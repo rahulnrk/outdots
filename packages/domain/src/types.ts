@@ -157,6 +157,8 @@ export interface OutboxCommand {
   id: string;
   draftId: string;
   reviewDigest: string;
+  policyVersion: string;
+  grantVersion: string;
   route: SendRoute;
   state: OutboxState;
   createdAt: string;

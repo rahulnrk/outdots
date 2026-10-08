@@ -1,4 +1,5 @@
-import type { Approval, Draft, HubState, OutboxCommand, ReviewPayload } from './types';
+import type { Account, Approval, Draft, HubState, OutboxCommand, ReviewPayload } from './types';
+import { evaluateReplyEligibility } from './eligibility';
 
 function stableJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -58,6 +59,8 @@ export async function approveDraft(draft: Draft, policyVersion: string, grantVer
     id: `outbox-${draft.id}`,
     draftId: draft.id,
     reviewDigest: digest,
+    policyVersion,
+    grantVersion,
     route: draft.route,
     state: 'ready',
     createdAt: now
@@ -65,17 +68,51 @@ export async function approveDraft(draft: Draft, policyVersion: string, grantVer
   return { approval, command };
 }
 
-export function dispatchOutbox(state: HubState, commandId: string, now: string): HubState {
+function failCommand(state: HubState, commandId: string, stateName: OutboxCommand['state'], failureReason: string, now: string): HubState {
+  return {
+    ...state,
+    outbox: state.outbox.map((item) => item.id === commandId ? { ...item, state: stateName, lastAttemptAt: now, failureReason } : item)
+  };
+}
+
+function latestInboundAt(state: HubState, draft: Draft): string | undefined {
+  return [...state.messages]
+    .filter((message) => message.conversationId === draft.conversationId && message.direction === 'inbound')
+    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))[0]?.occurredAt;
+}
+
+function accountForDraft(state: HubState, draft: Draft): Account | undefined {
+  return state.accounts.find((item) => item.id === draft.accountId);
+}
+
+export async function dispatchOutbox(state: HubState, commandId: string, now: string): Promise<HubState> {
   const command = state.outbox.find((item) => item.id === commandId);
   if (!command) throw new Error(`Command not found: ${commandId}`);
   if (command.state !== 'ready') return state;
 
+  const draft = state.drafts.find((item) => item.id === command.draftId);
+  if (!draft) {
+    return failCommand(state, commandId, 'expired_or_invalidated', 'draft_missing_for_approved_command', now);
+  }
+
+  const account = accountForDraft(state, draft);
+  if (!account) {
+    return failCommand(state, commandId, 'expired_or_invalidated', 'account_missing_for_approved_command', now);
+  }
+
+  const currentDigest = await digestReviewPayload(reviewPayloadFromDraft(draft, command.policyVersion, command.grantVersion));
+  if (currentDigest !== command.reviewDigest) {
+    return failCommand(state, commandId, 'expired_or_invalidated', 'review_payload_changed_since_approval', now);
+  }
+
+  const eligibility = evaluateReplyEligibility(account, command.route, now, latestInboundAt(state, draft));
+  if (!eligibility.eligibleNow) {
+    return failCommand(state, commandId, 'rejected', `route_recheck_failed:${eligibility.reasonCode}`, now);
+  }
+
   const approval = state.approvals.find((item) => item.draftId === command.draftId && item.reviewDigest === command.reviewDigest);
   if (!approval || approval.consumed || Date.parse(approval.expiresAt) < Date.parse(now)) {
-    return {
-      ...state,
-      outbox: state.outbox.map((item) => item.id === commandId ? { ...item, state: 'expired_or_invalidated', failureReason: 'approval_missing_consumed_or_expired' } : item)
-    };
+    return failCommand(state, commandId, 'expired_or_invalidated', 'approval_missing_consumed_or_expired', now);
   }
 
   const nextState = command.route === 'native_handoff' ? 'handoff_opened' : 'accepted_by_provider';

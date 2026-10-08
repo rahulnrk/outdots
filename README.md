@@ -9,7 +9,7 @@ The current implementation is an end-to-end local-first MVP slice that proves th
 - A shared domain core for accounts, connector capability snapshots, evidence, workflow, priority, reply eligibility, drafts, approvals and outbox commands.
 - A React web hub that demonstrates the intended first slice: Gmail plus WhatsApp notification evidence in one inbox, visibly different coverage, scoped local context, user decision capture, draft generation, exact review, approval and route-specific execution.
 - A tiny publisher service skeleton for release manifests and entitlement checks. It intentionally has no private inbox, prompt or memory endpoint.
-- Tests for the critical safety rules: user priority override, reply-window blocking, approval digest stability and no blind duplicate send.
+- Tests for the critical safety rules: user priority override, reply-window blocking, approval digest stability, send-time payload invalidation and no blind duplicate send.
 
 ## Run locally
 

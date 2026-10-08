@@ -50,9 +50,9 @@ export function App() {
     }));
   }
 
-  function dispatch() {
+  async function dispatch() {
     if (!latestCommand) return;
-    setState((current) => dispatchOutbox(current, latestCommand.id, '2026-10-08T12:00:30.000Z'));
+    setState(await dispatchOutbox(state, latestCommand.id, '2026-10-08T12:00:30.000Z'));
   }
 
   function overridePriority(priority: Priority) {
@@ -198,6 +198,7 @@ export function App() {
                   <button disabled={!latestCommand || latestCommand.state !== 'ready'} onClick={dispatch}>{latestDraft.route === 'native_handoff' ? 'Open source app handoff' : 'Dispatch Gmail send'}</button>
                   {latestCommand && <span className="muted">Outbox: {latestCommand.state.replaceAll('_', ' ')}</span>}
                 </div>
+                {latestCommand?.failureReason && <p className="warning block">Dispatch blocked: {latestCommand.failureReason}</p>}
               </article>
             )}
           </section>

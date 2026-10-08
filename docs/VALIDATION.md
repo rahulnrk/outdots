@@ -5,7 +5,7 @@ Run from `C:\Users\nande\Downloads\Mini` on 8 October 2026.
 | Check | Result |
 |---|---|
 | `npm audit --audit-level=moderate` | Passed, 0 vulnerabilities |
-| `npm test` | Passed, 6 domain tests |
+| `npm test` | Passed, 8 domain tests |
 | `npm run typecheck` | Passed for domain, publisher and hub workspaces |
 | `npm run build` | Passed, production hub bundle generated |
 
@@ -16,6 +16,8 @@ Run from `C:\Users\nande\Downloads\Mini` on 8 October 2026.
 - Expired 24-hour style customer windows block freeform API sends.
 - Drafting exposes missing commercial decisions instead of inventing them.
 - Approval digest changes when exact body changes.
+- Dispatch invalidates an approved command if the reviewed payload changes after approval.
+- Dispatch rechecks the current connector capability snapshot before using an approved command.
 - Outbox dispatch consumes approval once and avoids duplicate blind sends.
 
 ## Dependency security note
