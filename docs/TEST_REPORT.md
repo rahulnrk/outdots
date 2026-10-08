@@ -11,11 +11,18 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 | `npm test` | Pass: 3 files, 59 tests (13 domain, 33 security, 13 publisher) |
 | `npm run typecheck` | Pass: domain, publisher, hub |
 | `npm run build` | Pass: all workspaces, Vite bundle 192.88 kB JS / 60.40 kB gzip |
-| `native\\gradlew.bat test` | Pass: 29 JVM tests in shared module (including 1000-event synthetic stress, deduplication, updates, removals, bounded queue, restart recovery, budgets, action core, and evaluation harness) |
+| `native\\gradlew.bat test` | Pass: 35 JVM tests in shared module (including scoped retrieval budget, adaptive style consent gating, prompt injection defense, secret redaction, 1000-event synthetic stress, deduplication, updates, removals, bounded queue, restart recovery, budgets, action core, and evaluation harness) |
 | `native\\gradlew.bat assembleDebug` | Pass: debug APK built (29,692,208 bytes) packaging `libsqlcipher.so` and `MiniNotificationListenerService` |
 
 ### Tests added in this phase
 
+- Scoped conversation retrieval with token budget bounds and honest context omission warnings.
+- Compartment isolation and evidence reference linking for context bundles.
+- Adaptive style intelligence with explicit opt-in consent gating and per-category permissions.
+- Rejection of inbound messages and unedited AI drafts from teaching user style.
+- Prompt injection defense: malicious instruction text is treated as data, preventing trait corruption.
+- Sensitive number redaction (card numbers, PINs, secrets) from style example snippets.
+- Immediate profile purging on consent revocation.
 - Ingestion of 1,000 synthetic notification events across WhatsApp, Gmail, Instagram, and Slack.
 - Exact duplicate notification drop with idempotent preservation of state.
 - Preservation of distinct messages sharing identical text content.
