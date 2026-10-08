@@ -127,17 +127,17 @@ class NotificationNormalizer(
     }
 
     fun mapPackageToProvider(packageId: String): Provider = when {
-        packageId.contains("whatsapp", ignoreCase = true) -> Provider.WHATSAPP
-        packageId.contains("android.gm", ignoreCase = true) -> Provider.GMAIL
-        packageId.contains("outlook", ignoreCase = true) -> Provider.OUTLOOK
-        packageId.contains("teams", ignoreCase = true) -> Provider.TEAMS
-        packageId.contains("facebook.orca", ignoreCase = true) -> Provider.FACEBOOK
-        packageId.contains("facebook", ignoreCase = true) -> Provider.FACEBOOK
-        packageId.contains("instagram", ignoreCase = true) -> Provider.INSTAGRAM
-        packageId.contains("linkedin", ignoreCase = true) -> Provider.LINKEDIN
-        packageId.contains("twitter", ignoreCase = true) -> Provider.TWITTER
-        packageId.contains("slack", ignoreCase = true) -> Provider.SLACK
-        packageId.contains("whoop", ignoreCase = true) -> Provider.WHOOP
+        packageId == "com.whatsapp" || packageId == "com.whatsapp.w4b" || packageId.contains("whatsapp", ignoreCase = true) -> Provider.WHATSAPP
+        packageId == "com.google.android.gm" || packageId.contains("android.gm", ignoreCase = true) -> Provider.GMAIL
+        packageId == "com.microsoft.office.outlook" || packageId.contains("outlook", ignoreCase = true) -> Provider.OUTLOOK
+        packageId == "com.microsoft.teams" || packageId == "com.microsoft.skype.teams" || packageId.contains("teams", ignoreCase = true) -> Provider.TEAMS
+        packageId == "com.facebook.orca" -> Provider.FACEBOOK
+        packageId == "com.facebook.katana" || packageId == "com.facebook.lite" || packageId.contains("facebook", ignoreCase = true) -> Provider.FACEBOOK
+        packageId == "com.instagram.android" || packageId.contains("instagram", ignoreCase = true) -> Provider.INSTAGRAM
+        packageId == "com.linkedin.android" || packageId.contains("linkedin", ignoreCase = true) -> Provider.LINKEDIN
+        packageId == "com.twitter.android" || packageId == "com.twitter.android.lite" || packageId.contains("twitter", ignoreCase = true) -> Provider.TWITTER
+        packageId == "com.Slack" || packageId == "com.slack" || packageId.contains("slack", ignoreCase = true) -> Provider.SLACK
+        packageId == "com.noop.whoop.staging" || packageId == "com.whoop" || packageId.contains("whoop", ignoreCase = true) -> Provider.WHOOP
         packageId == "android" || packageId.startsWith("com.android.systemui") -> Provider.SYSTEM
         else -> Provider.APP
     }

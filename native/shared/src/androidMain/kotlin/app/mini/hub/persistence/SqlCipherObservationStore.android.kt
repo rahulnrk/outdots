@@ -41,6 +41,67 @@ class SqlCipherObservationStore(
     var isFts5Supported: Boolean = false
         private set
 
+    companion object {
+        const val DATABASE_VERSION = 2
+
+        const val SCHEMA_OBSERVATIONS = """
+            CREATE TABLE IF NOT EXISTS notification_observations (
+                id TEXT NOT NULL PRIMARY KEY,
+                account_key TEXT NOT NULL,
+                conversation_key TEXT NOT NULL,
+                package_id TEXT NOT NULL,
+                notification_key TEXT NOT NULL,
+                notification_id INTEGER NOT NULL,
+                tag TEXT,
+                sender_hint TEXT NOT NULL,
+                title TEXT,
+                text_fragments_json TEXT NOT NULL,
+                raw_text_digest TEXT NOT NULL,
+                observed_at INTEGER NOT NULL,
+                post_time INTEGER NOT NULL,
+                revision INTEGER NOT NULL,
+                is_removed INTEGER NOT NULL CHECK (is_removed IN (0, 1)),
+                is_group_summary INTEGER NOT NULL CHECK (is_group_summary IN (0, 1)),
+                truncation_state TEXT NOT NULL,
+                correlation_confidence TEXT NOT NULL,
+                provenance TEXT NOT NULL
+            )
+        """
+        const val SCHEMA_OBSERVATIONS_INDEX_CONV = """
+            CREATE INDEX IF NOT EXISTS idx_obs_conversation ON notification_observations (conversation_key, observed_at DESC)
+        """
+        const val SCHEMA_OBSERVATIONS_INDEX_KEY = """
+            CREATE INDEX IF NOT EXISTS idx_obs_notif_key ON notification_observations (notification_key)
+        """
+        const val SCHEMA_CONVERSATIONS = """
+            CREATE TABLE IF NOT EXISTS conversation_summaries (
+                conversation_key TEXT NOT NULL PRIMARY KEY,
+                account_key TEXT NOT NULL,
+                title TEXT NOT NULL,
+                app_name TEXT NOT NULL DEFAULT '',
+                sender_hint TEXT NOT NULL,
+                package_id TEXT NOT NULL,
+                latest_snippet TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'GeneralNotification',
+                coverage TEXT NOT NULL,
+                coverage_explanation TEXT NOT NULL,
+                latest_event_at INTEGER NOT NULL,
+                observation_count INTEGER NOT NULL,
+                unread_count INTEGER NOT NULL,
+                is_removed INTEGER NOT NULL CHECK (is_removed IN (0, 1))
+            )
+        """
+        const val SCHEMA_CURSORS = """
+            CREATE TABLE IF NOT EXISTS ingest_cursors (
+                source TEXT NOT NULL PRIMARY KEY,
+                last_processed_time_millis INTEGER NOT NULL,
+                last_processed_key TEXT,
+                processed_count INTEGER NOT NULL,
+                gap_count INTEGER NOT NULL
+            )
+        """
+    }
+
     private val database: SQLiteDatabase by lazy {
         databaseFile.parentFile?.mkdirs()
         SqlCipherObservationRuntime.ensureLoaded()
@@ -57,6 +118,21 @@ class SqlCipherObservationStore(
         db.execSQL(SCHEMA_CONVERSATIONS)
         db.execSQL(SCHEMA_CURSORS)
 
+        // Versioned schema migration
+        val currentVersion = db.version
+        if (currentVersion < DATABASE_VERSION) {
+            db.beginTransaction()
+            try {
+                if (currentVersion < 2) {
+                    migrateToVersion2(db)
+                }
+                db.version = DATABASE_VERSION
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
+        }
+
         // Probe FTS5 capability safely
         isFts5Supported = try {
             db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS _fts_probe USING fts5(content);")
@@ -66,6 +142,40 @@ class SqlCipherObservationStore(
             false
         }
         db
+    }
+
+    private fun migrateToVersion2(db: SQLiteDatabase) {
+        val existingColumns = mutableSetOf<String>()
+        db.rawQuery("PRAGMA table_info(conversation_summaries)", null).use { cursor ->
+            while (cursor.moveToNext()) {
+                existingColumns.add(cursor.getString(cursor.getColumnIndexOrThrow("name")))
+            }
+        }
+
+        if ("app_name" !in existingColumns) {
+            db.execSQL("ALTER TABLE conversation_summaries ADD COLUMN app_name TEXT NOT NULL DEFAULT '';")
+        }
+        if ("category" !in existingColumns) {
+            db.execSQL("ALTER TABLE conversation_summaries ADD COLUMN category TEXT NOT NULL DEFAULT 'GeneralNotification';")
+        }
+
+        db.execSQL("""
+            UPDATE conversation_summaries 
+            SET app_name = CASE 
+                WHEN package_id LIKE '%twitter%' THEN 'X'
+                WHEN package_id LIKE '%whoop%' THEN 'WHOOP'
+                WHEN package_id LIKE '%whatsapp%' THEN 'WhatsApp'
+                WHEN package_id LIKE '%android.gm%' THEN 'Gmail'
+                WHEN package_id LIKE '%facebook.orca%' THEN 'Messenger'
+                WHEN package_id LIKE '%facebook%' THEN 'Facebook'
+                WHEN package_id LIKE '%instagram%' THEN 'Instagram'
+                WHEN package_id LIKE '%linkedin%' THEN 'LinkedIn'
+                WHEN package_id LIKE '%slack%' THEN 'Slack'
+                WHEN package_id = 'android' THEN 'Android System'
+                ELSE package_id
+            END
+            WHERE app_name = '' OR app_name IS NULL;
+        """)
     }
 
     init {
@@ -339,65 +449,6 @@ class SqlCipherObservationStore(
             correlationConfidence = CorrelationConfidence.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("correlation_confidence"))),
             provenance = ObservationProvenance.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("provenance"))),
         )
-    }
-
-    private companion object {
-        const val SCHEMA_OBSERVATIONS = """
-            CREATE TABLE IF NOT EXISTS notification_observations (
-                id TEXT NOT NULL PRIMARY KEY,
-                account_key TEXT NOT NULL,
-                conversation_key TEXT NOT NULL,
-                package_id TEXT NOT NULL,
-                notification_key TEXT NOT NULL,
-                notification_id INTEGER NOT NULL,
-                tag TEXT,
-                sender_hint TEXT NOT NULL,
-                title TEXT,
-                text_fragments_json TEXT NOT NULL,
-                raw_text_digest TEXT NOT NULL,
-                observed_at INTEGER NOT NULL,
-                post_time INTEGER NOT NULL,
-                revision INTEGER NOT NULL,
-                is_removed INTEGER NOT NULL CHECK (is_removed IN (0, 1)),
-                is_group_summary INTEGER NOT NULL CHECK (is_group_summary IN (0, 1)),
-                truncation_state TEXT NOT NULL,
-                correlation_confidence TEXT NOT NULL,
-                provenance TEXT NOT NULL
-            )
-        """
-        const val SCHEMA_OBSERVATIONS_INDEX_CONV = """
-            CREATE INDEX IF NOT EXISTS idx_obs_conversation ON notification_observations (conversation_key, observed_at DESC)
-        """
-        const val SCHEMA_OBSERVATIONS_INDEX_KEY = """
-            CREATE INDEX IF NOT EXISTS idx_obs_notif_key ON notification_observations (notification_key)
-        """
-        const val SCHEMA_CONVERSATIONS = """
-            CREATE TABLE IF NOT EXISTS conversation_summaries (
-                conversation_key TEXT NOT NULL PRIMARY KEY,
-                account_key TEXT NOT NULL,
-                title TEXT NOT NULL,
-                app_name TEXT NOT NULL DEFAULT '',
-                sender_hint TEXT NOT NULL,
-                package_id TEXT NOT NULL,
-                latest_snippet TEXT NOT NULL,
-                category TEXT NOT NULL DEFAULT 'GeneralNotification',
-                coverage TEXT NOT NULL,
-                coverage_explanation TEXT NOT NULL,
-                latest_event_at INTEGER NOT NULL,
-                observation_count INTEGER NOT NULL,
-                unread_count INTEGER NOT NULL,
-                is_removed INTEGER NOT NULL CHECK (is_removed IN (0, 1))
-            )
-        """
-        const val SCHEMA_CURSORS = """
-            CREATE TABLE IF NOT EXISTS ingest_cursors (
-                source TEXT NOT NULL PRIMARY KEY,
-                last_processed_time_millis INTEGER NOT NULL,
-                last_processed_key TEXT,
-                processed_count INTEGER NOT NULL,
-                gap_count INTEGER NOT NULL
-            )
-        """
     }
 }
 
