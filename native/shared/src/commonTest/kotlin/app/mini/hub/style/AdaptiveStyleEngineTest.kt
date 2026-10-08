@@ -4,6 +4,7 @@ import app.mini.hub.domain.UtcInstant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class AdaptiveStyleEngineTest {
@@ -130,12 +131,29 @@ class AdaptiveStyleEngineTest {
             )
         )
 
-        val profile = engine.resolveProfile(ContextCategory.Professional, "recipient_safe", now)
+        val profile = engine.getRecipientProfile(ContextCategory.Professional, "recipient_safe")
+        assertNotNull(profile)
         assertTrue(profile.exampleSnippets.isNotEmpty())
         val snippet = profile.exampleSnippets.first()
         assertTrue(snippet.contains("[CARD_REDACTED]"))
         assertTrue(snippet.contains("[CODE_REDACTED]") || snippet.contains("[REDACTED]"))
         assertFalse(snippet.contains("4111-2222-3333-4444"))
+
+        // Single sample (confidence 0.25 < 0.40) -> resolveProfile falls back to neutral baseline
+        val resolvedInitial = engine.resolveProfile(ContextCategory.Professional, "recipient_safe", now)
+        assertEquals("neutral:Professional", resolvedInitial.id)
+
+        // Second sample (confidence 0.40) -> resolveProfile activates recipient profile
+        engine.learnFromText(
+            text = "Follow up on invoice.",
+            authorship = TextAuthorship.UserAuthoredSentMessage,
+            category = ContextCategory.Professional,
+            recipientId = "recipient_safe",
+            now = now,
+        )
+        val resolvedConfident = engine.resolveProfile(ContextCategory.Professional, "recipient_safe", now)
+        assertEquals("recip:Professional:recipient_safe", resolvedConfident.id)
+        assertTrue(resolvedConfident.confidence >= AdaptiveStyleEngine.MIN_RECIPIENT_CONFIDENCE)
     }
 
     @Test

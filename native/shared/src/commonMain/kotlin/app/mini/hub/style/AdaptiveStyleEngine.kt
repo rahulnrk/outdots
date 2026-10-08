@@ -66,6 +66,10 @@ class AdaptiveStyleEngine(
     private val lock = Any()
     private val profiles = LinkedHashMap<String, CompactStyleProfile>()
 
+    companion object {
+        const val MIN_RECIPIENT_CONFIDENCE: Double = 0.40
+    }
+
     fun getConsent(): StyleConsent = synchronized(lock) { consent }
 
     fun updateConsent(newConsent: StyleConsent) = synchronized(lock) {
@@ -161,10 +165,11 @@ class AdaptiveStyleEngine(
             return defaultNeutralProfile(category, recipientId, now)
         }
 
+        // Recipient profile requires sufficient evidence (confidence >= 0.40 / 2+ samples)
         if (recipientId != null) {
             val recipKey = "recip:$category:$recipientId"
             val recipProfile = profiles[recipKey]
-            if (recipProfile != null) {
+            if (recipProfile != null && recipProfile.confidence >= MIN_RECIPIENT_CONFIDENCE) {
                 return recipProfile
             }
         }
@@ -176,6 +181,10 @@ class AdaptiveStyleEngine(
         }
 
         return defaultNeutralProfile(category, recipientId, now)
+    }
+
+    fun getRecipientProfile(category: ContextCategory, recipientId: String): CompactStyleProfile? = synchronized(lock) {
+        profiles["recip:$category:$recipientId"]
     }
 
     fun resetRecipient(recipientId: String) = synchronized(lock) {

@@ -15,10 +15,10 @@ Factual status per feature. Legend: **Implemented+tested**, **Partial**, **Simul
 | Adaptive style intelligence | s6 | Implemented+tested | `AdaptiveStyleEngine` with opt-in consent, authorship verification, prompt-injection defense, secret redaction, and instant revocation | On-device nuance classifier integration |
 | Gmail connector | s4 | Simulated | Local fixture provider only | OAuth, cursor sync and provider fixture adapter. Live use **Blocked** |
 | WhatsApp notification observation | s4, s5 | Implemented+tested | Android `MiniNotificationListenerService`, non-blocking bounded queue, normalizer, deduplicator, 1000-event test suite | Real device listener verification |
-| Native handoff | s9 | Simulated | Domain launcher contract; browser fixture does not open a real source app | Android intent/handoff |
+| Native handoff | s9 | Implemented+tested | Domain launcher contract, `AndroidNativeHandoffLauncher` system chooser, `OutboxState.HandoffOpened` truthfulness | Real device manual dispatch |
 | Local inference engine | s8, s20 | Partial | KMP replaceable deterministic engine contract and evidence validator | Qualify a real device-local backend |
 | Resource Supervisor | s20.4 | Implemented+tested contract | Bounded queue/cache, cancellation, pressure lifecycle, hardware tier budgets, failure recovery, eval harness and host benchmark | Integrate with real runtime and device signals |
-| Android app (Compose) | s3 | Scaffold only | Debug APK builds; shell explicitly says not functional | Compose inbox, permissions, storage |
+| Android app (Compose) | s3 | Implemented+tested | Jetpack Compose `InboxScreen`, `ConversationDetailView`, `ExactActionReviewDialog`, `InboxViewModel`, FLAG_SECURE window | On-device manual flow qualification |
 | iOS app (SwiftUI) | s3 | Blocked | No macOS/Xcode | Build shared core and validate on macOS |
 | Outlook, Teams, Meta, LinkedIn adapters | s4 | Not started | Capability matrix documents boundaries | Typed adapters only after qualification |
 | Publisher service (no private content) | s2, s13 | Partial+tested | Strict aggregate diagnostics schema; no entitlement fabrication; 13 tests | Signed manifest and real entitlement authority |

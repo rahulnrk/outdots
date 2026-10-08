@@ -2,7 +2,7 @@
 
 Only commands actually executed are recorded here. Results were independently rerun by the coordinator.
 
-## 2026-10-09, notification ingestion and encrypted observation persistence checkpoint
+## 2026-10-09, native Android Compose inbox and UI review checkpoint
 
 Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 34/35.
 
@@ -11,10 +11,18 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 | `npm test` | Pass: 3 files, 59 tests (13 domain, 33 security, 13 publisher) |
 | `npm run typecheck` | Pass: domain, publisher, hub |
 | `npm run build` | Pass: all workspaces, Vite bundle 192.88 kB JS / 60.40 kB gzip |
-| `native\\gradlew.bat test` | Pass: 35 JVM tests in shared module (including scoped retrieval budget, adaptive style consent gating, prompt injection defense, secret redaction, 1000-event synthetic stress, deduplication, updates, removals, bounded queue, restart recovery, budgets, action core, and evaluation harness) |
-| `native\\gradlew.bat assembleDebug` | Pass: debug APK built (29,692,208 bytes) packaging `libsqlcipher.so` and `MiniNotificationListenerService` |
+| `native\\gradlew.bat test` | Pass: 37 tests (35 JVM in shared, 2 Android unit tests in androidApp) |
+| `native\\gradlew.bat assembleDebug` | Pass: debug APK built (29,720,000+ bytes) packaging Jetpack Compose UI, `MiniNotificationListenerService`, and `libsqlcipher.so` |
 
 ### Tests added in this phase
+
+- Android Jetpack Compose `InboxScreen` with conversation grouping, unread badges, and honest coverage warning cards.
+- User permission flow banner and notification listener connection status indicator.
+- `ConversationDetailView` with message timeline, OS truncation indicators, and style profile summaries.
+- `ExactActionReviewDialog` enforcing user-gated review and payload binding before dispatch.
+- `AndroidNativeHandoffLauncher` with system `Intent.ACTION_SEND` chooser and truthful `OutboxState.HandoffOpened` recording.
+- `InboxViewModelTest` verifying conversation selection, draft preparation, approval transaction, and handoff execution.
+- Adaptive style recipient confidence threshold (0.40 minimum) preventing premature overfitting on cold contacts.
 
 - Scoped conversation retrieval with token budget bounds and honest context omission warnings.
 - Compartment isolation and evidence reference linking for context bundles.
