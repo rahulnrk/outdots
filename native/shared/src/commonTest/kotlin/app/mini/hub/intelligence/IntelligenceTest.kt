@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class IntelligenceTest {
@@ -63,5 +64,103 @@ class IntelligenceTest {
         assertFalse(supervisor.ensureReady())
         assertEquals(0, supervisor.queuedCount)
         assertTrue(supervisor.resumeAfterPressure())
+    }
+
+    @Test fun deviceResourceBudgetsAreEnforced() {
+        assertEquals("Tier1LowEnd", DeviceResourceBudget.Tier1LowEnd.tierName)
+        assertEquals(512, DeviceResourceBudget.Tier1LowEnd.maxResidentMemoryMb)
+        assertEquals(64, DeviceResourceBudget.Tier1LowEnd.maxQueueSize)
+        assertEquals(8, DeviceResourceBudget.Tier1LowEnd.maxProposalCacheEntries)
+
+        assertEquals("Tier2MidRange", DeviceResourceBudget.Tier2MidRange.tierName)
+        assertEquals("Tier3HighEnd", DeviceResourceBudget.Tier3HighEnd.tierName)
+
+        // Invalid budget values fail fast
+        assertFails { DeviceResourceBudget("BadRAM", 64, 10, 5, 500, 50, 1000L) }
+        assertFails { DeviceResourceBudget("BadQueue", 1024, 0, 5, 500, 50, 1000L) }
+        assertFails { DeviceResourceBudget("BadTokens", 1024, 50, 5, 10000, 50, 1000L) }
+    }
+
+    @Test fun repeatedEngineFailuresTriggerDegradedStateAndRecovery() {
+        class FlakyEngine : DeterministicInferenceEngine() {
+            var throwError = true
+            override fun run(task: InferenceTask): ModelProposal {
+                if (throwError) throw IllegalStateException("Backend crash")
+                return super.run(task)
+            }
+        }
+
+        val flaky = FlakyEngine()
+        val supervisor = ResourceSupervisor(
+            engine = flaky,
+            modelId = "test-model",
+            budget = DeviceResourceBudget.Tier1LowEnd,
+            maxFailureThreshold = 2,
+        )
+
+        val t1 = task("fail-1")
+        val t2 = task("fail-2")
+        val t3 = task("fail-3")
+
+        supervisor.submit(t1)
+        assertEquals(null, supervisor.runNext())
+        assertEquals(1, supervisor.consecutiveFailures)
+        assertTrue(supervisor.state is SupervisorState.Ready)
+
+        supervisor.submit(t2)
+        assertEquals(null, supervisor.runNext())
+        assertEquals(2, supervisor.consecutiveFailures)
+        assertTrue(supervisor.state is SupervisorState.Degraded)
+
+        // Further submission blocked when Degraded
+        assertEquals(SubmitResult.Pressured, supervisor.submit(t3))
+
+        // Recovery restores Ready state
+        flaky.throwError = false
+        assertTrue(supervisor.recoverFromFailure())
+        assertEquals(0, supervisor.consecutiveFailures)
+        assertEquals(SubmitResult.Accepted, supervisor.submit(t3))
+        val proposal = supervisor.runNext()
+        assertNotNull(proposal)
+        assertEquals(t3.id, proposal.taskId)
+    }
+
+    @Test fun qualityEvaluationHarnessEvaluatesStandardSuite() {
+        val engine = DeterministicInferenceEngine()
+        val supervisor = ResourceSupervisor(engine, "model")
+        val cases = QualityEvaluationHarness.standardSuite(scope)
+        val harness = QualityEvaluationHarness()
+
+        val report = harness.evaluate(supervisor, cases)
+        assertEquals(5, report.totalCases)
+        // All safety requirements met (no unintended sends)
+        assertEquals(1.0, report.safetyPassRate)
+        assertTrue(report.passedCount >= 4)
+    }
+
+    @Test fun intelligenceBenchmarkExecutesSuccessfullyAndEmitsReport() {
+        val benchmark = IntelligenceBenchmark(
+            BenchmarkConfig(
+                scenarioName = "TestBenchmark",
+                warmupIterations = 2,
+                measuredIterations = 5,
+                budget = DeviceResourceBudget.Tier1LowEnd,
+            )
+        )
+        val result = benchmark.run(
+            engineFactory = { DeterministicInferenceEngine() },
+            modelId = "benchmark-model",
+        )
+
+        assertEquals("TestBenchmark", result.scenarioName)
+        assertEquals("Tier1LowEnd", result.tier)
+        assertEquals(5, result.tasksCompleted)
+        assertEquals(0, result.failures)
+        assertTrue(result.avgInferenceLatencyMillis >= 0.0)
+
+        val markdown = result.toLedgerMarkdown()
+        assertTrue(markdown.contains("Hardware Tier"))
+        assertTrue(markdown.contains("Avg Inference Latency"))
+        assertTrue(markdown.contains("Tier1LowEnd"))
     }
 }

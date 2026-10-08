@@ -3,6 +3,7 @@ package app.mini.hub.intelligence
 sealed class SupervisorState {
     data object Unloaded : SupervisorState()
     data object Ready : SupervisorState()
+    data class Degraded(val consecutiveFailures: Int, val reason: String) : SupervisorState()
     data object Pressured : SupervisorState()
 }
 
@@ -13,13 +14,28 @@ data class Job(val task: InferenceTask)
 class ResourceSupervisor(
     private val engine: InferenceEngine,
     private val modelId: String,
-    private val maxQueue: Int = 256,
-    private val maxCacheEntries: Int = 32,
+    val budget: DeviceResourceBudget = DeviceResourceBudget.Tier2MidRange,
+    private val maxFailureThreshold: Int = 3,
 ) {
+    private val maxQueue: Int = budget.maxQueueSize
+    private val maxCacheEntries: Int = budget.maxProposalCacheEntries
+
     init { require(maxQueue > 0); require(maxCacheEntries > 0) }
+
+    /** Backward-compatible constructor for custom queue and cache sizes. */
+    constructor(engine: InferenceEngine, modelId: String, maxQueue: Int, maxCacheEntries: Int) : this(
+        engine = engine,
+        modelId = modelId,
+        budget = DeviceResourceBudget("Custom", 1024, maxQueue, maxCacheEntries, 4096, 256, 5000L),
+    )
 
     var state: SupervisorState = SupervisorState.Unloaded
         private set
+    var consecutiveFailures: Int = 0
+        private set
+    var lastError: String? = null
+        private set
+
     var activeScope: CompartmentId? = null
         private set
     val queuedCount: Int get() = queue.size
@@ -29,6 +45,7 @@ class ResourceSupervisor(
     private val cancelled = mutableSetOf<String>()
 
     fun ensureReady(): Boolean {
+        if (state is SupervisorState.Degraded) return false
         if (state == SupervisorState.Pressured) return false
         if (state == SupervisorState.Unloaded) {
             if (!engine.load(modelId)) return false
@@ -39,6 +56,7 @@ class ResourceSupervisor(
 
     fun submit(task: InferenceTask): SubmitResult {
         if (state == SupervisorState.Pressured) return SubmitResult.Pressured
+        if (state is SupervisorState.Degraded) return SubmitResult.Pressured
         if (task.context.compartment != task.compartment) return SubmitResult.ScopeRejected
         if (task.context.inputTokens > task.budget.inputTokens) return SubmitResult.ScopeRejected
         if (queue.any { it.task.id == task.id } || cache.containsKey(task.id)) return SubmitResult.Duplicate
@@ -57,8 +75,17 @@ class ResourceSupervisor(
         return try {
             val proposal = engine.run(job.task)
             cache[job.task.id] = proposal
+            consecutiveFailures = 0
             while (cache.size > maxCacheEntries) cache.remove(cache.entries.first().key)
             proposal
+        } catch (e: Throwable) {
+            consecutiveFailures++
+            lastError = e.message ?: e::class.simpleName ?: "unknown error"
+            if (consecutiveFailures >= maxFailureThreshold) {
+                state = SupervisorState.Degraded(consecutiveFailures, lastError ?: "repeated failures")
+                engine.unload()
+            }
+            null
         } finally {
             activeScope = null
         }
@@ -72,6 +99,7 @@ class ResourceSupervisor(
 
     fun onMemoryPressure() {
         state = SupervisorState.Pressured
+        consecutiveFailures = 0
         queue.removeAll { cancelled += it.task.id; true }
         cache.clear()
         activeScope = null
@@ -84,8 +112,17 @@ class ResourceSupervisor(
         return ensureReady()
     }
 
+    fun recoverFromFailure(): Boolean {
+        consecutiveFailures = 0
+        lastError = null
+        state = SupervisorState.Unloaded
+        return ensureReady()
+    }
+
     fun release() {
         queue.clear(); cache.clear(); cancelled.clear(); activeScope = null
+        consecutiveFailures = 0
+        lastError = null
         engine.unload(); state = SupervisorState.Unloaded
     }
 }
