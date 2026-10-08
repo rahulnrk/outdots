@@ -8,3 +8,4 @@ coverage/
 *.log
 .vite/
 .local-vault/
+scripts/android-endurance/output/
