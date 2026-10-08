@@ -2,7 +2,7 @@
 
 Only commands actually executed are recorded here. Results were independently rerun by the coordinator.
 
-## 2026-10-08, web/native integration checkpoint
+## 2026-10-09, notification ingestion and encrypted observation persistence checkpoint
 
 Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 34/35.
 
@@ -11,12 +11,24 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 | `npm test` | Pass: 3 files, 59 tests (13 domain, 33 security, 13 publisher) |
 | `npm run typecheck` | Pass: domain, publisher, hub |
 | `npm run build` | Pass: all workspaces, Vite bundle 192.88 kB JS / 60.40 kB gzip |
-| `npm audit --audit-level=moderate` | Pass: 0 vulnerabilities (previously run at baseline) |
-| `native\\gradlew.bat :shared:jvmTest` | Pass: 21 tests, including intelligence budgets, failure recovery, quality evaluation and benchmark report tests |
-| `native\\gradlew.bat :shared:jvmTest :androidApp:assembleDebug` | Pass: 21 JVM tests and debug APK built, including the Android SQLCipher/Keystore store compilation |
-| APK archive inspection | Pass: debug APK is 29,609,054 bytes and packages `libsqlcipher.so` for arm64-v8a, armeabi-v7a, x86, and x86_64 |
+| `native\\gradlew.bat test` | Pass: 29 JVM tests in shared module (including 1000-event synthetic stress, deduplication, updates, removals, bounded queue, restart recovery, budgets, action core, and evaluation harness) |
+| `native\\gradlew.bat assembleDebug` | Pass: debug APK built (29,692,208 bytes) packaging `libsqlcipher.so` and `MiniNotificationListenerService` |
 
 ### Tests added in this phase
+
+- Ingestion of 1,000 synthetic notification events across WhatsApp, Gmail, Instagram, and Slack.
+- Exact duplicate notification drop with idempotent preservation of state.
+- Preservation of distinct messages sharing identical text content.
+- Notification content updates and revision incrementing.
+- Notification dismissal and removal handling.
+- Group summary vs child message correlation confidence.
+- Bounded queue non-blocking overflow defense.
+- Crash and restart recovery with durable cursor tracking and uncorrupted state reconciliation.
+- Encrypted Android SQLCipher observation store with Keystore key envelope.
+- Safe dynamic probe of FTS5 capability in SQLCipher.
+- Android `MiniNotificationListenerService` with explicit permission check and lifecycle handling.
+
+### Historical tests passed in prior baseline
 
 - Approval and dispatch race, restart interruption, invalid/rolled-back clock.
 - New inbound evidence, tombstones, stale drafts and current source binding.
