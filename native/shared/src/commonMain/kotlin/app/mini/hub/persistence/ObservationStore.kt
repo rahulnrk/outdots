@@ -23,6 +23,7 @@ data class RestartRecoveryReport(
 interface ObservationStore {
     val qualification: StorageQualification
     fun persistObservation(observation: ObservedNotification): PersistResult
+    fun persistBatch(observations: List<ObservedNotification>): Int
     fun getObservation(id: ScopedId): ObservedNotification?
     fun getObservationsForConversation(conversationId: ScopedId, limit: Int = 100): List<ObservedNotification>
     fun getConversationSummaries(accountId: AccountId? = null): List<ConversationObservationSummary>
@@ -103,6 +104,15 @@ class InMemoryObservationStore : ObservationStore {
         conversations[convKey] = summary
 
         PersistResult.Success(observation.id, observation.revision)
+    }
+
+    override fun persistBatch(observations: List<ObservedNotification>): Int = synchronized(lock) {
+        var count = 0
+        for (obs in observations) {
+            persistObservation(obs)
+            count++
+        }
+        count
     }
 
     override fun getObservation(id: ScopedId): ObservedNotification? = synchronized(lock) {

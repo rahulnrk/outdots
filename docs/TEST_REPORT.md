@@ -2,7 +2,7 @@
 
 Only commands actually executed are recorded here. Results were independently rerun by the coordinator.
 
-## 2026-10-09, Android end-to-end runtime reliability checkpoint
+## 2026-10-09, Android runtime endurance and migration integrity checkpoint
 
 Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 34/35.
 
@@ -18,7 +18,8 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 | `adb install -r androidApp-debug.apk` on `Pixel 10 Pro` (`56270DLCH000KZ`, Android 16 / API 36, arm64-v8a) | Pass: Streamed install succeeded; 16 KB incompatibility warning completely resolved |
 | `adb shell cmd notification allow_listener ...` on Pixel 10 Pro | Pass: Notification listener permission and restricted settings access granted |
 | `adb shell am start -n app.mini.hub/.android.MainActivity` on Pixel 10 Pro | Pass: MainActivity launched, Compose UI initialized, arm64 `libsqlcipher.so` loaded, Keystore encryption envelope verified, SQLCipher database keying code 0 |
-| `adb shell dumpsys meminfo app.mini.hub` on Pixel 10 Pro | Pass: Live physical device memory footprint = 93.0 MB Total PSS (Java Heap 7.8 MB, Native Heap 8.0 MB, Graphics 33.4 MB), well within Tier 1 budget |
+| `adb shell dumpsys meminfo app.mini.hub` on Pixel 10 Pro | Pass: Live physical device memory footprint = 101.1 MB Total PSS (Java Heap 12.3 MB, Native Heap 8.0 MB, Graphics 33.9 MB), stable across endurance and restart tests |
+| Transactional v1->v2 SQLite schema migration & batch persistence on Pixel 10 Pro | Pass: `DATABASE_VERSION = 2` migration verified on physical device with clean database keying (code 0) and `persistBatch` high-throughput write support |
 | Controlled live synthetic notification end-to-end test on `Pixel 10 Pro` | Pass: Broadcast `POST_SYNTHETIC_NOTIFICATION` processed via NotificationManager -> `MiniNotificationListenerService` -> `MiniHubRuntime` -> `BoundedIngestQueue` -> `SqlCipherObservationStore` -> Compose `InboxScreen` reactive update |
 | Multi-notification background & foreground persistence | Pass: Multiple notifications processed in background, persisted to SQLCipher, and displayed with unread badges on app resume |
 | Post-restart notification recovery on Pixel 10 Pro | Pass: After force-stop and cold restart, all 3 synthetic conversation records reloaded from encrypted SQLite |

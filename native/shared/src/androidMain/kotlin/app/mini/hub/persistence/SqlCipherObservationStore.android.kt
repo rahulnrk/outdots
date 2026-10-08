@@ -272,6 +272,93 @@ class SqlCipherObservationStore(
     }
 
     @Synchronized
+    override fun persistBatch(observations: List<ObservedNotification>): Int {
+        if (observations.isEmpty()) return 0
+        var count = 0
+        database.beginTransaction()
+        try {
+            for (obs in observations) {
+                val values = ContentValues().apply {
+                    put("id", obs.id.key)
+                    put("account_key", obs.accountId.key)
+                    put("conversation_key", obs.conversationId.key)
+                    put("package_id", obs.packageId)
+                    put("notification_key", obs.notificationKey)
+                    put("notification_id", obs.notificationId)
+                    put("tag", obs.tag)
+                    put("sender_hint", obs.senderHint)
+                    put("title", obs.title)
+                    put("text_fragments_json", obs.textFragments.joinToString("\u001F"))
+                    put("raw_text_digest", obs.rawTextDigest)
+                    put("observed_at", obs.observedAt.epochMillis)
+                    put("post_time", obs.postTime.epochMillis)
+                    put("revision", obs.revision)
+                    put("is_removed", if (obs.isRemoved) 1 else 0)
+                    put("is_group_summary", if (obs.isGroupSummary) 1 else 0)
+                    put("truncation_state", obs.truncationState.name)
+                    put("correlation_confidence", obs.correlationConfidence.name)
+                    put("provenance", obs.provenance.name)
+                }
+                database.insertWithOnConflict("notification_observations", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+
+                val cursorGap = queryCursorGap(database, obs.packageId)
+                val coverageExplanation = if (cursorGap > 0L) {
+                    "Observed via Android notifications only ($cursorGap dropped events due to backpressure). Prior history is not visible."
+                } else {
+                    "Observed via Android notifications only. Prior history and out-of-band replies are not visible."
+                }
+
+                val appName = when {
+                    obs.packageId.contains("twitter", ignoreCase = true) -> "X"
+                    obs.packageId.contains("whoop", ignoreCase = true) -> "WHOOP"
+                    obs.packageId.contains("whatsapp", ignoreCase = true) -> "WhatsApp"
+                    obs.packageId.contains("android.gm", ignoreCase = true) -> "Gmail"
+                    obs.packageId.contains("facebook.orca", ignoreCase = true) -> "Messenger"
+                    obs.packageId.contains("facebook", ignoreCase = true) -> "Facebook"
+                    obs.packageId.contains("instagram", ignoreCase = true) -> "Instagram"
+                    obs.packageId.contains("linkedin", ignoreCase = true) -> "LinkedIn"
+                    obs.packageId.contains("slack", ignoreCase = true) -> "Slack"
+                    obs.packageId == "android" -> "Android System"
+                    obs.packageId.startsWith("com.android.systemui") -> "System UI"
+                    else -> obs.packageId.substringAfterLast('.').replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+                }
+
+                val notifCategory = when {
+                    obs.isOngoing -> NotificationCategory.OngoingService
+                    obs.isGroupSummary -> NotificationCategory.GroupMessage
+                    obs.packageId.contains("twitter") || obs.packageId.contains("instagram") -> NotificationCategory.SocialUpdate
+                    obs.packageId == "android" || obs.packageId.startsWith("com.android.systemui") -> NotificationCategory.SystemStatus
+                    obs.packageId.contains("whatsapp") || obs.packageId.contains("orca") -> NotificationCategory.DirectMessage
+                    else -> NotificationCategory.GeneralNotification
+                }
+
+                val convValues = ContentValues().apply {
+                    put("conversation_key", obs.conversationId.key)
+                    put("account_key", obs.accountId.key)
+                    put("title", obs.title ?: obs.senderHint)
+                    put("app_name", appName)
+                    put("sender_hint", obs.senderHint)
+                    put("package_id", obs.packageId)
+                    put("latest_snippet", obs.textFragments.lastOrNull() ?: obs.title ?: "")
+                    put("category", notifCategory.name)
+                    put("coverage", ConversationCoverage.NotificationOnly.name)
+                    put("coverage_explanation", coverageExplanation)
+                    put("latest_event_at", obs.observedAt.epochMillis)
+                    put("observation_count", 1)
+                    put("unread_count", if (obs.isRemoved) 0 else 1)
+                    put("is_removed", if (obs.isRemoved) 1 else 0)
+                }
+                database.insertWithOnConflict("conversation_summaries", null, convValues, SQLiteDatabase.CONFLICT_REPLACE)
+                count++
+            }
+            database.setTransactionSuccessful()
+        } finally {
+            database.endTransaction()
+        }
+        return count
+    }
+
+    @Synchronized
     override fun getObservation(id: ScopedId): ObservedNotification? {
         return database.query(
             "notification_observations",
