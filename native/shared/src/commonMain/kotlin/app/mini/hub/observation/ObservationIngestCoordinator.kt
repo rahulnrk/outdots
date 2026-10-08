@@ -10,7 +10,7 @@ fun interface ObservationUiListener {
 
 /**
  * Coordinates non-blocking notification ingestion, deduplication, encrypted persistence,
- * and UI notification dispatch.
+ * and UI notification dispatch. Supports atomic batch persistence for burst workloads.
  */
 class ObservationIngestCoordinator(
     val queue: BoundedIngestQueue<NotificationRawPayload> = BoundedIngestQueue(),
@@ -77,14 +77,60 @@ class ObservationIngestCoordinator(
         }
     }
 
+    /**
+     * Drains pending queue items and persists them in an atomic batch to minimize database transactions.
+     */
     fun drainAndProcessAll(maxBatch: Int = 1000): Int {
-        var processed = 0
-        while (processed < maxBatch) {
-            val res = processNext()
-            if (res is IngestProcessResult.QueueEmpty) break
-            processed++
+        val batch = queue.drain(maxBatch)
+        if (batch.isEmpty()) return 0
+        val now = clock.now()
+
+        val observationsToPersist = mutableListOf<ObservedNotification>()
+        val affectedAccounts = mutableSetOf<app.mini.hub.domain.AccountId>()
+        var processedCount = 0
+
+        for (payload in batch) {
+            try {
+                val normalized = normalizer.normalize(payload, now)
+                val action = deduplicator.evaluate(normalized)
+
+                when (action) {
+                    is NotificationDeduplicator.DedupeAction.Insert -> {
+                        observationsToPersist.add(action.observation)
+                        affectedAccounts.add(action.observation.accountId)
+                        updateCursor(action.observation.packageId, now.epochMillis, action.observation.notificationKey)
+                        processedCount++
+                    }
+
+                    is NotificationDeduplicator.DedupeAction.Update -> {
+                        observationsToPersist.add(action.observation)
+                        affectedAccounts.add(action.observation.accountId)
+                        updateCursor(action.observation.packageId, now.epochMillis, action.observation.notificationKey)
+                        processedCount++
+                    }
+
+                    is NotificationDeduplicator.DedupeAction.DropDuplicate -> {
+                        processedCount++
+                    }
+
+                    is NotificationDeduplicator.DedupeAction.Remove -> {
+                        store.markRemoved(action.notificationKey, now)
+                        processedCount++
+                    }
+                }
+            } catch (_: Throwable) {
+            }
         }
-        return processed
+
+        if (observationsToPersist.isNotEmpty()) {
+            store.persistBatch(observationsToPersist)
+            for (acc in affectedAccounts) {
+                val summaries = store.getConversationSummaries(acc)
+                summaries.firstOrNull()?.let { uiListener?.onConversationUpdated(it) }
+            }
+        }
+
+        return processedCount
     }
 
     fun getRecentConversations(): List<ConversationObservationSummary> {

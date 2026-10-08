@@ -6,7 +6,7 @@ Factual status per feature. Legend: **Implemented+tested**, **Partial**, **Simul
 | Feature | Requirement (arch v1.1) | Status | Evidence | Next work |
 |---|---|---|---|---|
 | Shared domain rules (TS reference) | s6, s7, s9 | Implemented+tested | `npm test`: 59 tests including 33 adversarial security tests | Keep parity with KMP |
-| Shared domain core (Kotlin Multiplatform) | s3 | Implemented+tested core | KMP scaffold, scoped IDs, injectable UTC clock, action core, observation models, scoped retrieval, and adaptive style engine; 35 JVM tests pass | Port full conversation/workflow model |
+| Shared domain core (Kotlin Multiplatform) | s3 | Implemented+tested core | KMP scaffold, scoped IDs, injectable UTC clock, action core, observation models, scoped retrieval, adaptive style engine, and SQLCipher migration; 42 JVM/native tests pass | Port full conversation/workflow model |
 | Approval exact binding | s9 | Implemented+tested in TS and native contract | TS SHA-256 and native exact payload contract bind account, route, recipients, body, attachments, evidence, grants/policy and expiry | Platform SHA-256 adapter and durable integration |
 | Injectable clock | Stage D | Implemented+tested | Web `clock()` and KMP `Clock`; invalid/rollback tests | Use in all native business rules |
 | Durable outbox with restart recovery | s9 | Partial | Native state machine plus Android SQLCipher transaction implementation and interrupted recovery contract. Device restart qualification is pending | Wire native lifecycle and qualify restart behavior on device |
@@ -18,7 +18,7 @@ Factual status per feature. Legend: **Implemented+tested**, **Partial**, **Simul
 | Native handoff | s9 | Implemented+tested on device | Domain launcher contract, `AndroidNativeHandoffLauncher` system chooser, `OutboxState.HandoffOpened` truthfulness verified on physical Pixel 10 Pro | Live user messaging flow |
 | Local inference engine | s8, s20 | Partial | KMP replaceable deterministic engine contract and evidence validator | Qualify a real device-local backend |
 | Resource Supervisor | s20.4 | Implemented+tested contract | Bounded queue/cache, cancellation, pressure lifecycle, hardware tier budgets, failure recovery, eval harness and host benchmark | Integrate with real runtime and device signals |
-| Android app (Compose) | s3 | Implemented+qualified on device | Jetpack Compose `InboxScreen`, `ConversationDetailView`, `ExactActionReviewDialog`, `InboxViewModel`, FLAG_SECURE window; live memory profile: 93.0 MB Total PSS on physical Pixel 10 Pro (API 36) | Physical device manual flow qualification |
+| Android app (Compose) | s3 | Implemented+qualified on device | Jetpack Compose `InboxScreen`, `ConversationDetailView`, `ExactActionReviewDialog`, `InboxViewModel`, FLAG_SECURE window; live memory profile: 77.2–101.1 MB Total PSS on physical Pixel 10 Pro (API 36) | Physical device manual flow qualification |
 | iOS app (SwiftUI) | s3 | Blocked | No macOS/Xcode | Build shared core and validate on macOS |
 | Outlook, Teams, Meta, LinkedIn adapters | s4 | Not started | Capability matrix documents boundaries | Typed adapters only after qualification |
 | Publisher service (no private content) | s2, s13 | Partial+tested | Strict aggregate diagnostics schema; no entitlement fabrication; 13 tests | Signed manifest and real entitlement authority |
