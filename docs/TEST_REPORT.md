@@ -13,6 +13,11 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 | `npm run build` | Pass: all workspaces, Vite bundle 192.88 kB JS / 60.40 kB gzip |
 | `native\\gradlew.bat test` | Pass: 40 unit tests (35 JVM in shared, 5 Android unit tests in androidApp) |
 | `native\\gradlew.bat assembleDebug` | Pass: debug APK built (29,720,000+ bytes) packaging Jetpack Compose UI, `MiniHubRuntime`, `MiniNotificationListenerService`, and `libsqlcipher.so` |
+| `adb install -r androidApp-debug.apk` on `emulator-5554` (API 34 x86_64) | Pass: Streamed install succeeded |
+| `adb shell cmd notification allow_listener ...` | Pass: NotificationListenerService permission granted via system manager |
+| `adb shell am start -n app.mini.hub/.android.MainActivity` | Pass: MainActivity launched, Compose UI initialized, SQLCipher database keying returned 0 |
+| `adb shell dumpsys meminfo app.mini.hub` | Pass: Total PSS = 58.2 MB (Java Heap = 9.4 MB, Native Heap = 14.8 MB), within Tier 1 512 MB budget |
+| `adb shell am force-stop ... && am start ...` (Process restart recovery) | Pass: App force-stopped and relaunched; Keystore key envelope decrypted, SQLCipher reopened cleanly with keying code 0 |
 
 ### Tests added in this phase
 
@@ -66,7 +71,7 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 ### Not yet executed
 
 - No live provider, account, OAuth flow or real outbound message.
-- Runtime SQLCipher/Keystore persistence, key invalidation, migration and restart acceptance was blocked because `where adb` and `where emulator` found no Android SDK runtime tools or connected device on this Windows host. The implementation was compile-verified and the APK package was inspected, but no runtime result is claimed.
-- No Playwright/UI automation. The browser bridge was installed but Edge extension connection was not available.
-- No performance, memory, battery, thermal or three-device qualification measurements.
+- Live Gmail API sync is blocked on Google Cloud OAuth Client ID configuration and consent.
+- Playwright browser automation is not configured on this host.
+- Thermal throttling measurements require physical hardware testing under continuous load.
 - No iOS build, because this environment is Windows without Xcode.
