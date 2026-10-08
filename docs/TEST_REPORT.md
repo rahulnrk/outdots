@@ -2,7 +2,7 @@
 
 Only commands actually executed are recorded here. Results were independently rerun by the coordinator.
 
-## 2026-10-09, native Android Compose inbox and UI review checkpoint
+## 2026-10-09, Android end-to-end runtime reliability checkpoint
 
 Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 34/35.
 
@@ -11,11 +11,15 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 | `npm test` | Pass: 3 files, 59 tests (13 domain, 33 security, 13 publisher) |
 | `npm run typecheck` | Pass: domain, publisher, hub |
 | `npm run build` | Pass: all workspaces, Vite bundle 192.88 kB JS / 60.40 kB gzip |
-| `native\\gradlew.bat test` | Pass: 37 tests (35 JVM in shared, 2 Android unit tests in androidApp) |
-| `native\\gradlew.bat assembleDebug` | Pass: debug APK built (29,720,000+ bytes) packaging Jetpack Compose UI, `MiniNotificationListenerService`, and `libsqlcipher.so` |
+| `native\\gradlew.bat test` | Pass: 40 unit tests (35 JVM in shared, 5 Android unit tests in androidApp) |
+| `native\\gradlew.bat assembleDebug` | Pass: debug APK built (29,720,000+ bytes) packaging Jetpack Compose UI, `MiniHubRuntime`, `MiniNotificationListenerService`, and `libsqlcipher.so` |
 
 ### Tests added in this phase
 
+- Headless background notification ingestion via `MiniHubRuntime` without requiring `MainActivity` to be open.
+- Queue overflow gap-tracking in `IngestCursor` and reflection of dropped event counts in `ConversationObservationSummary` coverage warnings.
+- Event-driven reactive UI updates via `ObservationUiListener` replacing continuous timer polling.
+- Comprehensive `HeadlessNotificationLifecycleTest` verifying background draining, queue backpressure, cursor gap accumulation, and reactive event notifications.
 - Android Jetpack Compose `InboxScreen` with conversation grouping, unread badges, and honest coverage warning cards.
 - User permission flow banner and notification listener connection status indicator.
 - `ConversationDetailView` with message timeline, OS truncation indicators, and style profile summaries.

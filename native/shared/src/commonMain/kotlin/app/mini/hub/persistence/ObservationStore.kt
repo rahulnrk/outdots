@@ -52,6 +52,13 @@ class InMemoryObservationStore : ObservationStore {
         val unread = (existingConv?.unreadCount ?: 0) + if (observation.isRemoved) 0 else 1
         val totalObs = (existingConv?.observationCount ?: 0) + 1
 
+        val gapCount = cursors[observation.packageId]?.gapCount ?: 0L
+        val coverageExplanation = if (gapCount > 0L) {
+            "Observed via Android notifications only ($gapCount dropped events due to backpressure). Prior history is not visible."
+        } else {
+            "Observed via Android notifications only. Prior history and out-of-band replies are not visible."
+        }
+
         val summary = ConversationObservationSummary(
             conversationId = observation.conversationId,
             accountId = observation.accountId,
@@ -60,7 +67,7 @@ class InMemoryObservationStore : ObservationStore {
             packageId = observation.packageId,
             latestSnippet = snippet,
             coverage = ConversationCoverage.NotificationOnly,
-            coverageExplanation = "Observed via Android notifications only. Prior history and out-of-band replies are not visible.",
+            coverageExplanation = coverageExplanation,
             latestEventAt = observation.observedAt,
             observationCount = totalObs,
             unreadCount = unread,

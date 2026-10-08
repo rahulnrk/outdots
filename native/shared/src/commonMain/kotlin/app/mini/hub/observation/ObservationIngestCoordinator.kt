@@ -18,10 +18,18 @@ class ObservationIngestCoordinator(
     private val deduplicator: NotificationDeduplicator = NotificationDeduplicator(),
     val store: ObservationStore,
     private val clock: Clock,
-    private val uiListener: ObservationUiListener? = null,
+    private var uiListener: ObservationUiListener? = null,
 ) {
+    fun setUiListener(listener: ObservationUiListener?) {
+        uiListener = listener
+    }
+
     fun enqueue(payload: NotificationRawPayload): IngestOfferResult {
-        return queue.offer(payload)
+        val result = queue.offer(payload)
+        if (result == IngestOfferResult.QueueFull) {
+            recordDroppedGap(payload.packageId)
+        }
+        return result
     }
 
     fun processNext(): IngestProcessResult {
@@ -85,6 +93,18 @@ class ObservationIngestCoordinator(
 
     fun getConversationTimeline(conversationId: ScopedId): List<ObservedNotification> {
         return store.getObservationsForConversation(conversationId)
+    }
+
+    fun recordDroppedGap(source: String) {
+        val existing = store.getCursor(source)
+        val cursor = IngestCursor(
+            source = source,
+            lastProcessedTimeMillis = existing?.lastProcessedTimeMillis ?: clock.now().epochMillis,
+            lastProcessedKey = existing?.lastProcessedKey,
+            processedCount = existing?.processedCount ?: 0L,
+            gapCount = (existing?.gapCount ?: 0L) + 1L,
+        )
+        store.checkpointCursor(cursor)
     }
 
     private fun updateCursor(source: String, timeMillis: Long, key: String) {

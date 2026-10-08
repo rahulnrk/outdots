@@ -1,24 +1,24 @@
 package app.mini.hub.android.notification
 
 import android.app.Notification
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationManagerCompat
-import app.mini.hub.observation.BoundedIngestQueue
+import app.mini.hub.android.MiniHubRuntime
 import app.mini.hub.observation.NotificationRawPayload
 
 /**
  * Android NotificationListenerService for non-blocking capture of authorized notifications.
  *
  * Requirements enforced:
- * 1. Non-blocking callback: pushes payload into bounded queue and returns immediately.
- * 2. Explicit permission gating: checks whether user enabled notification access.
- * 3. Lifecycle state: tracks listener connection/disconnection.
- * 4. Filters out self-notifications to avoid loops.
+ * 1. Non-blocking callback: pushes payload into bounded queue and dispatches background persistence.
+ * 2. Headless startup: initializes runtime and persists events even if UI Activity is closed.
+ * 3. Explicit permission gating: checks whether user enabled notification access.
+ * 4. Lifecycle state: tracks listener connection/disconnection.
+ * 5. Filters out self-notifications to avoid loops.
  */
 class MiniNotificationListenerService : NotificationListenerService() {
 
@@ -26,9 +26,6 @@ class MiniNotificationListenerService : NotificationListenerService() {
         @Volatile
         var isConnected: Boolean = false
             private set
-
-        @Volatile
-        var sharedQueue: BoundedIngestQueue<NotificationRawPayload>? = null
 
         /**
          * Checks if the user has explicitly granted notification listener access to this app.
@@ -53,8 +50,14 @@ class MiniNotificationListenerService : NotificationListenerService() {
         }
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        MiniHubRuntime.init(applicationContext)
+    }
+
     override fun onListenerConnected() {
         super.onListenerConnected()
+        MiniHubRuntime.init(applicationContext)
         isConnected = true
     }
 
@@ -102,7 +105,7 @@ class MiniNotificationListenerService : NotificationListenerService() {
             isRemoved = false,
         )
 
-        sharedQueue?.offer(payload)
+        MiniHubRuntime.onNotificationReceived(payload)
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
@@ -122,6 +125,6 @@ class MiniNotificationListenerService : NotificationListenerService() {
             isRemoved = true,
         )
 
-        sharedQueue?.offer(payload)
+        MiniHubRuntime.onNotificationReceived(payload)
     }
 }

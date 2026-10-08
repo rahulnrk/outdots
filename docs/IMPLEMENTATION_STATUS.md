@@ -14,7 +14,7 @@ Factual status per feature. Legend: **Implemented+tested**, **Partial**, **Simul
 | FTS5 scoped retrieval | s3, s6 | Implemented+tested contract | KMP `ScopedRetrievalEngine` with compartment isolation and token budget bounds; SQLCipher dynamic FTS5 probe | Encrypted SQLite FTS5 table integration |
 | Adaptive style intelligence | s6 | Implemented+tested | `AdaptiveStyleEngine` with opt-in consent, authorship verification, prompt-injection defense, secret redaction, and instant revocation | On-device nuance classifier integration |
 | Gmail connector | s4 | Simulated | Local fixture provider only | OAuth, cursor sync and provider fixture adapter. Live use **Blocked** |
-| WhatsApp notification observation | s4, s5 | Implemented+tested | Android `MiniNotificationListenerService`, non-blocking bounded queue, normalizer, deduplicator, 1000-event test suite | Real device listener verification |
+| WhatsApp notification observation | s4, s5 | Implemented+tested | Android `MiniNotificationListenerService`, headless `MiniHubRuntime`, non-blocking bounded queue, overflow gap-tracking, normalizer, deduplicator, 40 unit tests | Real device listener verification |
 | Native handoff | s9 | Implemented+tested | Domain launcher contract, `AndroidNativeHandoffLauncher` system chooser, `OutboxState.HandoffOpened` truthfulness | Real device manual dispatch |
 | Local inference engine | s8, s20 | Partial | KMP replaceable deterministic engine contract and evidence validator | Qualify a real device-local backend |
 | Resource Supervisor | s20.4 | Implemented+tested contract | Bounded queue/cache, cancellation, pressure lifecycle, hardware tier budgets, failure recovery, eval harness and host benchmark | Integrate with real runtime and device signals |

@@ -98,6 +98,13 @@ class SqlCipherObservationStore(
                     }
                     database.insertWithOnConflict("notification_observations", null, values, SQLiteDatabase.CONFLICT_REPLACE)
 
+                    val cursorGap = getCursor(observation.packageId)?.gapCount ?: 0L
+                    val coverageExplanation = if (cursorGap > 0L) {
+                        "Observed via Android notifications only ($cursorGap dropped events due to backpressure). Prior history is not visible."
+                    } else {
+                        "Observed via Android notifications only. Prior history and out-of-band replies are not visible."
+                    }
+
                     // Update or insert conversation summary
                     val convValues = ContentValues().apply {
                         put("conversation_key", observation.conversationId.key)
@@ -107,7 +114,7 @@ class SqlCipherObservationStore(
                         put("package_id", observation.packageId)
                         put("latest_snippet", observation.textFragments.lastOrNull() ?: observation.title ?: "")
                         put("coverage", ConversationCoverage.NotificationOnly.name)
-                        put("coverage_explanation", "Observed via Android notifications only. Prior history and out-of-band replies are not visible.")
+                        put("coverage_explanation", coverageExplanation)
                         put("latest_event_at", observation.observedAt.epochMillis)
                         put("observation_count", 1) // Increment handled on query or aggregate
                         put("unread_count", if (observation.isRemoved) 0 else 1)
