@@ -54,6 +54,14 @@ function buildBody(context: ContextBundle, intent: DraftIntent): { body: string;
   };
 }
 
+function shortDigest(value: string): string {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 33) ^ value.charCodeAt(index);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 export function createDraft(state: HubState, account: Account, conversationId: string, context: ContextBundle, intent: DraftIntent, now: string): Draft {
   const route: SendRoute = account.capabilities.sendRoutes.includes('api') ? 'api' : 'native_handoff';
   const lastInbound = [...state.messages]
@@ -65,7 +73,7 @@ export function createDraft(state: HubState, account: Account, conversationId: s
   const conversation = state.conversations.find((item) => item.id === conversationId);
 
   return {
-    id: `draft-${conversationId}-${Date.parse(now)}`,
+    id: `draft-${conversationId}-${Date.parse(now)}-${shortDigest(`${JSON.stringify(intent)}|${body}`)}`,
     accountId: account.id,
     conversationId,
     route,

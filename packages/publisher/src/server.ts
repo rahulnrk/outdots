@@ -60,6 +60,21 @@ function hasPrivateContentShape(body: unknown): boolean {
 
 export function createPublisherServer() {
   return createServer(async (request, response) => {
+    try {
+      await handleRequest(request, response);
+    } catch (error) {
+      if (response.headersSent) {
+        response.destroy();
+        return;
+      }
+      const reason = error instanceof Error && error.message === 'body_too_large' ? 'body_too_large' : 'invalid_json';
+      json(response, reason === 'body_too_large' ? 413 : 400, { error: reason });
+    }
+  });
+}
+
+async function handleRequest(request: IncomingMessage, response: ServerResponse) {
+  {
     const url = new URL(request.url ?? '/', 'http://localhost');
 
     if (request.method === 'GET' && url.pathname === '/release-manifest') {
@@ -93,7 +108,7 @@ export function createPublisherServer() {
     }
 
     json(response, 404, { error: 'not_found', allowed: ['/release-manifest', '/entitlements/check', '/diagnostics'] });
-  });
+  }
 }
 
 if (process.env['MINI_PUBLISHER_LISTEN'] === '1') {

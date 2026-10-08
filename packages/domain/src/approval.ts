@@ -68,6 +68,23 @@ export async function approveDraft(draft: Draft, policyVersion: string, grantVer
   return { approval, command };
 }
 
+export type GatewayResult =
+  | { kind: 'accepted'; receipt: string }
+  | { kind: 'rejected'; reason: string }
+  | { kind: 'unknown'; reason: string };
+
+/** Injected provider boundary. The domain never talks to a network itself. */
+export interface ProviderGateway {
+  send(command: OutboxCommand, draft: Draft, account: Account): Promise<GatewayResult>;
+}
+
+/** Default when no real connector is configured: the send is refused, never simulated as accepted. */
+export const unconfiguredGateway: ProviderGateway = {
+  async send() {
+    return { kind: 'rejected', reason: 'no_provider_connector_configured' };
+  }
+};
+
 function failCommand(state: HubState, commandId: string, stateName: OutboxCommand['state'], failureReason: string, now: string): HubState {
   return {
     ...state,
@@ -85,7 +102,11 @@ function accountForDraft(state: HubState, draft: Draft): Account | undefined {
   return state.accounts.find((item) => item.id === draft.accountId);
 }
 
-export async function dispatchOutbox(state: HubState, commandId: string, now: string): Promise<HubState> {
+export interface DispatchOptions {
+  gateway?: ProviderGateway;
+}
+
+export async function dispatchOutbox(state: HubState, commandId: string, now: string, options: DispatchOptions = {}): Promise<HubState> {
   const command = state.outbox.find((item) => item.id === commandId);
   if (!command) throw new Error(`Command not found: ${commandId}`);
   if (command.state !== 'ready') return state;
@@ -115,11 +136,42 @@ export async function dispatchOutbox(state: HubState, commandId: string, now: st
     return failCommand(state, commandId, 'expired_or_invalidated', 'approval_missing_consumed_or_expired', now);
   }
 
-  const nextState = command.route === 'native_handoff' ? 'handoff_opened' : 'accepted_by_provider';
-  return {
+  // Consume the one-use approval before any network call, so a retry cannot reuse it.
+  const consumed: HubState = {
     ...state,
-    approvals: state.approvals.map((item) => item.id === approval.id ? { ...item, consumed: true } : item),
-    outbox: state.outbox.map((item) => item.id === commandId ? { ...item, state: nextState, lastAttemptAt: now, receipt: command.route === 'api' ? `provider-accepted-${command.id}` : 'source-app-opened-unverified' } : item),
-    drafts: state.drafts.map((draft) => draft.id === command.draftId ? { ...draft, status: command.route === 'api' ? 'sent' : 'approved' } : draft)
+    approvals: state.approvals.map((item) => item.id === approval.id ? { ...item, consumed: true } : item)
+  };
+
+  if (command.route === 'native_handoff') {
+    return {
+      ...consumed,
+      outbox: consumed.outbox.map((item) => item.id === commandId ? { ...item, state: 'handoff_opened', lastAttemptAt: now, receipt: 'source-app-opened-unverified' } : item),
+      drafts: consumed.drafts.map((item) => item.id === command.draftId ? { ...item, status: 'approved' } : item)
+    };
+  }
+
+  const gateway = options.gateway ?? unconfiguredGateway;
+  const result = await gateway.send(command, draft, account);
+
+  if (result.kind === 'accepted') {
+    return {
+      ...consumed,
+      outbox: consumed.outbox.map((item) => item.id === commandId ? { ...item, state: 'accepted_by_provider', lastAttemptAt: now, receipt: result.receipt } : item),
+      drafts: consumed.drafts.map((item) => item.id === command.draftId ? { ...item, status: 'sent' } : item)
+    };
+  }
+
+  if (result.kind === 'rejected') {
+    return {
+      ...consumed,
+      outbox: consumed.outbox.map((item) => item.id === commandId ? { ...item, state: 'rejected', lastAttemptAt: now, failureReason: result.reason } : item)
+    };
+  }
+
+  // Timeout or transport failure after the request may have reached the provider.
+  // Never retry automatically; the outcome must be reconciled before any further attempt.
+  return {
+    ...consumed,
+    outbox: consumed.outbox.map((item) => item.id === commandId ? { ...item, state: 'outcome_unknown', lastAttemptAt: now, failureReason: result.reason } : item)
   };
 }
