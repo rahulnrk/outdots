@@ -19,7 +19,9 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 | `adb shell cmd notification allow_listener ...` on Pixel 10 Pro | Pass: Notification listener permission and restricted settings access granted |
 | `adb shell am start -n app.mini.hub/.android.MainActivity` on Pixel 10 Pro | Pass: MainActivity launched, Compose UI initialized, arm64 `libsqlcipher.so` loaded, Keystore encryption envelope verified, SQLCipher database keying code 0 |
 | `adb shell dumpsys meminfo app.mini.hub` on Pixel 10 Pro | Pass: Live physical device memory footprint = 93.0 MB Total PSS (Java Heap 7.8 MB, Native Heap 8.0 MB, Graphics 33.4 MB), well within Tier 1 budget |
-| `adb shell am force-stop ... && am start ...` on Pixel 10 Pro | Pass: Clean process termination and restart; Keystore key envelope decrypted, SQLCipher database re-opened with keying code 0 |
+| Controlled live synthetic notification end-to-end test on `Pixel 10 Pro` | Pass: Broadcast `POST_SYNTHETIC_NOTIFICATION` processed via NotificationManager -> `MiniNotificationListenerService` -> `MiniHubRuntime` -> `BoundedIngestQueue` -> `SqlCipherObservationStore` -> Compose `InboxScreen` reactive update |
+| Multi-notification background & foreground persistence | Pass: Multiple notifications processed in background, persisted to SQLCipher, and displayed with unread badges on app resume |
+| Post-restart notification recovery on Pixel 10 Pro | Pass: After force-stop and cold restart, all 3 synthetic conversation records reloaded from encrypted SQLite |
 | `adb install -r androidApp-debug.apk` on `emulator-5554` (API 34 x86_64) | Pass: Streamed install succeeded |
 | `adb shell dumpsys meminfo app.mini.hub` on emulator-5554 | Pass: Total PSS = 58.2 MB (Java Heap = 9.4 MB, Native Heap = 14.8 MB) |
 

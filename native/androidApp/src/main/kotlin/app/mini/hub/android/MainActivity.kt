@@ -52,6 +52,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (::viewModel.isInitialized) {
+            MiniNotificationListenerService.rebindIfNeeded(this)
             val isGranted = MiniNotificationListenerService.isPermissionGranted(this)
             val isConnected = MiniNotificationListenerService.isConnected
             viewModel.refresh(isPermissionGranted = isGranted, isListenerConnected = isConnected)

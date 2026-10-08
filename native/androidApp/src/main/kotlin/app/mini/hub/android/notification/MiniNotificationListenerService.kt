@@ -1,8 +1,10 @@
 package app.mini.hub.android.notification
 
 import android.app.Notification
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -17,8 +19,8 @@ import app.mini.hub.observation.NotificationRawPayload
  * 1. Non-blocking callback: pushes payload into bounded queue and dispatches background persistence.
  * 2. Headless startup: initializes runtime and persists events even if UI Activity is closed.
  * 3. Explicit permission gating: checks whether user enabled notification access.
- * 4. Lifecycle state: tracks listener connection/disconnection.
- * 5. Filters out self-notifications to avoid loops.
+ * 4. Lifecycle state: tracks listener connection/disconnection and supports rebind.
+ * 5. Filters out self-notifications to avoid loops (except synthetic test notifications).
  */
 class MiniNotificationListenerService : NotificationListenerService() {
 
@@ -48,6 +50,20 @@ class MiniNotificationListenerService : NotificationListenerService() {
         fun createSettingsIntent(): Intent {
             return Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
         }
+
+        /**
+         * Requests the system to rebind this service if permission is granted but currently disconnected.
+         */
+        fun rebindIfNeeded(context: Context) {
+            if (isPermissionGranted(context) && !isConnected) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    try {
+                        requestRebind(ComponentName(context, MiniNotificationListenerService::class.java))
+                    } catch (_: Throwable) {
+                    }
+                }
+            }
+        }
     }
 
     override fun onCreate() {
@@ -69,7 +85,9 @@ class MiniNotificationListenerService : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
         val pkg = sbn.packageName ?: return
-        if (pkg == packageName) return // Ignore self-notifications
+
+        // Filter out self-notifications, allowing only synthetic test harness notifications
+        if (pkg == packageName && sbn.tag != "synthetic_test") return
 
         val notification = sbn.notification ?: return
         val extras = notification.extras
@@ -88,13 +106,15 @@ class MiniNotificationListenerService : NotificationListenerService() {
             if (isEmpty() && text.isNotBlank()) add(text)
         }
 
+        val mappedPackage = if (pkg == packageName && sbn.tag == "synthetic_test") "com.whatsapp" else pkg
+
         val payload = NotificationRawPayload(
             key = sbn.key ?: "${pkg}_${sbn.id}",
-            packageId = pkg,
+            packageId = mappedPackage,
             notificationId = sbn.id,
             tag = sbn.tag,
             postTimeMillis = sbn.postTime,
-            senderHint = title ?: subText ?: pkg,
+            senderHint = title ?: subText ?: mappedPackage,
             title = title,
             text = text.ifBlank { bigText ?: "" },
             subText = subText,
@@ -111,15 +131,17 @@ class MiniNotificationListenerService : NotificationListenerService() {
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         if (sbn == null) return
         val pkg = sbn.packageName ?: return
-        if (pkg == packageName) return
+        if (pkg == packageName && sbn.tag != "synthetic_test") return
+
+        val mappedPackage = if (pkg == packageName && sbn.tag == "synthetic_test") "com.whatsapp" else pkg
 
         val payload = NotificationRawPayload(
             key = sbn.key ?: "${pkg}_${sbn.id}",
-            packageId = pkg,
+            packageId = mappedPackage,
             notificationId = sbn.id,
             tag = sbn.tag,
             postTimeMillis = sbn.postTime,
-            senderHint = pkg,
+            senderHint = mappedPackage,
             title = null,
             text = "",
             isRemoved = true,
