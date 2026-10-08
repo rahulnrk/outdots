@@ -12,8 +12,8 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 | `npm run typecheck` | Pass: domain, publisher, hub |
 | `npm run build` | Pass: all workspaces, Vite bundle 192.88 kB JS / 60.40 kB gzip |
 | `npm audit --audit-level=moderate` | Pass: 0 vulnerabilities (previously run at baseline) |
-| `native\\gradlew.bat :shared:jvmTest` | Pass: 7 tests, including scaffold and 6 intelligence safety/lifecycle tests |
-| `native\\gradlew.bat :shared:jvmTest :androidApp:assembleDebug` | Pass: JVM tests and debug APK built |
+| `native\\gradlew.bat :shared:jvmTest` | Pass: 17 tests, including scaffold, action core, persistence boundary and intelligence safety/lifecycle tests |
+| `native\\gradlew.bat :shared:jvmTest :androidApp:assembleDebug` | Pass: 17 JVM tests and debug APK built |
 
 ### Tests added in this phase
 
@@ -25,6 +25,8 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 - Prompt-injection sender text, missing commercial decisions and self-identity handling.
 - Publisher content schema, byte limits, loopback binding, invalid port and unsigned manifest truthfulness.
 - Bounded local intelligence proposal validation, scope separation, cancellation, model reuse and memory pressure.
+- Native exact action approval, attachment/source binding, expiry, clock rollback, ambiguous outcomes, handoff truthfulness and restart recovery.
+- Native persistence transaction boundary and explicit not-production-qualified in-memory repository.
 
 ### Not yet executed
 

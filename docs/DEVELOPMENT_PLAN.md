@@ -51,6 +51,10 @@ graph TD
 The Gmail + WhatsApp observation slice from architecture section 16, on Android, against synthetic fixtures,
 surviving restart. Live Gmail is blocked until an OAuth client and explicit user authorization exist.
 
+## Current verified milestone
+
+At commit `89356b0`, the KMP shared module has exact action approval/outbox contracts and an explicit persistence boundary. JVM tests cover exact payload drift, approvals, expiration, ambiguous provider outcomes, native handoff, interrupted recovery and transactional test-store behavior. The store is deliberately marked in-memory test-only until SQLCipher and Keystore qualification exists.
+
 ## Known external blockers
 
 - Gmail live sync/send: needs Google Cloud OAuth client and test account consent.
