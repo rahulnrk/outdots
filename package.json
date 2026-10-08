@@ -1,0 +1,30 @@
+{
+  "name": "private-ai-communication-hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @mini/hub",
+    "build": "npm run build -w @mini/domain && npm run build -w @mini/publisher && npm run build -w @mini/hub",
+    "test": "vitest run",
+    "typecheck": "npm run typecheck -w @mini/domain && npm run typecheck -w @mini/publisher && npm run typecheck -w @mini/hub",
+    "preview": "npm run preview -w @mini/hub"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
