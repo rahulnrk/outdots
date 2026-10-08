@@ -31,6 +31,8 @@ export interface Account {
   compartment: ContextCompartment;
   capabilities: ConnectorCapabilities;
   grants: string[];
+  selfIdentities?: string[];
+  signatureName?: string;
 }
 
 export interface SourceRef {
@@ -116,10 +118,18 @@ export interface Draft {
   recipients: string[];
   subject?: string;
   body: string;
+  attachments?: Attachment[];
   evidence: SourceRef[];
   missingDecisions: string[];
   status: 'proposed' | 'stale' | 'ready_for_review' | 'approved' | 'sent' | 'blocked';
   createdAt: string;
+}
+
+export interface Attachment {
+  id: string;
+  name: string;
+  sha256: string;
+  sizeBytes: number;
 }
 
 export interface ReplyEligibility {
@@ -139,6 +149,7 @@ export interface ReviewPayload {
   recipients: string[];
   subject?: string;
   body: string;
+  attachments?: Attachment[];
   evidence: SourceRef[];
   policyVersion: string;
   grantVersion: string;
@@ -151,6 +162,7 @@ export interface Approval {
   approvedAt: string;
   expiresAt: string;
   consumed: boolean;
+  sourceVersions?: SourceRef[];
 }
 
 export interface OutboxCommand {
@@ -165,6 +177,7 @@ export interface OutboxCommand {
   lastAttemptAt?: string;
   receipt?: string;
   failureReason?: string;
+  sourceVersions?: SourceRef[];
 }
 
 export interface HubState {

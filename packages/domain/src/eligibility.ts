@@ -4,6 +4,9 @@ const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
 export function evaluateReplyEligibility(account: Account, route: SendRoute, now: string, lastQualifyingInboundAt?: string): ReplyEligibility {
+  if (account.capabilities.qualificationStatus === 'disabled') {
+    return { windowState: 'unknown', route, eligibleNow: false, reasonCode: 'connector_disabled', policyVersion: account.capabilities.policyVersion, needsRecheck: true };
+  }
   if (!account.capabilities.sendRoutes.includes(route)) {
     return {
       windowState: 'unknown',
@@ -26,6 +29,10 @@ export function evaluateReplyEligibility(account: Account, route: SendRoute, now
     };
   }
 
+  if (route !== 'api' || !account.grants.includes('send')) {
+    return { windowState: 'unknown', route, eligibleNow: false, reasonCode: 'send_grant_missing', policyVersion: account.capabilities.policyVersion, needsRecheck: true };
+  }
+
   if (account.provider === 'gmail') {
     return {
       windowState: 'not_applicable',
@@ -37,7 +44,11 @@ export function evaluateReplyEligibility(account: Account, route: SendRoute, now
     };
   }
 
-  if (!lastQualifyingInboundAt) {
+  if (account.provider !== 'instagram' && account.provider !== 'facebook' && account.provider !== 'whatsapp' && account.provider !== 'teams') {
+    return { windowState: 'not_applicable', route, eligibleNow: true, reasonCode: 'provider_route_available', policyVersion: account.capabilities.policyVersion, needsRecheck: true };
+  }
+
+  if (!lastQualifyingInboundAt || !Number.isFinite(Date.parse(now)) || !Number.isFinite(Date.parse(lastQualifyingInboundAt)) || Date.parse(lastQualifyingInboundAt) > Date.parse(now)) {
     return {
       windowState: 'unknown',
       route,
