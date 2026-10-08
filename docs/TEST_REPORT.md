@@ -13,7 +13,7 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 | `npm run build` | Pass: all workspaces, Vite bundle 192.88 kB JS / 60.40 kB gzip |
 | `npm audit --audit-level=moderate` | Pass: 0 vulnerabilities (previously run at baseline) |
 | `native\\gradlew.bat :shared:jvmTest` | Pass: 17 tests, including scaffold, action core, persistence boundary and intelligence safety/lifecycle tests |
-| `native\\gradlew.bat :shared:jvmTest :androidApp:assembleDebug` | Pass: 17 JVM tests and debug APK built |
+| `native\\gradlew.bat :shared:jvmTest :androidApp:assembleDebug` | Pass: 17 JVM tests and debug APK built, including the Android SQLCipher/Keystore store compilation |
 
 ### Tests added in this phase
 
@@ -31,7 +31,7 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 ### Not yet executed
 
 - No live provider, account, OAuth flow or real outbound message.
-- No SQLCipher/Keystore persistence or restart test on an Android emulator/device.
+- No SQLCipher/Keystore persistence, key invalidation, migration or restart test on an Android emulator/device. The Android implementation was compile-verified only.
 - No Playwright/UI automation. The browser bridge was installed but Edge extension connection was not available.
 - No performance, memory, battery, thermal or three-device qualification measurements.
 - No iOS build, because this environment is Windows without Xcode.

@@ -8,10 +8,10 @@ Updated 2026-10-08. Decisions are scoped to this repository and preserve the arc
 package remains a browser reference harness and executable safety specification while KMP parity is built.
 
 **Why:** The architecture calls for shared deterministic rules plus native authorization, storage, lifecycle and UI.
-A browser demo cannot prove Android notification permissions, Keystore, WorkManager or iOS behavior.
+A browser demo cannot prove Android notification permissions, Keystore, WorkManager or iOS behavior. The Android store now has a SQLCipher and Keystore implementation, but device qualification remains a separate acceptance step.
 
 **Consequence:** The TypeScript and KMP cores need parity tests before either is called release-ready. The current
-KMP scaffold builds JVM tests and an Android debug APK, but persistence and native connectors are not implemented.
+KMP scaffold builds JVM tests and an Android debug APK. Android SQLCipher persistence is implemented behind the shared store boundary, while native connectors and device qualification remain outstanding.
 
 ## ADR-002: Injectable clocks for business rules
 
@@ -31,7 +31,7 @@ approval before any gateway call. Ambiguous results become outcome unknown and a
 **Why:** A UI confirmation that is not bound to the exact payload is a confused-deputy and duplicate-send risk.
 
 **Consequence:** Durable storage must transactionally persist the consumed approval and dispatching state. The current
-TS implementation has a process-local lock; native durable outbox is still pending.
+TS implementation has a process-local lock; Android now persists the native action state transactionally in SQLCipher, pending device restart qualification.
 
 ## ADR-004: Provider outcomes are separate states
 

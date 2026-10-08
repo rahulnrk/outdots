@@ -53,7 +53,7 @@ surviving restart. Live Gmail is blocked until an OAuth client and explicit user
 
 ## Current verified milestone
 
-At commit `89356b0`, the KMP shared module has exact action approval/outbox contracts and an explicit persistence boundary. JVM tests cover exact payload drift, approvals, expiration, ambiguous provider outcomes, native handoff, interrupted recovery and transactional test-store behavior. The store is deliberately marked in-memory test-only until SQLCipher and Keystore qualification exists.
+The KMP shared module has exact action approval/outbox contracts and an Android `SqlCipherActionStore` implementation. JVM tests cover exact payload drift, approvals, expiration, ambiguous provider outcomes, native handoff, interrupted recovery and transactional test-store behavior. Android debug compilation verifies the SQLCipher/Keystore adapter, but device migration, key invalidation and restart qualification are still outstanding.
 
 ## Known external blockers
 
