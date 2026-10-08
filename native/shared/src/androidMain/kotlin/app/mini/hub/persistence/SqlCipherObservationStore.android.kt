@@ -188,79 +188,7 @@ class SqlCipherObservationStore(
         return try {
             database.beginTransaction()
             try {
-                val values = ContentValues().apply {
-                    put("id", observation.id.key)
-                    put("account_key", observation.accountId.key)
-                    put("conversation_key", observation.conversationId.key)
-                    put("package_id", observation.packageId)
-                    put("notification_key", observation.notificationKey)
-                    put("notification_id", observation.notificationId)
-                    put("tag", observation.tag)
-                    put("sender_hint", observation.senderHint)
-                    put("title", observation.title)
-                    put("text_fragments_json", observation.textFragments.joinToString("\u001F"))
-                    put("raw_text_digest", observation.rawTextDigest)
-                    put("observed_at", observation.observedAt.epochMillis)
-                    put("post_time", observation.postTime.epochMillis)
-                    put("revision", observation.revision)
-                    put("is_removed", if (observation.isRemoved) 1 else 0)
-                    put("is_group_summary", if (observation.isGroupSummary) 1 else 0)
-                    put("truncation_state", observation.truncationState.name)
-                    put("correlation_confidence", observation.correlationConfidence.name)
-                    put("provenance", observation.provenance.name)
-                }
-                database.insertWithOnConflict("notification_observations", null, values, SQLiteDatabase.CONFLICT_REPLACE)
-
-                val cursorGap = queryCursorGap(database, observation.packageId)
-                val coverageExplanation = if (cursorGap > 0L) {
-                    "Observed via Android notifications only ($cursorGap dropped events due to backpressure). Prior history is not visible."
-                } else {
-                    "Observed via Android notifications only. Prior history and out-of-band replies are not visible."
-                }
-
-                val appName = when {
-                    observation.packageId.contains("twitter", ignoreCase = true) -> "X"
-                    observation.packageId.contains("whoop", ignoreCase = true) -> "WHOOP"
-                    observation.packageId.contains("whatsapp", ignoreCase = true) -> "WhatsApp"
-                    observation.packageId.contains("android.gm", ignoreCase = true) -> "Gmail"
-                    observation.packageId.contains("facebook.orca", ignoreCase = true) -> "Messenger"
-                    observation.packageId.contains("facebook", ignoreCase = true) -> "Facebook"
-                    observation.packageId.contains("instagram", ignoreCase = true) -> "Instagram"
-                    observation.packageId.contains("linkedin", ignoreCase = true) -> "LinkedIn"
-                    observation.packageId.contains("slack", ignoreCase = true) -> "Slack"
-                    observation.packageId == "android" -> "Android System"
-                    observation.packageId.startsWith("com.android.systemui") -> "System UI"
-                    else -> observation.packageId.substringAfterLast('.').replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-                }
-
-                val notifCategory = when {
-                    observation.isOngoing -> NotificationCategory.OngoingService
-                    observation.isGroupSummary -> NotificationCategory.GroupMessage
-                    observation.packageId.contains("twitter") || observation.packageId.contains("instagram") -> NotificationCategory.SocialUpdate
-                    observation.packageId == "android" || observation.packageId.startsWith("com.android.systemui") -> NotificationCategory.SystemStatus
-                    observation.packageId.contains("whatsapp") || observation.packageId.contains("orca") -> NotificationCategory.DirectMessage
-                    else -> NotificationCategory.GeneralNotification
-                }
-
-                // Update or insert conversation summary
-                val convValues = ContentValues().apply {
-                    put("conversation_key", observation.conversationId.key)
-                    put("account_key", observation.accountId.key)
-                    put("title", observation.title ?: observation.senderHint)
-                    put("app_name", appName)
-                    put("sender_hint", observation.senderHint)
-                    put("package_id", observation.packageId)
-                    put("latest_snippet", observation.textFragments.lastOrNull() ?: observation.title ?: "")
-                    put("category", notifCategory.name)
-                    put("coverage", ConversationCoverage.NotificationOnly.name)
-                    put("coverage_explanation", coverageExplanation)
-                    put("latest_event_at", observation.observedAt.epochMillis)
-                    put("observation_count", 1) // Increment handled on query or aggregate
-                    put("unread_count", if (observation.isRemoved) 0 else 1)
-                    put("is_removed", if (observation.isRemoved) 1 else 0)
-                }
-                database.insertWithOnConflict("conversation_summaries", null, convValues, SQLiteDatabase.CONFLICT_REPLACE)
-
+                persistObservationRow(database, observation)
                 database.setTransactionSuccessful()
                 PersistResult.Success(observation.id, observation.revision)
             } finally {
@@ -278,77 +206,7 @@ class SqlCipherObservationStore(
         database.beginTransaction()
         try {
             for (obs in observations) {
-                val values = ContentValues().apply {
-                    put("id", obs.id.key)
-                    put("account_key", obs.accountId.key)
-                    put("conversation_key", obs.conversationId.key)
-                    put("package_id", obs.packageId)
-                    put("notification_key", obs.notificationKey)
-                    put("notification_id", obs.notificationId)
-                    put("tag", obs.tag)
-                    put("sender_hint", obs.senderHint)
-                    put("title", obs.title)
-                    put("text_fragments_json", obs.textFragments.joinToString("\u001F"))
-                    put("raw_text_digest", obs.rawTextDigest)
-                    put("observed_at", obs.observedAt.epochMillis)
-                    put("post_time", obs.postTime.epochMillis)
-                    put("revision", obs.revision)
-                    put("is_removed", if (obs.isRemoved) 1 else 0)
-                    put("is_group_summary", if (obs.isGroupSummary) 1 else 0)
-                    put("truncation_state", obs.truncationState.name)
-                    put("correlation_confidence", obs.correlationConfidence.name)
-                    put("provenance", obs.provenance.name)
-                }
-                database.insertWithOnConflict("notification_observations", null, values, SQLiteDatabase.CONFLICT_REPLACE)
-
-                val cursorGap = queryCursorGap(database, obs.packageId)
-                val coverageExplanation = if (cursorGap > 0L) {
-                    "Observed via Android notifications only ($cursorGap dropped events due to backpressure). Prior history is not visible."
-                } else {
-                    "Observed via Android notifications only. Prior history and out-of-band replies are not visible."
-                }
-
-                val appName = when {
-                    obs.packageId.contains("twitter", ignoreCase = true) -> "X"
-                    obs.packageId.contains("whoop", ignoreCase = true) -> "WHOOP"
-                    obs.packageId.contains("whatsapp", ignoreCase = true) -> "WhatsApp"
-                    obs.packageId.contains("android.gm", ignoreCase = true) -> "Gmail"
-                    obs.packageId.contains("facebook.orca", ignoreCase = true) -> "Messenger"
-                    obs.packageId.contains("facebook", ignoreCase = true) -> "Facebook"
-                    obs.packageId.contains("instagram", ignoreCase = true) -> "Instagram"
-                    obs.packageId.contains("linkedin", ignoreCase = true) -> "LinkedIn"
-                    obs.packageId.contains("slack", ignoreCase = true) -> "Slack"
-                    obs.packageId == "android" -> "Android System"
-                    obs.packageId.startsWith("com.android.systemui") -> "System UI"
-                    else -> obs.packageId.substringAfterLast('.').replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-                }
-
-                val notifCategory = when {
-                    obs.isOngoing -> NotificationCategory.OngoingService
-                    obs.isGroupSummary -> NotificationCategory.GroupMessage
-                    obs.packageId.contains("twitter") || obs.packageId.contains("instagram") -> NotificationCategory.SocialUpdate
-                    obs.packageId == "android" || obs.packageId.startsWith("com.android.systemui") -> NotificationCategory.SystemStatus
-                    obs.packageId.contains("whatsapp") || obs.packageId.contains("orca") -> NotificationCategory.DirectMessage
-                    else -> NotificationCategory.GeneralNotification
-                }
-
-                val convValues = ContentValues().apply {
-                    put("conversation_key", obs.conversationId.key)
-                    put("account_key", obs.accountId.key)
-                    put("title", obs.title ?: obs.senderHint)
-                    put("app_name", appName)
-                    put("sender_hint", obs.senderHint)
-                    put("package_id", obs.packageId)
-                    put("latest_snippet", obs.textFragments.lastOrNull() ?: obs.title ?: "")
-                    put("category", notifCategory.name)
-                    put("coverage", ConversationCoverage.NotificationOnly.name)
-                    put("coverage_explanation", coverageExplanation)
-                    put("latest_event_at", obs.observedAt.epochMillis)
-                    put("observation_count", 1)
-                    put("unread_count", if (obs.isRemoved) 0 else 1)
-                    put("is_removed", if (obs.isRemoved) 1 else 0)
-                }
-                database.insertWithOnConflict("conversation_summaries", null, convValues, SQLiteDatabase.CONFLICT_REPLACE)
+                persistObservationRow(database, obs)
                 count++
             }
             database.setTransactionSuccessful()
@@ -356,6 +214,161 @@ class SqlCipherObservationStore(
             database.endTransaction()
         }
         return count
+    }
+
+    @Synchronized
+    override fun persistBatchWithCursors(
+        observations: List<ObservedNotification>,
+        cursors: List<IngestCursor>,
+    ): BatchPersistResult {
+        if (observations.isEmpty() && cursors.isEmpty()) {
+            return BatchPersistResult(0, 0, emptyList())
+        }
+        return try {
+            database.beginTransaction()
+            try {
+                for (obs in observations) {
+                    persistObservationRow(database, obs)
+                }
+                for (cursor in cursors) {
+                    persistCursorRow(database, cursor)
+                }
+                database.setTransactionSuccessful()
+                BatchPersistResult(observations.size, 0, emptyList())
+            } finally {
+                database.endTransaction()
+            }
+        } catch (e: Throwable) {
+            BatchPersistResult(0, observations.size, listOf(e.message ?: "Database error"))
+        }
+    }
+
+    @Synchronized
+    override fun persistObservationWithCursor(
+        observation: ObservedNotification,
+        cursor: IngestCursor,
+    ): PersistResult {
+        return try {
+            database.beginTransaction()
+            try {
+                persistObservationRow(database, observation)
+                persistCursorRow(database, cursor)
+                database.setTransactionSuccessful()
+                PersistResult.Success(observation.id, observation.revision)
+            } finally {
+                database.endTransaction()
+            }
+        } catch (e: Throwable) {
+            PersistResult.Error(e.message ?: e::class.simpleName ?: "Database error")
+        }
+    }
+
+    @Synchronized
+    override fun getObservationByNotificationKey(notificationKey: String): ObservedNotification? {
+        return database.query(
+            "notification_observations",
+            null,
+            "notification_key = ? AND is_removed = 0",
+            arrayOf(notificationKey),
+            null,
+            null,
+            "observed_at DESC",
+            "1",
+        ).use { cursor ->
+            if (cursor.moveToFirst()) mapObservation(cursor) else null
+        }
+    }
+
+    /**
+     * Writes one observation row and its conversation summary row.
+     * Must be called inside an active transaction.
+     */
+    private fun persistObservationRow(db: SQLiteDatabase, obs: ObservedNotification) {
+        val values = ContentValues().apply {
+            put("id", obs.id.key)
+            put("account_key", obs.accountId.key)
+            put("conversation_key", obs.conversationId.key)
+            put("package_id", obs.packageId)
+            put("notification_key", obs.notificationKey)
+            put("notification_id", obs.notificationId)
+            put("tag", obs.tag)
+            put("sender_hint", obs.senderHint)
+            put("title", obs.title)
+            put("text_fragments_json", obs.textFragments.joinToString("\u001F"))
+            put("raw_text_digest", obs.rawTextDigest)
+            put("observed_at", obs.observedAt.epochMillis)
+            put("post_time", obs.postTime.epochMillis)
+            put("revision", obs.revision)
+            put("is_removed", if (obs.isRemoved) 1 else 0)
+            put("is_group_summary", if (obs.isGroupSummary) 1 else 0)
+            put("truncation_state", obs.truncationState.name)
+            put("correlation_confidence", obs.correlationConfidence.name)
+            put("provenance", obs.provenance.name)
+        }
+        db.insertWithOnConflict("notification_observations", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+
+        val cursorGap = queryCursorGap(db, obs.packageId)
+        val coverageExplanation = if (cursorGap > 0L) {
+            "Observed via Android notifications only ($cursorGap dropped events due to backpressure). Prior history is not visible."
+        } else {
+            "Observed via Android notifications only. Prior history and out-of-band replies are not visible."
+        }
+
+        val appName = when {
+            obs.packageId.contains("twitter", ignoreCase = true) -> "X"
+            obs.packageId.contains("whoop", ignoreCase = true) -> "WHOOP"
+            obs.packageId.contains("whatsapp", ignoreCase = true) -> "WhatsApp"
+            obs.packageId.contains("android.gm", ignoreCase = true) -> "Gmail"
+            obs.packageId.contains("facebook.orca", ignoreCase = true) -> "Messenger"
+            obs.packageId.contains("facebook", ignoreCase = true) -> "Facebook"
+            obs.packageId.contains("instagram", ignoreCase = true) -> "Instagram"
+            obs.packageId.contains("linkedin", ignoreCase = true) -> "LinkedIn"
+            obs.packageId.contains("slack", ignoreCase = true) -> "Slack"
+            obs.packageId == "android" -> "Android System"
+            obs.packageId.startsWith("com.android.systemui") -> "System UI"
+            else -> obs.packageId.substringAfterLast('.').replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        }
+
+        val notifCategory = when {
+            obs.isOngoing -> NotificationCategory.OngoingService
+            obs.isGroupSummary -> NotificationCategory.GroupMessage
+            obs.packageId.contains("twitter") || obs.packageId.contains("instagram") -> NotificationCategory.SocialUpdate
+            obs.packageId == "android" || obs.packageId.startsWith("com.android.systemui") -> NotificationCategory.SystemStatus
+            obs.packageId.contains("whatsapp") || obs.packageId.contains("orca") -> NotificationCategory.DirectMessage
+            else -> NotificationCategory.GeneralNotification
+        }
+
+        val convValues = ContentValues().apply {
+            put("conversation_key", obs.conversationId.key)
+            put("account_key", obs.accountId.key)
+            put("title", obs.title ?: obs.senderHint)
+            put("app_name", appName)
+            put("sender_hint", obs.senderHint)
+            put("package_id", obs.packageId)
+            put("latest_snippet", obs.textFragments.lastOrNull() ?: obs.title ?: "")
+            put("category", notifCategory.name)
+            put("coverage", ConversationCoverage.NotificationOnly.name)
+            put("coverage_explanation", coverageExplanation)
+            put("latest_event_at", obs.observedAt.epochMillis)
+            put("observation_count", 1)
+            put("unread_count", if (obs.isRemoved) 0 else 1)
+            put("is_removed", if (obs.isRemoved) 1 else 0)
+        }
+        db.insertWithOnConflict("conversation_summaries", null, convValues, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    /**
+     * Writes one cursor row. Must be called inside an active transaction.
+     */
+    private fun persistCursorRow(db: SQLiteDatabase, cursor: IngestCursor) {
+        val values = ContentValues().apply {
+            put("source", cursor.source)
+            put("last_processed_time_millis", cursor.lastProcessedTimeMillis)
+            put("last_processed_key", cursor.lastProcessedKey)
+            put("processed_count", cursor.processedCount)
+            put("gap_count", cursor.gapCount)
+        }
+        db.insertWithOnConflict("ingest_cursors", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
     @Synchronized

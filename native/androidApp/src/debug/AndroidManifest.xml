@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug-only manifest entries. Merged only for debug builds. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver
+            android:name=".notification.SyntheticNotificationReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="app.mini.hub.POST_SYNTHETIC_NOTIFICATION" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

@@ -12,6 +12,17 @@ import app.mini.hub.observation.ObservedNotification
 sealed class PersistResult {
     data class Success(val id: ScopedId, val revision: Long) : PersistResult()
     data class Error(val message: String) : PersistResult()
+
+    val isSuccess: Boolean get() = this is Success
+    val isError: Boolean get() = this is Error
+}
+
+data class BatchPersistResult(
+    val successCount: Int,
+    val failedCount: Int,
+    val errors: List<String>,
+) {
+    val isFullySuccessful: Boolean get() = failedCount == 0
 }
 
 data class RestartRecoveryReport(
@@ -31,6 +42,30 @@ interface ObservationStore {
     fun checkpointCursor(cursor: IngestCursor)
     fun getCursor(source: String): IngestCursor?
     fun recoverFromRestart(): RestartRecoveryReport
+
+    /**
+     * Atomically persist a batch of observations and checkpoint cursors in a single transaction.
+     * If any write fails, the entire batch is rolled back and no cursors are updated.
+     */
+    fun persistBatchWithCursors(
+        observations: List<ObservedNotification>,
+        cursors: List<IngestCursor>,
+    ): BatchPersistResult
+
+    /**
+     * Atomically persist one observation and checkpoint its cursor in a single transaction.
+     * Returns PersistResult.Error if either write fails (neither is committed).
+     */
+    fun persistObservationWithCursor(
+        observation: ObservedNotification,
+        cursor: IngestCursor,
+    ): PersistResult
+
+    /**
+     * Read back a specific observation by its notification key.
+     * Used for independent verification after writes.
+     */
+    fun getObservationByNotificationKey(notificationKey: String): ObservedNotification?
 }
 
 /**
@@ -45,6 +80,7 @@ class InMemoryObservationStore : ObservationStore {
     private val cursors = mutableMapOf<String, IngestCursor>()
 
     override fun persistObservation(observation: ObservedNotification): PersistResult = synchronized(lock) {
+        simulatedPersistError?.let { return PersistResult.Error(it) }
         observations[observation.id.key] = observation
 
         // Update conversation summary
@@ -109,10 +145,88 @@ class InMemoryObservationStore : ObservationStore {
     override fun persistBatch(observations: List<ObservedNotification>): Int = synchronized(lock) {
         var count = 0
         for (obs in observations) {
-            persistObservation(obs)
-            count++
+            val result = persistObservation(obs)
+            if (result.isSuccess) count++
         }
         count
+    }
+
+    override fun persistBatchWithCursors(
+        observations: List<ObservedNotification>,
+        cursors: List<IngestCursor>,
+    ): BatchPersistResult = synchronized(lock) {
+        // Snapshot for rollback
+        val obsSnapshot = LinkedHashMap(this.observations)
+        val convSnapshot = LinkedHashMap(conversations)
+        val cursorSnapshot = this.cursors.toMutableMap()
+
+        val errors = mutableListOf<String>()
+        var successCount = 0
+
+        try {
+            for (obs in observations) {
+                val result = persistObservation(obs)
+                if (result.isError) {
+                    errors.add((result as PersistResult.Error).message)
+                } else {
+                    successCount++
+                }
+            }
+
+            if (errors.isNotEmpty()) {
+                // Rollback all changes
+                this.observations.clear()
+                this.observations.putAll(obsSnapshot)
+                conversations.clear()
+                conversations.putAll(convSnapshot)
+                this.cursors.clear()
+                this.cursors.putAll(cursorSnapshot)
+                return BatchPersistResult(0, observations.size, errors)
+            }
+
+            for (cursor in cursors) {
+                checkpointCursor(cursor)
+            }
+
+            BatchPersistResult(successCount, 0, emptyList())
+        } catch (e: Throwable) {
+            // Rollback on any exception
+            this.observations.clear()
+            this.observations.putAll(obsSnapshot)
+            conversations.clear()
+            conversations.putAll(convSnapshot)
+            this.cursors.clear()
+            this.cursors.putAll(cursorSnapshot)
+            BatchPersistResult(0, observations.size, listOf(e.message ?: "Unknown error"))
+        }
+    }
+
+    override fun persistObservationWithCursor(
+        observation: ObservedNotification,
+        cursor: IngestCursor,
+    ): PersistResult = synchronized(lock) {
+        val obsSnapshot = LinkedHashMap(this.observations)
+        val convSnapshot = LinkedHashMap(conversations)
+        val cursorSnapshot = this.cursors.toMutableMap()
+
+        val result = persistObservation(observation)
+        if (result.isError) {
+            // Rollback
+            this.observations.clear()
+            this.observations.putAll(obsSnapshot)
+            conversations.clear()
+            conversations.putAll(convSnapshot)
+            this.cursors.clear()
+            this.cursors.putAll(cursorSnapshot)
+            return result
+        }
+
+        checkpointCursor(cursor)
+        result
+    }
+
+    override fun getObservationByNotificationKey(notificationKey: String): ObservedNotification? = synchronized(lock) {
+        observations.values.find { it.notificationKey == notificationKey && !it.isRemoved }
     }
 
     override fun getObservation(id: ScopedId): ObservedNotification? = synchronized(lock) {
@@ -131,6 +245,9 @@ class InMemoryObservationStore : ObservationStore {
             .filter { accountId == null || it.accountId == accountId }
             .sortedByDescending { it.latestEventAt.epochMillis }
     }
+
+    /** Injected error simulation for testing: set to non-null to force persistObservation failures. */
+    var simulatedPersistError: String? = null
 
     override fun markRemoved(notificationKey: String, removedAt: UtcInstant): Int = synchronized(lock) {
         var count = 0

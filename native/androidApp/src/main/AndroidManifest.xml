@@ -28,13 +28,5 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
-
-        <receiver
-            android:name=".notification.SyntheticNotificationReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="app.mini.hub.POST_SYNTHETIC_NOTIFICATION" />
-            </intent-filter>
-        </receiver>
     </application>
 </manifest>

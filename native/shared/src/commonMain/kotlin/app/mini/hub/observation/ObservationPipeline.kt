@@ -243,6 +243,20 @@ class NotificationNormalizer(
  * 4. Removals -> handles dismissal.
  * 5. Group summaries vs child messages.
  */
+/**
+ * Deduplicator that handles:
+ * 1. Exact repeated notification posts -> drops duplicate.
+ * 2. Distinct messages with identical text -> preserves both if postTime/key differs.
+ * 3. Updates to existing notification -> increments revision.
+ * 4. Removals -> handles dismissal.
+ * 5. Group summaries vs child messages.
+ *
+ * Key correctness property: `evaluate()` returns a candidate action without caching.
+ * The caller MUST call `confirmPersisted()` after successful database writes
+ * so the entry is cached and future duplicates are correctly identified.
+ * On write failure, the caller does NOT call `confirmPersisted()`, so the same
+ * notification key remains eligible for retry (not incorrectly marked as a duplicate).
+ */
 class NotificationDeduplicator(
     private val maxCacheEntries: Int = 1000,
 ) {
@@ -256,6 +270,10 @@ class NotificationDeduplicator(
         data class Remove(val notificationKey: String) : DedupeAction()
     }
 
+    /**
+     * Evaluate a normalized notification and return the appropriate action.
+     * Does NOT cache the entry. The caller must call [confirmPersisted] after a successful write.
+     */
     fun evaluate(normalized: ObservedNotification): DedupeAction = synchronized(lock) {
         if (normalized.isRemoved) {
             recentNotifications.remove(normalized.notificationKey)
@@ -264,7 +282,7 @@ class NotificationDeduplicator(
 
         val existing = recentNotifications[normalized.notificationKey]
         if (existing == null) {
-            put(normalized)
+            // Do NOT cache here -- wait for confirmPersisted
             return DedupeAction.Insert(normalized)
         }
 
@@ -278,8 +296,16 @@ class NotificationDeduplicator(
             id = existing.id,
             revision = existing.revision + 1L,
         )
-        put(updated)
+        // Do NOT cache here -- wait for confirmPersisted
         return DedupeAction.Update(updated, existing.revision)
+    }
+
+    /**
+     * Confirm that the observation was successfully persisted to the database.
+     * Only after this call will the entry be cached for future deduplication.
+     */
+    fun confirmPersisted(obs: ObservedNotification): Unit = synchronized(lock) {
+        put(obs)
     }
 
     private fun put(obs: ObservedNotification) {

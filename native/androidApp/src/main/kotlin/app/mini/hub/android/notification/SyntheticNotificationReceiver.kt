@@ -34,6 +34,12 @@ class SyntheticNotificationReceiver : BroadcastReceiver() {
         val notifId = intent.getIntExtra(EXTRA_ID, 1001)
 
         val key = "app.mini.hub_${notifId}_synthetic_test"
+
+        // Record SourcePublished with the SAME key the NotificationListenerService will use.
+        // The listener constructs key as sbn.key which for NotificationManager.notify(tag, id, ...)
+        // becomes "<package>|<tag>|<id>". We use the same tag "synthetic_test" and the same id,
+        // so the listener key will be derived by the OS. We record our own explicit key for the
+        // synthetic path only.
         MiniHubRuntime.ledger.record(key, app.mini.hub.observation.PipelineStage.SourcePublished, System.currentTimeMillis())
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
