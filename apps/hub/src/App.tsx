@@ -41,7 +41,7 @@ export function App() {
 
   async function approveAndQueue() {
     if (!selected || !latestDraft) return;
-    const { approval, command } = await approveDraft(latestDraft, selected.account.capabilities.policyVersion, selected.account.grants.join('+') || 'no-grants', demoNow);
+    const { approval, command } = await approveDraft(latestDraft, selected.account, demoNow);
     setState((current) => ({
       ...current,
       approvals: [...current.approvals, approval],

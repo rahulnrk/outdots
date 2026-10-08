@@ -8,6 +8,7 @@ import {
   dispatchOutbox,
   effectivePriority,
   evaluateReplyEligibility,
+  grantVersionFor,
   retrieveContext,
   reviewPayloadFromDraft,
   setPriorityOverride
@@ -88,7 +89,7 @@ describe('drafting and approval', () => {
     const account = state.accounts[0];
     const context = retrieveContext(state, 'conv-gmail-1');
     const draft = createDraft(state, account, 'conv-gmail-1', context, { stance: 'accept', price: '₹80,000', date: 'Friday' }, now);
-    const { approval, command } = await approveDraft(draft, account.capabilities.policyVersion, 'grants-v1', now);
+    const { approval, command } = await approveDraft(draft, account, now);
     const readyState = { ...state, drafts: [draft], approvals: [approval], outbox: [command] };
     const gateway = { send: async () => ({ kind: 'accepted' as const, receipt: 'gmail-msg-once' }) };
 
@@ -106,7 +107,7 @@ describe('drafting and approval', () => {
     const account = state.accounts[0];
     const context = retrieveContext(state, 'conv-gmail-1');
     const draft = createDraft(state, account, 'conv-gmail-1', context, { stance: 'accept', price: '₹80,000', date: 'Friday' }, now);
-    const { approval, command } = await approveDraft(draft, account.capabilities.policyVersion, 'grants-v1', now);
+    const { approval, command } = await approveDraft(draft, account, now);
     const tamperedState = {
       ...state,
       drafts: [{ ...draft, body: `${draft.body}\nP.S. changed after approval` }],
@@ -127,8 +128,8 @@ describe('drafting and approval', () => {
     const context = retrieveContext(state, 'conv-gmail-1');
     const first = createDraft(state, account, 'conv-gmail-1', context, { stance: 'accept', price: '₹80,000', date: 'Friday' }, now);
     const second = createDraft(state, account, 'conv-gmail-1', context, { stance: 'counter', price: '₹90,000', date: 'Monday' }, now);
-    const firstApproval = await approveDraft(first, account.capabilities.policyVersion, 'grants-v1', now);
-    const secondApproval = await approveDraft(second, account.capabilities.policyVersion, 'grants-v1', now);
+    const firstApproval = await approveDraft(first, account, now);
+    const secondApproval = await approveDraft(second, account, now);
 
     expect(secondApproval.command.id).not.toBe(firstApproval.command.id);
     expect(secondApproval.approval.id).not.toBe(firstApproval.approval.id);
@@ -139,7 +140,7 @@ describe('drafting and approval', () => {
     const account = state.accounts[0];
     const context = retrieveContext(state, 'conv-gmail-1');
     const draft = createDraft(state, account, 'conv-gmail-1', context, { stance: 'accept', price: '₹80,000', date: 'Friday' }, now);
-    const { approval, command } = await approveDraft(draft, account.capabilities.policyVersion, 'grants-v1', now);
+    const { approval, command } = await approveDraft(draft, account, now);
     const readyState = { ...state, drafts: [draft], approvals: [approval], outbox: [command] };
 
     const result = await dispatchOutbox(readyState, command.id, '2026-10-08T12:00:30.000Z');
@@ -154,7 +155,7 @@ describe('drafting and approval', () => {
     const account = state.accounts[0];
     const context = retrieveContext(state, 'conv-gmail-1');
     const draft = createDraft(state, account, 'conv-gmail-1', context, { stance: 'accept', price: '₹80,000', date: 'Friday' }, now);
-    const { approval, command } = await approveDraft(draft, account.capabilities.policyVersion, 'grants-v1', now);
+    const { approval, command } = await approveDraft(draft, account, now);
     const readyState = { ...state, drafts: [draft], approvals: [approval], outbox: [command] };
     const gateway = { send: async () => ({ kind: 'accepted' as const, receipt: 'gmail-msg-test-id' }) };
 
@@ -170,7 +171,7 @@ describe('drafting and approval', () => {
     const account = state.accounts[0];
     const context = retrieveContext(state, 'conv-gmail-1');
     const draft = createDraft(state, account, 'conv-gmail-1', context, { stance: 'accept', price: '₹80,000', date: 'Friday' }, now);
-    const { approval, command } = await approveDraft(draft, account.capabilities.policyVersion, 'grants-v1', now);
+    const { approval, command } = await approveDraft(draft, account, now);
     const readyState = { ...state, drafts: [draft], approvals: [approval], outbox: [command] };
     let calls = 0;
     const gateway = { send: async () => { calls += 1; return { kind: 'unknown' as const, reason: 'timeout' }; } };
@@ -184,12 +185,36 @@ describe('drafting and approval', () => {
     expect(calls).toBe(1);
   });
 
+  it('blocks dispatch when a send grant is revoked after approval', async () => {
+    const state = createDemoState();
+    const account = state.accounts[0];
+    const context = retrieveContext(state, 'conv-gmail-1');
+    const draft = createDraft(state, account, 'conv-gmail-1', context, { stance: 'accept', price: '₹80,000', date: 'Friday' }, now);
+    const { approval, command } = await approveDraft(draft, account, now);
+    const revokedAccount = { ...account, grants: account.grants.filter((grant) => grant !== 'send') };
+    const revokedState = {
+      ...state,
+      accounts: state.accounts.map((item) => item.id === account.id ? revokedAccount : item),
+      drafts: [draft],
+      approvals: [approval],
+      outbox: [command]
+    };
+    const gateway = { send: async () => ({ kind: 'accepted' as const, receipt: 'must-not-send' }) };
+
+    const result = await dispatchOutbox(revokedState, command.id, '2026-10-08T12:00:30.000Z', { gateway });
+
+    expect(result.outbox[0].state).toBe('expired_or_invalidated');
+    expect(result.outbox[0].failureReason).toBe('policy_or_grants_changed_since_approval');
+    expect(result.outbox[0].receipt).toBeUndefined();
+    expect(result.approvals[0].consumed).toBe(false);
+  });
+
   it('rechecks current route capability before dispatching', async () => {
     const state = createDemoState();
     const account = state.accounts[0];
     const context = retrieveContext(state, 'conv-gmail-1');
     const draft = createDraft(state, account, 'conv-gmail-1', context, { stance: 'accept', price: '₹80,000', date: 'Friday' }, now);
-    const { approval, command } = await approveDraft(draft, account.capabilities.policyVersion, 'grants-v1', now);
+    const { approval, command } = await approveDraft(draft, account, now);
     const revokedState = {
       ...state,
       accounts: state.accounts.map((item) => item.id === account.id ? { ...item, capabilities: { ...item.capabilities, sendRoutes: [] } } : item),

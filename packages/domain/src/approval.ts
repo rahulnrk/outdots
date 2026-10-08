@@ -40,11 +40,13 @@ export async function digestReviewPayload(payload: ReviewPayload): Promise<strin
   return `fallback-${(hash >>> 0).toString(16)}`;
 }
 
-export async function approveDraft(draft: Draft, policyVersion: string, grantVersion: string, now: string): Promise<{ approval: Approval; command: OutboxCommand }> {
+export async function approveDraft(draft: Draft, account: Account, now: string): Promise<{ approval: Approval; command: OutboxCommand }> {
   if (draft.status !== 'ready_for_review') {
     throw new Error('Only review-ready drafts can be approved.');
   }
 
+  const policyVersion = account.capabilities.policyVersion;
+  const grantVersion = grantVersionFor(account);
   const digest = await digestReviewPayload(reviewPayloadFromDraft(draft, policyVersion, grantVersion));
   const expiresAt = new Date(Date.parse(now) + 2 * 60 * 1000).toISOString();
   const approval: Approval = {
@@ -102,6 +104,10 @@ function accountForDraft(state: HubState, draft: Draft): Account | undefined {
   return state.accounts.find((item) => item.id === draft.accountId);
 }
 
+export function grantVersionFor(account: Account): string {
+  return `grants:${[...account.grants].sort().join('+') || 'none'}`;
+}
+
 export interface DispatchOptions {
   gateway?: ProviderGateway;
 }
@@ -119,6 +125,12 @@ export async function dispatchOutbox(state: HubState, commandId: string, now: st
   const account = accountForDraft(state, draft);
   if (!account) {
     return failCommand(state, commandId, 'expired_or_invalidated', 'account_missing_for_approved_command', now);
+  }
+
+  const currentPolicy = account.capabilities.policyVersion;
+  const currentGrants = grantVersionFor(account);
+  if (currentPolicy !== command.policyVersion || currentGrants !== command.grantVersion) {
+    return failCommand(state, commandId, 'expired_or_invalidated', 'policy_or_grants_changed_since_approval', now);
   }
 
   const currentDigest = await digestReviewPayload(reviewPayloadFromDraft(draft, command.policyVersion, command.grantVersion));
