@@ -4,7 +4,6 @@ import {
   buildInbox,
   createDemoState,
   createDraft,
-  demoNow,
   dispatchOutbox,
   evaluateReplyEligibility,
   retrieveContext,
@@ -13,12 +12,13 @@ import {
   type HubState,
   type Priority
 } from '@mini/domain';
+import { systemClock, type Clock } from './clock';
 
 function formatTime(value: string): string {
   return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' }).format(new Date(value));
 }
 
-export function App() {
+export function App({ clock = systemClock }: { clock?: Clock } = {}) {
   const [state, setState] = useState<HubState>(() => createDemoState());
   const inbox = useMemo(() => buildInbox(state), [state]);
   const [selectedId, setSelectedId] = useState(inbox[0]?.conversation.id ?? '');
@@ -31,17 +31,17 @@ export function App() {
     .filter((message) => message.conversationId === selected.conversation.id && message.direction === 'inbound')
     .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))[0] : undefined;
   const route = selected?.account.capabilities.sendRoutes.includes('api') ? 'api' : 'native_handoff';
-  const eligibility = selected ? evaluateReplyEligibility(selected.account, route, demoNow, latestInbound?.occurredAt) : undefined;
+  const eligibility = selected ? evaluateReplyEligibility(selected.account, route, clock(), latestInbound?.occurredAt) : undefined;
 
   function generateDraft() {
     if (!selected || !context) return;
-    const draft = createDraft(state, selected.account, selected.conversation.id, context, intent, demoNow);
+    const draft = createDraft(state, selected.account, selected.conversation.id, context, intent, clock());
     setState((current) => ({ ...current, drafts: [...current.drafts.filter((item) => item.id !== draft.id), draft] }));
   }
 
   async function approveAndQueue() {
     if (!selected || !latestDraft) return;
-    const { approval, command } = await approveDraft(latestDraft, selected.account, demoNow);
+    const { approval, command } = await approveDraft(latestDraft, selected.account, clock());
     setState((current) => ({
       ...current,
       approvals: [...current.approvals, approval],
@@ -52,12 +52,12 @@ export function App() {
 
   async function dispatch() {
     if (!latestCommand) return;
-    setState(await dispatchOutbox(state, latestCommand.id, '2026-10-08T12:00:30.000Z'));
+    setState(await dispatchOutbox(state, latestCommand.id, clock()));
   }
 
   function overridePriority(priority: Priority) {
     if (!selected) return;
-    setState((current) => setPriorityOverride(current, selected.conversation.id, priority, 'User marked from hub UI', demoNow));
+    setState((current) => setPriorityOverride(current, selected.conversation.id, priority, 'User marked from hub UI', clock()));
   }
 
   return (
