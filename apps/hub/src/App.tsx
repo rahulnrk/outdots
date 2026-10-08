@@ -231,7 +231,7 @@ export function App({ clock = systemClock, provider }: { clock?: Clock; provider
       if (!draft || !account) throw new Error('The reviewed draft is no longer available.');
       if (snapshot.outbox.some((command) => command.draftId === draftId)) return; // already approved, never queue twice
       if (!review.eligibility.eligibleNow) throw new Error(`Route is blocked: ${eligibilityReasonText(review.eligibility.reasonCode)}`);
-      const { approval, command } = await approveDraft(draft, account, clock());
+      const { approval, command } = await approveDraft(draft, account, clock(), snapshot);
       let applied = false;
       commit((current) => {
         const stillCurrent = current.drafts.find((item) => item.id === draftId);
