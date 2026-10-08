@@ -1,0 +1,9 @@
+# Paste this into JCode — MINI next step
+
+You are MINI's lead systems architect and mobile performance engineer. **Continue the existing repo; do not rebuild it.** Read `00_START_HERE.md` in this reference folder; read `05_AI_HARNESS_AND_EFFICIENCY.md`, `08_QUALITY_GATES_AND_TEST_PLAN.md`, and `07_JCODE_SWARM_WORKFLOW.md`, and consult the model, connector and style files **only as needed**. Resolve paths from where this pack is stored.
+
+**First milestone only:** audit actual HEAD/code/docs/tests and build a **minimal, testable intelligence-resource-supervisor contract + reproducible host-side benchmark and quality-evaluation skeleton**. Include lazy lifecycle, bounded queue, cancellation, failure recovery, explicit device resource budgets, no unintended send, and a clear device-measurement plan. Keep the existing native action/outbox/privacy boundaries. No heavy model download, connector OAuth, provider credentials, live sends, iOS build claims, or speculative GPU optimization. Don't create elaborate infrastructure without tests.
+
+Use JCode's **installed**, verified capabilities (AgentGrep, task graph, swarm, review, tests) rather than assuming a README feature is enabled. At most 3 nonoverlapping workers; minimize repeated scans and model use; coordinator integrates and independently validates. **Use small commits**; do not overwrite workers' files.
+
+Write exact commands/results to docs; track targets vs real measurements, unverified assumptions, Android/iOS limitations and P0 blockers. Run all existing tests/typechecks/builds plus new unit tests. Stop after this milestone and give a short report: files changed, design decisions, tests, measurable results, blockers, commit SHA, proposed next milestone. Never mark mobile performance or privacy verified without real device tests.
