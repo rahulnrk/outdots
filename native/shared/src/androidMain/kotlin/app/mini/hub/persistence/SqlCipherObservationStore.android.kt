@@ -40,93 +40,94 @@ class SqlCipherObservationStore(
     var isFts5Supported: Boolean = false
         private set
 
-    init {
+    private val database: SQLiteDatabase by lazy {
         databaseFile.parentFile?.mkdirs()
         SqlCipherObservationRuntime.ensureLoaded()
-        open().use { database ->
-            database.execSQL(SCHEMA_OBSERVATIONS)
-            database.execSQL(SCHEMA_OBSERVATIONS_INDEX_CONV)
-            database.execSQL(SCHEMA_OBSERVATIONS_INDEX_KEY)
-            database.execSQL(SCHEMA_CONVERSATIONS)
-            database.execSQL(SCHEMA_CURSORS)
+        val db = SQLiteDatabase.openOrCreateDatabase(
+            databaseFile,
+            keyEnvelope.databaseKey(),
+            null,
+            null,
+            null,
+        )
+        db.execSQL(SCHEMA_OBSERVATIONS)
+        db.execSQL(SCHEMA_OBSERVATIONS_INDEX_CONV)
+        db.execSQL(SCHEMA_OBSERVATIONS_INDEX_KEY)
+        db.execSQL(SCHEMA_CONVERSATIONS)
+        db.execSQL(SCHEMA_CURSORS)
 
-            // Probe FTS5 capability safely
-            isFts5Supported = try {
-                database.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS _fts_probe USING fts5(content);")
-                database.execSQL("DROP TABLE IF EXISTS _fts_probe;")
-                true
-            } catch (_: Throwable) {
-                false
-            }
+        // Probe FTS5 capability safely
+        isFts5Supported = try {
+            db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS _fts_probe USING fts5(content);")
+            db.execSQL("DROP TABLE IF EXISTS _fts_probe;")
+            true
+        } catch (_: Throwable) {
+            false
         }
+        db
     }
 
-    private fun open(): SQLiteDatabase = SQLiteDatabase.openOrCreateDatabase(
-        databaseFile,
-        keyEnvelope.databaseKey(),
-        null,
-        null,
-        null,
-    )
+    init {
+        // Force lazy initialization
+        database
+    }
 
     @Synchronized
     override fun persistObservation(observation: ObservedNotification): PersistResult {
         return try {
-            open().use { database ->
-                database.beginTransaction()
-                try {
-                    val values = ContentValues().apply {
-                        put("id", observation.id.key)
-                        put("account_key", observation.accountId.key)
-                        put("conversation_key", observation.conversationId.key)
-                        put("package_id", observation.packageId)
-                        put("notification_key", observation.notificationKey)
-                        put("notification_id", observation.notificationId)
-                        put("tag", observation.tag)
-                        put("sender_hint", observation.senderHint)
-                        put("title", observation.title)
-                        put("text_fragments_json", observation.textFragments.joinToString("\u001F"))
-                        put("raw_text_digest", observation.rawTextDigest)
-                        put("observed_at", observation.observedAt.epochMillis)
-                        put("post_time", observation.postTime.epochMillis)
-                        put("revision", observation.revision)
-                        put("is_removed", if (observation.isRemoved) 1 else 0)
-                        put("is_group_summary", if (observation.isGroupSummary) 1 else 0)
-                        put("truncation_state", observation.truncationState.name)
-                        put("correlation_confidence", observation.correlationConfidence.name)
-                        put("provenance", observation.provenance.name)
-                    }
-                    database.insertWithOnConflict("notification_observations", null, values, SQLiteDatabase.CONFLICT_REPLACE)
-
-                    val cursorGap = getCursor(observation.packageId)?.gapCount ?: 0L
-                    val coverageExplanation = if (cursorGap > 0L) {
-                        "Observed via Android notifications only ($cursorGap dropped events due to backpressure). Prior history is not visible."
-                    } else {
-                        "Observed via Android notifications only. Prior history and out-of-band replies are not visible."
-                    }
-
-                    // Update or insert conversation summary
-                    val convValues = ContentValues().apply {
-                        put("conversation_key", observation.conversationId.key)
-                        put("account_key", observation.accountId.key)
-                        put("title", observation.title ?: observation.senderHint)
-                        put("sender_hint", observation.senderHint)
-                        put("package_id", observation.packageId)
-                        put("latest_snippet", observation.textFragments.lastOrNull() ?: observation.title ?: "")
-                        put("coverage", ConversationCoverage.NotificationOnly.name)
-                        put("coverage_explanation", coverageExplanation)
-                        put("latest_event_at", observation.observedAt.epochMillis)
-                        put("observation_count", 1) // Increment handled on query or aggregate
-                        put("unread_count", if (observation.isRemoved) 0 else 1)
-                        put("is_removed", if (observation.isRemoved) 1 else 0)
-                    }
-                    database.insertWithOnConflict("conversation_summaries", null, convValues, SQLiteDatabase.CONFLICT_REPLACE)
-
-                    database.setTransactionSuccessful()
-                    PersistResult.Success(observation.id, observation.revision)
-                } finally {
-                    database.endTransaction()
+            database.beginTransaction()
+            try {
+                val values = ContentValues().apply {
+                    put("id", observation.id.key)
+                    put("account_key", observation.accountId.key)
+                    put("conversation_key", observation.conversationId.key)
+                    put("package_id", observation.packageId)
+                    put("notification_key", observation.notificationKey)
+                    put("notification_id", observation.notificationId)
+                    put("tag", observation.tag)
+                    put("sender_hint", observation.senderHint)
+                    put("title", observation.title)
+                    put("text_fragments_json", observation.textFragments.joinToString("\u001F"))
+                    put("raw_text_digest", observation.rawTextDigest)
+                    put("observed_at", observation.observedAt.epochMillis)
+                    put("post_time", observation.postTime.epochMillis)
+                    put("revision", observation.revision)
+                    put("is_removed", if (observation.isRemoved) 1 else 0)
+                    put("is_group_summary", if (observation.isGroupSummary) 1 else 0)
+                    put("truncation_state", observation.truncationState.name)
+                    put("correlation_confidence", observation.correlationConfidence.name)
+                    put("provenance", observation.provenance.name)
                 }
+                database.insertWithOnConflict("notification_observations", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+
+                val cursorGap = queryCursorGap(database, observation.packageId)
+                val coverageExplanation = if (cursorGap > 0L) {
+                    "Observed via Android notifications only ($cursorGap dropped events due to backpressure). Prior history is not visible."
+                } else {
+                    "Observed via Android notifications only. Prior history and out-of-band replies are not visible."
+                }
+
+                // Update or insert conversation summary
+                val convValues = ContentValues().apply {
+                    put("conversation_key", observation.conversationId.key)
+                    put("account_key", observation.accountId.key)
+                    put("title", observation.title ?: observation.senderHint)
+                    put("sender_hint", observation.senderHint)
+                    put("package_id", observation.packageId)
+                    put("latest_snippet", observation.textFragments.lastOrNull() ?: observation.title ?: "")
+                    put("coverage", ConversationCoverage.NotificationOnly.name)
+                    put("coverage_explanation", coverageExplanation)
+                    put("latest_event_at", observation.observedAt.epochMillis)
+                    put("observation_count", 1) // Increment handled on query or aggregate
+                    put("unread_count", if (observation.isRemoved) 0 else 1)
+                    put("is_removed", if (observation.isRemoved) 1 else 0)
+                }
+                database.insertWithOnConflict("conversation_summaries", null, convValues, SQLiteDatabase.CONFLICT_REPLACE)
+
+                database.setTransactionSuccessful()
+                PersistResult.Success(observation.id, observation.revision)
+            } finally {
+                database.endTransaction()
             }
         } catch (e: Throwable) {
             PersistResult.Error(e.message ?: e::class.simpleName ?: "Database error")
@@ -135,38 +136,34 @@ class SqlCipherObservationStore(
 
     @Synchronized
     override fun getObservation(id: ScopedId): ObservedNotification? {
-        return open().use { database ->
-            database.query(
-                "notification_observations",
-                null,
-                "id = ?",
-                arrayOf(id.key),
-                null,
-                null,
-                null,
-            ).use { cursor ->
-                if (cursor.moveToFirst()) mapObservation(cursor) else null
-            }
+        return database.query(
+            "notification_observations",
+            null,
+            "id = ?",
+            arrayOf(id.key),
+            null,
+            null,
+            null,
+        ).use { cursor ->
+            if (cursor.moveToFirst()) mapObservation(cursor) else null
         }
     }
 
     @Synchronized
     override fun getObservationsForConversation(conversationId: ScopedId, limit: Int): List<ObservedNotification> {
-        return open().use { database ->
-            database.query(
-                "notification_observations",
-                null,
-                "conversation_key = ?",
-                arrayOf(conversationId.key),
-                null,
-                null,
-                "observed_at DESC",
-                limit.toString(),
-            ).use { cursor ->
-                buildList {
-                    while (cursor.moveToNext()) {
-                        add(mapObservation(cursor))
-                    }
+        return database.query(
+            "notification_observations",
+            null,
+            "conversation_key = ?",
+            arrayOf(conversationId.key),
+            null,
+            null,
+            "observed_at DESC",
+            limit.toString(),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(mapObservation(cursor))
                 }
             }
         }
@@ -174,38 +171,36 @@ class SqlCipherObservationStore(
 
     @Synchronized
     override fun getConversationSummaries(accountId: AccountId?): List<ConversationObservationSummary> {
-        return open().use { database ->
-            val selection = if (accountId != null) "account_key = ?" else null
-            val selectionArgs = if (accountId != null) arrayOf(accountId.key) else null
+        val selection = if (accountId != null) "account_key = ?" else null
+        val selectionArgs = if (accountId != null) arrayOf(accountId.key) else null
 
-            database.query(
-                "conversation_summaries",
-                null,
-                selection,
-                selectionArgs,
-                null,
-                null,
-                "latest_event_at DESC",
-            ).use { cursor ->
-                buildList {
-                    while (cursor.moveToNext()) {
-                        add(
-                            ConversationObservationSummary(
-                                conversationId = ScopedId.parse(cursor.getString(cursor.getColumnIndexOrThrow("conversation_key"))),
-                                accountId = AccountId.parse(cursor.getString(cursor.getColumnIndexOrThrow("account_key"))),
-                                title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
-                                senderHint = cursor.getString(cursor.getColumnIndexOrThrow("sender_hint")),
-                                packageId = cursor.getString(cursor.getColumnIndexOrThrow("package_id")),
-                                latestSnippet = cursor.getString(cursor.getColumnIndexOrThrow("latest_snippet")),
-                                coverage = ConversationCoverage.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("coverage"))),
-                                coverageExplanation = cursor.getString(cursor.getColumnIndexOrThrow("coverage_explanation")),
-                                latestEventAt = UtcInstant(cursor.getLong(cursor.getColumnIndexOrThrow("latest_event_at"))),
-                                observationCount = cursor.getInt(cursor.getColumnIndexOrThrow("observation_count")),
-                                unreadCount = cursor.getInt(cursor.getColumnIndexOrThrow("unread_count")),
-                                isRemoved = cursor.getInt(cursor.getColumnIndexOrThrow("is_removed")) != 0,
-                            ),
-                        )
-                    }
+        return database.query(
+            "conversation_summaries",
+            null,
+            selection,
+            selectionArgs,
+            null,
+            null,
+            "latest_event_at DESC",
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        ConversationObservationSummary(
+                            conversationId = ScopedId.parse(cursor.getString(cursor.getColumnIndexOrThrow("conversation_key"))),
+                            accountId = AccountId.parse(cursor.getString(cursor.getColumnIndexOrThrow("account_key"))),
+                            title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
+                            senderHint = cursor.getString(cursor.getColumnIndexOrThrow("sender_hint")),
+                            packageId = cursor.getString(cursor.getColumnIndexOrThrow("package_id")),
+                            latestSnippet = cursor.getString(cursor.getColumnIndexOrThrow("latest_snippet")),
+                            coverage = ConversationCoverage.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("coverage"))),
+                            coverageExplanation = cursor.getString(cursor.getColumnIndexOrThrow("coverage_explanation")),
+                            latestEventAt = UtcInstant(cursor.getLong(cursor.getColumnIndexOrThrow("latest_event_at"))),
+                            observationCount = cursor.getInt(cursor.getColumnIndexOrThrow("observation_count")),
+                            unreadCount = cursor.getInt(cursor.getColumnIndexOrThrow("unread_count")),
+                            isRemoved = cursor.getInt(cursor.getColumnIndexOrThrow("is_removed")) != 0,
+                        ),
+                    )
                 }
             }
         }
@@ -213,74 +208,80 @@ class SqlCipherObservationStore(
 
     @Synchronized
     override fun markRemoved(notificationKey: String, removedAt: UtcInstant): Int {
-        return open().use { database ->
-            val values = ContentValues().apply {
-                put("is_removed", 1)
-            }
-            database.update(
-                "notification_observations",
-                values,
-                "notification_key = ?",
-                arrayOf(notificationKey),
-            )
+        val values = ContentValues().apply {
+            put("is_removed", 1)
         }
+        return database.update(
+            "notification_observations",
+            values,
+            "notification_key = ?",
+            arrayOf(notificationKey),
+        )
     }
 
     @Synchronized
     override fun checkpointCursor(cursor: IngestCursor) {
-        open().use { database ->
-            val values = ContentValues().apply {
-                put("source", cursor.source)
-                put("last_processed_time_millis", cursor.lastProcessedTimeMillis)
-                put("last_processed_key", cursor.lastProcessedKey)
-                put("processed_count", cursor.processedCount)
-                put("gap_count", cursor.gapCount)
-            }
-            database.insertWithOnConflict("ingest_cursors", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        val values = ContentValues().apply {
+            put("source", cursor.source)
+            put("last_processed_time_millis", cursor.lastProcessedTimeMillis)
+            put("last_processed_key", cursor.lastProcessedKey)
+            put("processed_count", cursor.processedCount)
+            put("gap_count", cursor.gapCount)
         }
+        database.insertWithOnConflict("ingest_cursors", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
     @Synchronized
     override fun getCursor(source: String): IngestCursor? {
-        return open().use { database ->
-            database.query(
-                "ingest_cursors",
-                null,
-                "source = ?",
-                arrayOf(source),
-                null,
-                null,
-                null,
-            ).use { cursor ->
-                if (cursor.moveToFirst()) {
-                    IngestCursor(
-                        source = cursor.getString(cursor.getColumnIndexOrThrow("source")),
-                        lastProcessedTimeMillis = cursor.getLong(cursor.getColumnIndexOrThrow("last_processed_time_millis")),
-                        lastProcessedKey = cursor.getString(cursor.getColumnIndexOrThrow("last_processed_key")),
-                        processedCount = cursor.getLong(cursor.getColumnIndexOrThrow("processed_count")),
-                        gapCount = cursor.getLong(cursor.getColumnIndexOrThrow("gap_count")),
-                    )
-                } else null
-            }
+        return database.query(
+            "ingest_cursors",
+            null,
+            "source = ?",
+            arrayOf(source),
+            null,
+            null,
+            null,
+        ).use { cursor ->
+            if (cursor.moveToFirst()) {
+                IngestCursor(
+                    source = cursor.getString(cursor.getColumnIndexOrThrow("source")),
+                    lastProcessedTimeMillis = cursor.getLong(cursor.getColumnIndexOrThrow("last_processed_time_millis")),
+                    lastProcessedKey = cursor.getString(cursor.getColumnIndexOrThrow("last_processed_key")),
+                    processedCount = cursor.getLong(cursor.getColumnIndexOrThrow("processed_count")),
+                    gapCount = cursor.getLong(cursor.getColumnIndexOrThrow("gap_count")),
+                )
+            } else null
         }
     }
 
     @Synchronized
     override fun recoverFromRestart(): RestartRecoveryReport {
-        return open().use { database ->
-            var obsCount = 0
-            var convCount = 0
-            database.rawQuery("SELECT COUNT(*) FROM notification_observations", null).use {
-                if (it.moveToFirst()) obsCount = it.getInt(0)
-            }
-            database.rawQuery("SELECT COUNT(*) FROM conversation_summaries", null).use {
-                if (it.moveToFirst()) convCount = it.getInt(0)
-            }
-            RestartRecoveryReport(
-                totalObservations = obsCount,
-                totalConversations = convCount,
-                lastCursor = null,
-            )
+        var obsCount = 0
+        var convCount = 0
+        database.rawQuery("SELECT COUNT(*) FROM notification_observations", null).use {
+            if (it.moveToFirst()) obsCount = it.getInt(0)
+        }
+        database.rawQuery("SELECT COUNT(*) FROM conversation_summaries", null).use {
+            if (it.moveToFirst()) convCount = it.getInt(0)
+        }
+        return RestartRecoveryReport(
+            totalObservations = obsCount,
+            totalConversations = convCount,
+            lastCursor = null,
+        )
+    }
+
+    private fun queryCursorGap(db: SQLiteDatabase, source: String): Long {
+        return db.query(
+            "ingest_cursors",
+            arrayOf("gap_count"),
+            "source = ?",
+            arrayOf(source),
+            null,
+            null,
+            null,
+        ).use { cursor ->
+            if (cursor.moveToFirst()) cursor.getLong(0) else 0L
         }
     }
 

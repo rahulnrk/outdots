@@ -38,43 +38,43 @@ class SqlCipherActionStore(
     // Device migration, key invalidation and restart tests are still required before qualification.
     override val qualification: StorageQualification = StorageQualification.SqlCipherAndroidKeystorePending
 
-    init {
+    private val database: SQLiteDatabase by lazy {
         databaseFile.parentFile?.mkdirs()
         SqlCipherRuntime.ensureLoaded()
-        open().use { database ->
-            database.execSQL(SCHEMA_APPROVALS)
-            database.execSQL(SCHEMA_OUTBOX)
-        }
+        val db = SQLiteDatabase.openOrCreateDatabase(
+            databaseFile,
+            keyEnvelope.databaseKey(),
+            null,
+            null,
+            null,
+        )
+        db.execSQL(SCHEMA_APPROVALS)
+        db.execSQL(SCHEMA_OUTBOX)
+        db
+    }
+
+    init {
+        database
     }
 
     @Synchronized
-    override fun snapshot(): ActionState = open().use(::readState)
+    override fun snapshot(): ActionState = readState(database)
 
     @Synchronized
     override fun transaction(update: (ActionState) -> ActionState): ActionState {
-        open().use { database ->
-            database.beginTransaction()
-            try {
-                val next = update(readState(database))
-                replaceState(database, next)
-                database.setTransactionSuccessful()
-                return next
-            } finally {
-                database.endTransaction()
-            }
+        database.beginTransaction()
+        try {
+            val next = update(readState(database))
+            replaceState(database, next)
+            database.setTransactionSuccessful()
+            return next
+        } finally {
+            database.endTransaction()
         }
     }
 
     @Synchronized
     override fun recoverInterrupted(controller: ActionController): ActionState = transaction(controller::recoverInterrupted)
-
-    private fun open(): SQLiteDatabase = SQLiteDatabase.openOrCreateDatabase(
-        databaseFile,
-        keyEnvelope.databaseKey(),
-        null,
-        null,
-        null,
-    )
 
     private fun readState(database: SQLiteDatabase): ActionState {
         val approvals = database.query(

@@ -13,11 +13,13 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 | `npm run build` | Pass: all workspaces, Vite bundle 192.88 kB JS / 60.40 kB gzip |
 | `native\\gradlew.bat test` | Pass: 40 unit tests (35 JVM in shared, 5 Android unit tests in androidApp) |
 | `native\\gradlew.bat assembleDebug` | Pass: debug APK built (29,720,000+ bytes) packaging Jetpack Compose UI, `MiniHubRuntime`, `MiniNotificationListenerService`, and `libsqlcipher.so` |
+| `adb install -r androidApp-debug.apk` on `Pixel 10 Pro` (`56270DLCH000KZ`, Android 16 / API 36, arm64-v8a) | Pass: Streamed install succeeded |
+| `adb shell cmd notification allow_listener ...` on Pixel 10 Pro | Pass: Notification listener permission and restricted settings access granted |
+| `adb shell am start -n app.mini.hub/.android.MainActivity` on Pixel 10 Pro | Pass: MainActivity launched, Compose UI initialized, arm64 `libsqlcipher.so` loaded, Keystore encryption envelope verified, SQLCipher database keying code 0 |
+| `adb shell dumpsys meminfo app.mini.hub` on Pixel 10 Pro | Pass: Live physical device memory footprint = 93.0 MB Total PSS (Java Heap 7.8 MB, Native Heap 8.0 MB, Graphics 33.4 MB), well within Tier 1 budget |
+| `adb shell am force-stop ... && am start ...` on Pixel 10 Pro | Pass: Clean process termination and restart; Keystore key envelope decrypted, SQLCipher database re-opened with keying code 0 |
 | `adb install -r androidApp-debug.apk` on `emulator-5554` (API 34 x86_64) | Pass: Streamed install succeeded |
-| `adb shell cmd notification allow_listener ...` | Pass: NotificationListenerService permission granted via system manager |
-| `adb shell am start -n app.mini.hub/.android.MainActivity` | Pass: MainActivity launched, Compose UI initialized, SQLCipher database keying returned 0 |
-| `adb shell dumpsys meminfo app.mini.hub` | Pass: Total PSS = 58.2 MB (Java Heap = 9.4 MB, Native Heap = 14.8 MB), within Tier 1 512 MB budget |
-| `adb shell am force-stop ... && am start ...` (Process restart recovery) | Pass: App force-stopped and relaunched; Keystore key envelope decrypted, SQLCipher reopened cleanly with keying code 0 |
+| `adb shell dumpsys meminfo app.mini.hub` on emulator-5554 | Pass: Total PSS = 58.2 MB (Java Heap = 9.4 MB, Native Heap = 14.8 MB) |
 
 ### Tests added in this phase
 
