@@ -8,6 +8,7 @@ import app.mini.hub.domain.Clock
 import app.mini.hub.domain.IdGenerator
 import app.mini.hub.domain.UtcInstant
 import app.mini.hub.observation.BoundedIngestQueue
+import app.mini.hub.observation.DeliveryAccountingLedger
 import app.mini.hub.observation.NotificationDeduplicator
 import app.mini.hub.observation.NotificationNormalizer
 import app.mini.hub.observation.NotificationRawPayload
@@ -39,6 +40,7 @@ object MiniHubRuntime {
         private set
     lateinit var ingestCoordinator: ObservationIngestCoordinator
         private set
+    val ledger = DeliveryAccountingLedger(2000)
     lateinit var retrievalEngine: ScopedRetrievalEngine
         private set
     lateinit var styleEngine: AdaptiveStyleEngine
@@ -83,6 +85,7 @@ object MiniHubRuntime {
                 deduplicator = deduplicator,
                 store = observationStore,
                 clock = clock,
+                ledger = ledger,
             )
 
             retrievalEngine = ScopedRetrievalEngine(observationStore)

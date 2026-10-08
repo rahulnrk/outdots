@@ -106,15 +106,13 @@ class MiniNotificationListenerService : NotificationListenerService() {
             if (isEmpty() && text.isNotBlank()) add(text)
         }
 
-        val mappedPackage = if (pkg == packageName && sbn.tag == "synthetic_test") "com.whatsapp" else pkg
-
         val payload = NotificationRawPayload(
             key = sbn.key ?: "${pkg}_${sbn.id}",
-            packageId = mappedPackage,
+            packageId = pkg,
             notificationId = sbn.id,
             tag = sbn.tag,
             postTimeMillis = sbn.postTime,
-            senderHint = title ?: subText ?: mappedPackage,
+            senderHint = title ?: subText ?: pkg,
             title = title,
             text = text.ifBlank { bigText ?: "" },
             subText = subText,
@@ -125,6 +123,7 @@ class MiniNotificationListenerService : NotificationListenerService() {
             isRemoved = false,
         )
 
+        MiniHubRuntime.ledger.record(payload.key, app.mini.hub.observation.PipelineStage.ListenerReceived, System.currentTimeMillis())
         MiniHubRuntime.onNotificationReceived(payload)
     }
 
@@ -133,20 +132,19 @@ class MiniNotificationListenerService : NotificationListenerService() {
         val pkg = sbn.packageName ?: return
         if (pkg == packageName && sbn.tag != "synthetic_test") return
 
-        val mappedPackage = if (pkg == packageName && sbn.tag == "synthetic_test") "com.whatsapp" else pkg
-
         val payload = NotificationRawPayload(
             key = sbn.key ?: "${pkg}_${sbn.id}",
-            packageId = mappedPackage,
+            packageId = pkg,
             notificationId = sbn.id,
             tag = sbn.tag,
             postTimeMillis = sbn.postTime,
-            senderHint = mappedPackage,
+            senderHint = pkg,
             title = null,
             text = "",
             isRemoved = true,
         )
 
+        MiniHubRuntime.ledger.record(payload.key, app.mini.hub.observation.PipelineStage.ListenerReceived, System.currentTimeMillis())
         MiniHubRuntime.onNotificationReceived(payload)
     }
 }
