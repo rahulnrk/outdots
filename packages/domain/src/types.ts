@@ -1,4 +1,4 @@
-export type Provider = 'gmail' | 'outlook' | 'teams' | 'whatsapp' | 'facebook' | 'instagram' | 'linkedin';
+export type Provider = 'gmail' | 'outlook' | 'teams' | 'whatsapp' | 'facebook' | 'instagram' | 'linkedin' | 'twitter' | 'slack' | 'whoop' | 'system' | 'app';
 export type ContextCompartment = 'personal' | 'business';
 export type CoverageState = 'current' | 'partial' | 'stale' | 'unknown';
 export type Priority = 'high' | 'normal' | 'low';

@@ -267,6 +267,75 @@ class ObservationPipelineTest {
     }
 
     @Test
+    fun testAppLabelAndProviderResolution() {
+        val normalizer = NotificationNormalizer(idGen, digest)
+
+        assertEquals("X", normalizer.deriveHumanAppName("com.twitter.android", null))
+        assertEquals("WHOOP", normalizer.deriveHumanAppName("com.noop.whoop.staging", null))
+        assertEquals("WhatsApp", normalizer.deriveHumanAppName("com.whatsapp", null))
+        assertEquals("Gmail", normalizer.deriveHumanAppName("com.google.android.gm", null))
+        assertEquals("Android System", normalizer.deriveHumanAppName("android", null))
+
+        // Custom app label from PackageManager takes precedence
+        assertEquals("Custom App Title", normalizer.deriveHumanAppName("com.custom.app", "Custom App Title"))
+
+        assertEquals(Provider.TWITTER, normalizer.mapPackageToProvider("com.twitter.android"))
+        assertEquals(Provider.WHOOP, normalizer.mapPackageToProvider("com.noop.whoop.staging"))
+        assertEquals(Provider.SYSTEM, normalizer.mapPackageToProvider("android"))
+        assertEquals(Provider.SLACK, normalizer.mapPackageToProvider("com.Slack"))
+    }
+
+    @Test
+    fun testNotificationCategoryClassification() {
+        val normalizer = NotificationNormalizer(idGen, digest)
+
+        val dmPayload = NotificationRawPayload(
+            key = "dm_1",
+            packageId = "com.whatsapp",
+            notificationId = 1,
+            postTimeMillis = 1000L,
+            senderHint = "Alice",
+            text = "Hello",
+            category = "msg",
+        )
+        assertEquals(NotificationCategory.DirectMessage, normalizer.deriveNotificationCategory(dmPayload))
+
+        val groupPayload = NotificationRawPayload(
+            key = "grp_1",
+            packageId = "com.whatsapp",
+            notificationId = 2,
+            postTimeMillis = 2000L,
+            senderHint = "Dev Team",
+            text = "3 new messages",
+            category = "msg",
+            isGroupSummary = true,
+        )
+        assertEquals(NotificationCategory.GroupMessage, normalizer.deriveNotificationCategory(groupPayload))
+
+        val socialPayload = NotificationRawPayload(
+            key = "soc_1",
+            packageId = "com.twitter.android",
+            notificationId = 3,
+            postTimeMillis = 3000L,
+            senderHint = "X",
+            text = "New tweet from @developer",
+            category = "social",
+        )
+        assertEquals(NotificationCategory.SocialUpdate, normalizer.deriveNotificationCategory(socialPayload))
+
+        val servicePayload = NotificationRawPayload(
+            key = "srv_1",
+            packageId = "com.noop.whoop.staging",
+            notificationId = 4,
+            postTimeMillis = 4000L,
+            senderHint = "WHOOP",
+            text = "Streaming in background",
+            isOngoing = true,
+        )
+        assertEquals(NotificationCategory.OngoingService, normalizer.deriveNotificationCategory(servicePayload))
+    }
+
+    @Test
     fun testCrashAndRestartRecovery() {
         val store = InMemoryObservationStore()
         val coordinator = createCoordinator(store = store, capacity = 1000)

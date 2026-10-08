@@ -6,6 +6,7 @@ import app.mini.hub.domain.UtcInstant
 import app.mini.hub.observation.ConversationCoverage
 import app.mini.hub.observation.ConversationObservationSummary
 import app.mini.hub.observation.IngestCursor
+import app.mini.hub.observation.NotificationCategory
 import app.mini.hub.observation.ObservedNotification
 
 sealed class PersistResult {
@@ -59,13 +60,39 @@ class InMemoryObservationStore : ObservationStore {
             "Observed via Android notifications only. Prior history and out-of-band replies are not visible."
         }
 
+        val category = when {
+            observation.isOngoing -> NotificationCategory.OngoingService
+            observation.isGroupSummary -> NotificationCategory.GroupMessage
+            observation.packageId.contains("twitter") || observation.packageId.contains("instagram") -> NotificationCategory.SocialUpdate
+            observation.packageId == "android" || observation.packageId.startsWith("com.android.systemui") -> NotificationCategory.SystemStatus
+            observation.packageId.contains("whatsapp") || observation.packageId.contains("orca") -> NotificationCategory.DirectMessage
+            else -> NotificationCategory.GeneralNotification
+        }
+
+        val appName = when {
+            observation.packageId.contains("twitter", ignoreCase = true) -> "X"
+            observation.packageId.contains("whoop", ignoreCase = true) -> "WHOOP"
+            observation.packageId.contains("whatsapp", ignoreCase = true) -> "WhatsApp"
+            observation.packageId.contains("android.gm", ignoreCase = true) -> "Gmail"
+            observation.packageId.contains("facebook.orca", ignoreCase = true) -> "Messenger"
+            observation.packageId.contains("facebook", ignoreCase = true) -> "Facebook"
+            observation.packageId.contains("instagram", ignoreCase = true) -> "Instagram"
+            observation.packageId.contains("linkedin", ignoreCase = true) -> "LinkedIn"
+            observation.packageId.contains("slack", ignoreCase = true) -> "Slack"
+            observation.packageId == "android" -> "Android System"
+            observation.packageId.startsWith("com.android.systemui") -> "System UI"
+            else -> observation.packageId.substringAfterLast('.').replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        }
+
         val summary = ConversationObservationSummary(
             conversationId = observation.conversationId,
             accountId = observation.accountId,
             title = observation.title ?: existingConv?.title ?: observation.senderHint,
+            appName = appName,
             senderHint = observation.senderHint,
             packageId = observation.packageId,
             latestSnippet = snippet,
+            category = category,
             coverage = ConversationCoverage.NotificationOnly,
             coverageExplanation = coverageExplanation,
             latestEventAt = observation.observedAt,

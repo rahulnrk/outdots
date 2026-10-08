@@ -81,8 +81,10 @@ class NotificationNormalizer(
     ): ObservedNotification {
         val provider = mapPackageToProvider(payload.packageId)
         val account = AccountId(provider, "local_user")
+        val appName = deriveHumanAppName(payload.packageId, payload.appLabel)
+        val category = deriveNotificationCategory(payload)
 
-        val conversationKey = deriveConversationKey(payload)
+        val conversationKey = deriveConversationKey(payload, appName, category)
         val conversationId = ScopedId(account, ScopedId.Kind.CONVERSATION, conversationKey)
         val observationId = ScopedId(account, ScopedId.Kind.OBSERVATION, idGenerator.next("obs"))
 
@@ -97,6 +99,9 @@ class NotificationNormalizer(
         val digest = computeContentDigest(payload, fragments)
         val truncation = detectTruncation(payload)
 
+        val titleDisplay = deriveDisplayTitle(payload, appName, category)
+        val senderDisplay = deriveDisplaySender(payload, appName, category)
+
         return ObservedNotification(
             id = observationId,
             accountId = account,
@@ -105,8 +110,8 @@ class NotificationNormalizer(
             notificationKey = payload.key,
             notificationId = payload.notificationId,
             tag = payload.tag,
-            senderHint = payload.senderHint.ifBlank { payload.title ?: "Unknown" },
-            title = payload.title,
+            senderHint = senderDisplay,
+            title = titleDisplay,
             textFragments = fragments,
             rawTextDigest = digest,
             observedAt = observedAt,
@@ -114,29 +119,98 @@ class NotificationNormalizer(
             revision = 1L,
             isRemoved = payload.isRemoved,
             isGroupSummary = payload.isGroupSummary,
+            isOngoing = payload.isOngoing,
             truncationState = truncation,
             correlationConfidence = if (payload.isGroupSummary) CorrelationConfidence.Medium else CorrelationConfidence.High,
             provenance = ObservationProvenance.AndroidNotificationListener,
         )
     }
 
-    private fun mapPackageToProvider(packageId: String): Provider = when {
+    fun mapPackageToProvider(packageId: String): Provider = when {
         packageId.contains("whatsapp", ignoreCase = true) -> Provider.WHATSAPP
         packageId.contains("android.gm", ignoreCase = true) -> Provider.GMAIL
         packageId.contains("outlook", ignoreCase = true) -> Provider.OUTLOOK
         packageId.contains("teams", ignoreCase = true) -> Provider.TEAMS
         packageId.contains("facebook.orca", ignoreCase = true) -> Provider.FACEBOOK
+        packageId.contains("facebook", ignoreCase = true) -> Provider.FACEBOOK
         packageId.contains("instagram", ignoreCase = true) -> Provider.INSTAGRAM
         packageId.contains("linkedin", ignoreCase = true) -> Provider.LINKEDIN
-        else -> Provider.WHATSAPP
+        packageId.contains("twitter", ignoreCase = true) -> Provider.TWITTER
+        packageId.contains("slack", ignoreCase = true) -> Provider.SLACK
+        packageId.contains("whoop", ignoreCase = true) -> Provider.WHOOP
+        packageId == "android" || packageId.startsWith("com.android.systemui") -> Provider.SYSTEM
+        else -> Provider.APP
     }
 
-    private fun deriveConversationKey(payload: NotificationRawPayload): String {
-        val titleClean = payload.title?.trim()?.replace(Regex("[^a-zA-Z0-9_.-]"), "_")
-        if (!titleClean.isNullOrBlank()) return titleClean
-        val tagClean = payload.tag?.trim()?.replace(Regex("[^a-zA-Z0-9_.-]"), "_")
-        if (!tagClean.isNullOrBlank()) return tagClean
-        return "notif_${payload.notificationId}"
+    fun deriveHumanAppName(packageId: String, appLabel: String?): String {
+        if (!appLabel.isNullOrBlank() && appLabel != packageId) return appLabel
+        return when {
+            packageId.contains("twitter", ignoreCase = true) -> "X"
+            packageId.contains("whoop", ignoreCase = true) -> "WHOOP"
+            packageId.contains("whatsapp", ignoreCase = true) -> "WhatsApp"
+            packageId.contains("android.gm", ignoreCase = true) -> "Gmail"
+            packageId.contains("facebook.orca", ignoreCase = true) -> "Messenger"
+            packageId.contains("facebook", ignoreCase = true) -> "Facebook"
+            packageId.contains("instagram", ignoreCase = true) -> "Instagram"
+            packageId.contains("linkedin", ignoreCase = true) -> "LinkedIn"
+            packageId.contains("slack", ignoreCase = true) -> "Slack"
+            packageId == "android" -> "Android System"
+            packageId.startsWith("com.android.systemui") -> "System UI"
+            else -> packageId.substringAfterLast('.').replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        }
+    }
+
+    fun deriveNotificationCategory(payload: NotificationRawPayload): NotificationCategory = when {
+        payload.isOngoing || payload.category == "service" || payload.packageId.contains("whoop", ignoreCase = true) ->
+            NotificationCategory.OngoingService
+        payload.category == "msg" || payload.category == "message" ||
+            payload.packageId.contains("whatsapp", ignoreCase = true) ||
+            payload.packageId.contains("facebook.orca", ignoreCase = true) ->
+            if (payload.isGroupSummary) NotificationCategory.GroupMessage else NotificationCategory.DirectMessage
+        payload.category == "social" || payload.packageId.contains("twitter", ignoreCase = true) ||
+            payload.packageId.contains("instagram", ignoreCase = true) ||
+            payload.packageId.contains("facebook", ignoreCase = true) ->
+            NotificationCategory.SocialUpdate
+        payload.category == "sys" || payload.packageId == "android" || payload.packageId.startsWith("com.android.systemui") ->
+            NotificationCategory.SystemStatus
+        else -> NotificationCategory.GeneralNotification
+    }
+
+    private fun deriveDisplayTitle(payload: NotificationRawPayload, appName: String, category: NotificationCategory): String {
+        val rawTitle = payload.title?.trim()
+        if (!rawTitle.isNullOrBlank() && rawTitle != payload.packageId) {
+            return rawTitle
+        }
+        return when (category) {
+            NotificationCategory.OngoingService -> "$appName Service"
+            NotificationCategory.SystemStatus -> "$appName Status"
+            NotificationCategory.SocialUpdate -> "$appName Alert"
+            else -> appName
+        }
+    }
+
+    private fun deriveDisplaySender(payload: NotificationRawPayload, appName: String, category: NotificationCategory): String {
+        val hint = payload.senderHint.trim()
+        if (hint.isNotBlank() && hint != payload.packageId) return hint
+        val title = payload.title?.trim()
+        if (!title.isNullOrBlank() && title != payload.packageId) return title
+        return appName
+    }
+
+    private fun deriveConversationKey(payload: NotificationRawPayload, appName: String, category: NotificationCategory): String {
+        // Direct messages and group messages group by thread / sender
+        if (category == NotificationCategory.DirectMessage || category == NotificationCategory.GroupMessage) {
+            val titleClean = payload.title?.trim()?.replace(Regex("[^a-zA-Z0-9_.-]"), "_")
+            if (!titleClean.isNullOrBlank() && titleClean != payload.packageId) return titleClean
+            val tagClean = payload.tag?.trim()?.replace(Regex("[^a-zA-Z0-9_.-]"), "_")
+            if (!tagClean.isNullOrBlank()) return tagClean
+        }
+
+        // Social, Service, and System notifications group under the app topic
+        val appClean = appName.replace(Regex("[^a-zA-Z0-9_.-]"), "_")
+        val subClean = payload.subText?.trim()?.replace(Regex("[^a-zA-Z0-9_.-]"), "_")
+        if (!subClean.isNullOrBlank()) return "${appClean}_${subClean}"
+        return "${appClean}_alerts"
     }
 
     private fun computeContentDigest(payload: NotificationRawPayload, fragments: List<String>): String {

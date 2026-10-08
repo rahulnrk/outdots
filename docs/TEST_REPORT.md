@@ -11,8 +11,8 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 | `npm test` | Pass: 3 files, 59 tests (13 domain, 33 security, 13 publisher) |
 | `npm run typecheck` | Pass: domain, publisher, hub |
 | `npm run build` | Pass: all workspaces, Vite bundle 192.88 kB JS / 60.40 kB gzip |
-| `native\\gradlew.bat test` | Pass: 40 unit tests (35 JVM in shared, 5 Android unit tests in androidApp) |
-| `native\\gradlew.bat assembleDebug` | Pass: debug APK built (29,720,000+ bytes) packaging Jetpack Compose UI, `MiniHubRuntime`, `MiniNotificationListenerService`, and `libsqlcipher.so` |
+| `native\\gradlew.bat test` | Pass: 42 unit tests (37 JVM in shared, 5 Android unit tests in androidApp) |
+| `native\\gradlew.bat assembleDebug` | Pass: debug APK built (29,720,000+ bytes) packaging Jetpack Compose UI, `MiniHubRuntime`, `MiniNotificationListenerService`, `SyntheticNotificationReceiver`, and `libsqlcipher.so` |
 | `zipalign -c -P 16 4 androidApp-debug.apk` | Pass: 16 KB page alignment verified on all ELF binaries (`lib/arm64-v8a/libsqlcipher.so` aligned at 7,651,328 bytes % 16,384 = 0) |
 | `llvm-readelf.exe -l libsqlcipher.so` | Pass: ELF LOAD segment alignment confirmed at 0x4000 (16,384 bytes) |
 | `adb install -r androidApp-debug.apk` on `Pixel 10 Pro` (`56270DLCH000KZ`, Android 16 / API 36, arm64-v8a) | Pass: Streamed install succeeded; 16 KB incompatibility warning completely resolved |
@@ -26,6 +26,12 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 | `adb shell dumpsys meminfo app.mini.hub` on emulator-5554 | Pass: Total PSS = 58.2 MB (Java Heap = 9.4 MB, Native Heap = 14.8 MB) |
 
 ### Tests added in this phase
+
+- Resolved human-friendly application names (`X`, `WHOOP`, `WhatsApp`, `Gmail`, `Messenger`, `Facebook`, `Slack`, `Android System`) without raw package IDs.
+- Classified notification categories: `DirectMessage`, `GroupMessage`, `SocialUpdate`, `SystemStatus`, `OngoingService`, and `GeneralNotification`.
+- Removed synthetic package substitution to prevent attributing test broadcasts to third-party packages.
+- Added Compose category badges on inbox conversation cards.
+- Unit tests in `ObservationPipelineTest` for app name resolution and category classification.
 
 - Headless background notification ingestion via `MiniHubRuntime` without requiring `MainActivity` to be open.
 - Queue overflow gap-tracking in `IngestCursor` and reflection of dropped event counts in `ConversationObservationSummary` coverage warnings.

@@ -31,6 +31,15 @@ enum class ConversationCoverage {
     StaleOrDisconnected,
 }
 
+enum class NotificationCategory {
+    DirectMessage,
+    GroupMessage,
+    SocialUpdate,
+    SystemStatus,
+    OngoingService,
+    GeneralNotification,
+}
+
 data class NotificationRawPayload(
     val key: String,
     val packageId: String,
@@ -45,6 +54,7 @@ data class NotificationRawPayload(
     val isGroupSummary: Boolean = false,
     val isOngoing: Boolean = false,
     val category: String? = null,
+    val appLabel: String? = null,
     val isRemoved: Boolean = false,
     val removedReason: Int? = null,
 ) {
@@ -71,6 +81,7 @@ data class ObservedNotification(
     val revision: Long,
     val isRemoved: Boolean,
     val isGroupSummary: Boolean,
+    val isOngoing: Boolean = false,
     val truncationState: TruncationState,
     val correlationConfidence: CorrelationConfidence,
     val provenance: ObservationProvenance,
@@ -85,9 +96,11 @@ data class ConversationObservationSummary(
     val conversationId: ScopedId,
     val accountId: AccountId,
     val title: String,
+    val appName: String,
     val senderHint: String,
     val packageId: String,
     val latestSnippet: String,
+    val category: NotificationCategory,
     val coverage: ConversationCoverage,
     val coverageExplanation: String,
     val latestEventAt: UtcInstant,

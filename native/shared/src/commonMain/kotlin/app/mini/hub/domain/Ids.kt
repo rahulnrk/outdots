@@ -6,10 +6,11 @@ package app.mini.hub.domain
  */
 enum class Provider(val wire: String) {
     GMAIL("gmail"), OUTLOOK("outlook"), TEAMS("teams"), WHATSAPP("whatsapp"),
-    FACEBOOK("facebook"), INSTAGRAM("instagram"), LINKEDIN("linkedin");
+    FACEBOOK("facebook"), INSTAGRAM("instagram"), LINKEDIN("linkedin"),
+    TWITTER("twitter"), SLACK("slack"), WHOOP("whoop"), SYSTEM("system"), APP("app");
 
     companion object {
-        fun fromWire(value: String): Provider = entries.first { it.wire == value }
+        fun fromWire(value: String): Provider = entries.firstOrNull { it.wire == value } ?: APP
     }
 }
 

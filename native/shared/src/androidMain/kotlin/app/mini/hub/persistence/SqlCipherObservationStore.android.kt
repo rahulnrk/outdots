@@ -12,6 +12,7 @@ import app.mini.hub.observation.ConversationCoverage
 import app.mini.hub.observation.ConversationObservationSummary
 import app.mini.hub.observation.CorrelationConfidence
 import app.mini.hub.observation.IngestCursor
+import app.mini.hub.observation.NotificationCategory
 import app.mini.hub.observation.ObservationProvenance
 import app.mini.hub.observation.ObservedNotification
 import app.mini.hub.observation.TruncationState
@@ -107,14 +108,40 @@ class SqlCipherObservationStore(
                     "Observed via Android notifications only. Prior history and out-of-band replies are not visible."
                 }
 
+                val appName = when {
+                    observation.packageId.contains("twitter", ignoreCase = true) -> "X"
+                    observation.packageId.contains("whoop", ignoreCase = true) -> "WHOOP"
+                    observation.packageId.contains("whatsapp", ignoreCase = true) -> "WhatsApp"
+                    observation.packageId.contains("android.gm", ignoreCase = true) -> "Gmail"
+                    observation.packageId.contains("facebook.orca", ignoreCase = true) -> "Messenger"
+                    observation.packageId.contains("facebook", ignoreCase = true) -> "Facebook"
+                    observation.packageId.contains("instagram", ignoreCase = true) -> "Instagram"
+                    observation.packageId.contains("linkedin", ignoreCase = true) -> "LinkedIn"
+                    observation.packageId.contains("slack", ignoreCase = true) -> "Slack"
+                    observation.packageId == "android" -> "Android System"
+                    observation.packageId.startsWith("com.android.systemui") -> "System UI"
+                    else -> observation.packageId.substringAfterLast('.').replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+                }
+
+                val notifCategory = when {
+                    observation.isOngoing -> NotificationCategory.OngoingService
+                    observation.isGroupSummary -> NotificationCategory.GroupMessage
+                    observation.packageId.contains("twitter") || observation.packageId.contains("instagram") -> NotificationCategory.SocialUpdate
+                    observation.packageId == "android" || observation.packageId.startsWith("com.android.systemui") -> NotificationCategory.SystemStatus
+                    observation.packageId.contains("whatsapp") || observation.packageId.contains("orca") -> NotificationCategory.DirectMessage
+                    else -> NotificationCategory.GeneralNotification
+                }
+
                 // Update or insert conversation summary
                 val convValues = ContentValues().apply {
                     put("conversation_key", observation.conversationId.key)
                     put("account_key", observation.accountId.key)
                     put("title", observation.title ?: observation.senderHint)
+                    put("app_name", appName)
                     put("sender_hint", observation.senderHint)
                     put("package_id", observation.packageId)
                     put("latest_snippet", observation.textFragments.lastOrNull() ?: observation.title ?: "")
+                    put("category", notifCategory.name)
                     put("coverage", ConversationCoverage.NotificationOnly.name)
                     put("coverage_explanation", coverageExplanation)
                     put("latest_event_at", observation.observedAt.epochMillis)
@@ -190,9 +217,11 @@ class SqlCipherObservationStore(
                             conversationId = ScopedId.parse(cursor.getString(cursor.getColumnIndexOrThrow("conversation_key"))),
                             accountId = AccountId.parse(cursor.getString(cursor.getColumnIndexOrThrow("account_key"))),
                             title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
+                            appName = cursor.getString(cursor.getColumnIndexOrThrow("app_name")),
                             senderHint = cursor.getString(cursor.getColumnIndexOrThrow("sender_hint")),
                             packageId = cursor.getString(cursor.getColumnIndexOrThrow("package_id")),
                             latestSnippet = cursor.getString(cursor.getColumnIndexOrThrow("latest_snippet")),
+                            category = NotificationCategory.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("category"))),
                             coverage = ConversationCoverage.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("coverage"))),
                             coverageExplanation = cursor.getString(cursor.getColumnIndexOrThrow("coverage_explanation")),
                             latestEventAt = UtcInstant(cursor.getLong(cursor.getColumnIndexOrThrow("latest_event_at"))),
@@ -347,9 +376,11 @@ class SqlCipherObservationStore(
                 conversation_key TEXT NOT NULL PRIMARY KEY,
                 account_key TEXT NOT NULL,
                 title TEXT NOT NULL,
+                app_name TEXT NOT NULL DEFAULT '',
                 sender_hint TEXT NOT NULL,
                 package_id TEXT NOT NULL,
                 latest_snippet TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'GeneralNotification',
                 coverage TEXT NOT NULL,
                 coverage_explanation TEXT NOT NULL,
                 latest_event_at INTEGER NOT NULL,

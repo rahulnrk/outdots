@@ -200,9 +200,10 @@ fun ConversationItemCard(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = conversation.packageId.substringAfterLast('.').uppercase(),
+                    text = conversation.appName,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
                 )
             }
 
@@ -219,9 +220,18 @@ fun ConversationItemCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Truthful coverage badge
+                val categoryLabel = when (conversation.category) {
+                    app.mini.hub.observation.NotificationCategory.DirectMessage -> "Direct Message"
+                    app.mini.hub.observation.NotificationCategory.GroupMessage -> "Group Message"
+                    app.mini.hub.observation.NotificationCategory.SocialUpdate -> "Social Alert"
+                    app.mini.hub.observation.NotificationCategory.OngoingService -> "Active Service"
+                    app.mini.hub.observation.NotificationCategory.SystemStatus -> "System Status"
+                    app.mini.hub.observation.NotificationCategory.GeneralNotification -> "Notification"
+                }
+
+                // Truthful coverage & category badge
                 Text(
-                    text = "Notification Observation (Partial)",
+                    text = "$categoryLabel · Partial Observation",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.secondary,
                 )
