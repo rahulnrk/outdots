@@ -14,6 +14,7 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 | `npm audit --audit-level=moderate` | Pass: 0 vulnerabilities (previously run at baseline) |
 | `native\\gradlew.bat :shared:jvmTest` | Pass: 17 tests, including scaffold, action core, persistence boundary and intelligence safety/lifecycle tests |
 | `native\\gradlew.bat :shared:jvmTest :androidApp:assembleDebug` | Pass: 17 JVM tests and debug APK built, including the Android SQLCipher/Keystore store compilation |
+| APK archive inspection | Pass: debug APK is 29,609,054 bytes and packages `libsqlcipher.so` for arm64-v8a, armeabi-v7a, x86, and x86_64 |
 
 ### Tests added in this phase
 
@@ -31,7 +32,7 @@ Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 3
 ### Not yet executed
 
 - No live provider, account, OAuth flow or real outbound message.
-- No SQLCipher/Keystore persistence, key invalidation, migration or restart test on an Android emulator/device. The Android implementation was compile-verified only.
+- Runtime SQLCipher/Keystore persistence, key invalidation, migration and restart acceptance was blocked because `where adb` and `where emulator` found no Android SDK runtime tools or connected device on this Windows host. The implementation was compile-verified and the APK package was inspected, but no runtime result is claimed.
 - No Playwright/UI automation. The browser bridge was installed but Edge extension connection was not available.
 - No performance, memory, battery, thermal or three-device qualification measurements.
 - No iOS build, because this environment is Windows without Xcode.

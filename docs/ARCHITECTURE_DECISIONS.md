@@ -8,7 +8,7 @@ Updated 2026-10-08. Decisions are scoped to this repository and preserve the arc
 package remains a browser reference harness and executable safety specification while KMP parity is built.
 
 **Why:** The architecture calls for shared deterministic rules plus native authorization, storage, lifecycle and UI.
-A browser demo cannot prove Android notification permissions, Keystore, WorkManager or iOS behavior. The Android store now has a SQLCipher and Keystore implementation, but device qualification remains a separate acceptance step.
+A browser demo cannot prove Android notification permissions, Keystore, WorkManager or iOS behavior. The Android store now has a SQLCipher and Keystore implementation, but device qualification remains a separate acceptance step. This host has no `adb`, emulator binary or connected device, so that acceptance step is currently blocked.
 
 **Consequence:** The TypeScript and KMP cores need parity tests before either is called release-ready. The current
 KMP scaffold builds JVM tests and an Android debug APK. Android SQLCipher persistence is implemented behind the shared store boundary, while native connectors and device qualification remain outstanding.
