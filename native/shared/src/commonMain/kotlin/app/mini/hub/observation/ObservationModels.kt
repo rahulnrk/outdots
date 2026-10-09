@@ -19,8 +19,31 @@ enum class CorrelationConfidence {
 
 enum class ObservationProvenance {
     AndroidNotificationListener,
+    OfficialProviderApi,
+    ThirdPartyBridge,
     SyntheticFixture,
     UserImport,
+}
+
+fun coverageFor(provenance: ObservationProvenance): ConversationCoverage = when (provenance) {
+    ObservationProvenance.OfficialProviderApi -> ConversationCoverage.FullProviderSync
+    ObservationProvenance.ThirdPartyBridge -> ConversationCoverage.PartialApiSync
+    ObservationProvenance.UserImport -> ConversationCoverage.UserImportedSnapshot
+    ObservationProvenance.AndroidNotificationListener,
+    ObservationProvenance.SyntheticFixture -> ConversationCoverage.NotificationOnly
+}
+
+fun coverageExplanationFor(provenance: ObservationProvenance, gapCount: Long = 0L): String = when (provenance) {
+    ObservationProvenance.OfficialProviderApi ->
+        if (gapCount > 0) "Synchronized through the official provider API; $gapCount recovery gap(s) require another backfill."
+        else "Synchronized through the official provider API for this authorized account."
+    ObservationProvenance.ThirdPartyBridge ->
+        "Synchronized through a third-party bridge; coverage, retention and provider policy limits apply."
+    ObservationProvenance.UserImport -> "Imported by explicit user action; it is not a live synchronized inbox."
+    ObservationProvenance.AndroidNotificationListener ->
+        if (gapCount > 0) "Observed via Android notifications only ($gapCount dropped events due to backpressure). Prior history is not visible."
+        else "Observed via Android notifications only. Prior history and out-of-band replies are not visible."
+    ObservationProvenance.SyntheticFixture -> "Synthetic test data; not a connected provider account."
 }
 
 enum class ConversationCoverage {

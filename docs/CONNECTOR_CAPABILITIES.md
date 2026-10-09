@@ -1,11 +1,11 @@
 # Connector capabilities and limitations
 
-Updated 2026-10-08. This matrix describes the repository's current qualification status, not a promise that an
+Updated 2026-10-09. This matrix describes the repository's current qualification status, not a promise that an
 unconfigured provider works. No live credentials or provider calls were used.
 
 | Source/account | Read path | Outbound path | Privacy/coverage boundary | Repository status |
 |---|---|---|---|---|
-| Gmail user mailbox | Official Gmail API with user OAuth and history cursor is the intended path | Gmail API send after exact review and current grant check | Scope, token, cursor expiry, edits/deletions and provider acceptance must be represented | Synthetic fixture only. Live OAuth/client consent blocked |
+| Gmail user mailbox | Official Gmail REST adapter now supports bounded profile, message-list and metadata reads with a caller-supplied OAuth token and page cursor | Not implemented. Gmail API send remains gated by exact approval and current grant check | Scope, token, cursor expiry, edits/deletions, duplicate recovery and provider acceptance must be represented | Shared adapter, Android Keystore token boundary, account-scoped atomic cursor runner and fake-transport tests implemented. OAuth/client consent and live account remain blocked |
 | Outlook user/work mailbox | Microsoft Graph delegated permissions are the intended path | Graph sendMail only after account-scoped grant and exact review | Tenant/admin consent, throttling, token expiry and mailbox scope apply | Not implemented |
 | Teams | Microsoft Graph account/tenant-specific APIs only where approved | Route depends on qualified account and API capability | Tenant policies, app permissions and incomplete message visibility must remain visible | Not implemented |
 | WhatsApp personal | Android notification listener observations only, with explicit opt-in | Native source-app handoff; no provider receipt | Observations are partial. History and outbound state may be absent. Never call it a complete thread | Seeded observation in web harness; Android listener not implemented |

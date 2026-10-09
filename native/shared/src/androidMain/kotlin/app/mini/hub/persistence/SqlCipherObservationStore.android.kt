@@ -15,6 +15,8 @@ import app.mini.hub.observation.IngestCursor
 import app.mini.hub.observation.NotificationCategory
 import app.mini.hub.observation.ObservationProvenance
 import app.mini.hub.observation.ObservedNotification
+import app.mini.hub.observation.coverageExplanationFor
+import app.mini.hub.observation.coverageFor
 import app.mini.hub.observation.TruncationState
 import java.security.KeyStore
 import java.security.SecureRandom
@@ -377,11 +379,7 @@ class SqlCipherObservationStore(
         db.insertWithOnConflict("notification_observations", null, values, SQLiteDatabase.CONFLICT_REPLACE)
 
         val cursorGap = queryCursorGap(db, obs.packageId)
-        val coverageExplanation = if (cursorGap > 0L) {
-            "Observed via Android notifications only ($cursorGap dropped events due to backpressure). Prior history is not visible."
-        } else {
-            "Observed via Android notifications only. Prior history and out-of-band replies are not visible."
-        }
+        val coverageExplanation = coverageExplanationFor(obs.provenance, cursorGap)
 
         val appName = when {
             obs.packageId.contains("twitter", ignoreCase = true) -> "X"
@@ -416,7 +414,7 @@ class SqlCipherObservationStore(
             put("package_id", obs.packageId)
             put("latest_snippet", obs.textFragments.lastOrNull() ?: obs.title ?: "")
             put("category", notifCategory.name)
-            put("coverage", ConversationCoverage.NotificationOnly.name)
+            put("coverage", coverageFor(obs.provenance).name)
             put("coverage_explanation", coverageExplanation)
             put("latest_event_at", obs.observedAt.epochMillis)
             put("observation_count", 1)

@@ -8,6 +8,8 @@ import app.mini.hub.observation.ConversationObservationSummary
 import app.mini.hub.observation.IngestCursor
 import app.mini.hub.observation.NotificationCategory
 import app.mini.hub.observation.ObservedNotification
+import app.mini.hub.observation.coverageExplanationFor
+import app.mini.hub.observation.coverageFor
 
 sealed class PersistResult {
     data class Success(val id: ScopedId, val revision: Long) : PersistResult()
@@ -113,11 +115,7 @@ class InMemoryObservationStore : ObservationStore {
         val totalObs = (existingConv?.observationCount ?: 0) + 1
 
         val gapCount = cursors[observation.packageId]?.gapCount ?: 0L
-        val coverageExplanation = if (gapCount > 0L) {
-            "Observed via Android notifications only ($gapCount dropped events due to backpressure). Prior history is not visible."
-        } else {
-            "Observed via Android notifications only. Prior history and out-of-band replies are not visible."
-        }
+        val coverageExplanation = coverageExplanationFor(observation.provenance, gapCount)
 
         val category = when {
             observation.isOngoing -> NotificationCategory.OngoingService
@@ -152,7 +150,7 @@ class InMemoryObservationStore : ObservationStore {
             packageId = observation.packageId,
             latestSnippet = snippet,
             category = category,
-            coverage = ConversationCoverage.NotificationOnly,
+            coverage = coverageFor(observation.provenance),
             coverageExplanation = coverageExplanation,
             latestEventAt = observation.observedAt,
             observationCount = totalObs,
