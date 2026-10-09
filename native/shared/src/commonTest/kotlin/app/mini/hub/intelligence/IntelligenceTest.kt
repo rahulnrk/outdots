@@ -116,10 +116,12 @@ class IntelligenceTest {
         // Further submission blocked when Degraded
         assertEquals(SubmitResult.Pressured, supervisor.submit(t3))
 
-        // Recovery restores Ready state
+        // Recovery resets to Unloaded (lazy, no model load yet)
         flaky.throwError = false
-        assertTrue(supervisor.recoverFromFailure())
+        supervisor.recoverFromFailure()
         assertEquals(0, supervisor.consecutiveFailures)
+        assertTrue(supervisor.state is SupervisorState.Unloaded)
+        // Next submit triggers lazy load and succeeds
         assertEquals(SubmitResult.Accepted, supervisor.submit(t3))
         val proposal = supervisor.runNext()
         assertNotNull(proposal)

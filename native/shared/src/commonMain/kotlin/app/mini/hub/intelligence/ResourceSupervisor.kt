@@ -112,11 +112,11 @@ class ResourceSupervisor(
         }
     }
 
-    fun recoverFromFailure(): Boolean {
+    /** Reset from Degraded to Unloaded. Does not load the model; next submit() will load lazily. */
+    fun recoverFromFailure() {
         consecutiveFailures = 0
         lastError = null
         state = SupervisorState.Unloaded
-        return ensureReady()
     }
 
     fun release() {

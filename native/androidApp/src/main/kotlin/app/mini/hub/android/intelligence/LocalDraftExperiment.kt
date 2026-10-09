@@ -68,7 +68,7 @@ class LocalDraftExperiment internal constructor(
     private val activeTaskId = AtomicReference<String?>(null)
     private val cancelled = AtomicBoolean(false)
     private val cancellationEpoch = AtomicLong(0L)
-    private val isForeground = AtomicBoolean(true) // assume foreground until told otherwise
+    private val isForeground = AtomicBoolean(false) // background until explicitly foregrounded
 
     fun setForeground(foreground: Boolean) {
         val wasForeground = isForeground.getAndSet(foreground)
@@ -139,13 +139,6 @@ class LocalDraftExperiment internal constructor(
             prompt = prompt,
         )
 
-        // Attempt automatic recovery only when the supervisor entered Degraded state
-        // (repeated inference errors). Does not override Pressured, which requires
-        // an explicit setForeground(true) call.
-        if (supervisor.state is app.mini.hub.intelligence.SupervisorState.Degraded) {
-            supervisor.recoverFromFailure()
-        }
-
         val cold = supervisor.state is app.mini.hub.intelligence.SupervisorState.Unloaded
         val started = nowMillis()
         return try {
@@ -198,9 +191,18 @@ class LocalDraftExperiment internal constructor(
         return true
     }
 
-    /** Explicitly reset the supervisor from Degraded state (e.g. after connectivity restored). */
-    fun recoverFromDegraded() {
-        serializedAsync { supervisor.recoverFromFailure() }
+    /**
+     * Explicitly reset the supervisor from Degraded state.
+     * Foreground-only, blocked under memory pressure, and lazy: resets counters
+     * and state to Unloaded without loading the model. Runs on the serial worker so it observes
+     * any pending release or memory-pressure transition first.
+     */
+    fun recoverFromDegraded(): Boolean = serialized {
+        if (!isForeground.get()) return@serialized false
+        if (supervisor.state == app.mini.hub.intelligence.SupervisorState.Pressured) return@serialized false
+        if (supervisor.state !is app.mini.hub.intelligence.SupervisorState.Degraded) return@serialized false
+        supervisor.recoverFromFailure()
+        true
     }
 
     fun onMemoryPressure() {
