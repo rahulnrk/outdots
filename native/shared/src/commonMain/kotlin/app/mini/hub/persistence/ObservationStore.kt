@@ -53,6 +53,18 @@ interface ObservationStore {
     ): BatchPersistResult
 
     /**
+     * Atomically apply removals, persist observations, and checkpoint cursors in one transaction.
+     * Removals are applied first (in order); if any removal or write fails, the entire batch is
+     * rolled back and no cursors are updated.  This is the correct primitive for drainAndProcessAll
+     * so that removals and inserts/updates within the same drain call are committed atomically.
+     */
+    fun persistAtomicBatch(
+        removals: List<Pair<String, UtcInstant>>,
+        observations: List<ObservedNotification>,
+        cursors: List<IngestCursor>,
+    ): BatchPersistResult
+
+    /**
      * Atomically persist one observation and checkpoint its cursor in a single transaction.
      * Returns PersistResult.Error if either write fails (neither is committed).
      */
@@ -66,6 +78,12 @@ interface ObservationStore {
      * Used for independent verification after writes.
      */
     fun getObservationByNotificationKey(notificationKey: String): ObservedNotification?
+
+    /** Debug/test readback that includes removed rows, unlike the user-facing lookup above. */
+    fun getObservationByNotificationKeyIncludingRemoved(notificationKey: String): ObservedNotification?
+
+    /** Debug/test lookup by synthetic notification ID, including removed rows. */
+    fun getObservationByNotificationIdIncludingRemoved(packageId: String, notificationId: Int): ObservedNotification?
 }
 
 /**
@@ -80,6 +98,10 @@ class InMemoryObservationStore : ObservationStore {
     private val cursors = mutableMapOf<String, IngestCursor>()
 
     override fun persistObservation(observation: ObservedNotification): PersistResult = synchronized(lock) {
+        if (simulatedPersistFailuresRemaining > 0) {
+            simulatedPersistFailuresRemaining--
+            return PersistResult.Error(simulatedPersistError ?: "Transient simulated error")
+        }
         simulatedPersistError?.let { return PersistResult.Error(it) }
         observations[observation.id.key] = observation
 
@@ -201,6 +223,62 @@ class InMemoryObservationStore : ObservationStore {
         }
     }
 
+    override fun persistAtomicBatch(
+        removals: List<Pair<String, UtcInstant>>,
+        observations: List<ObservedNotification>,
+        cursors: List<IngestCursor>,
+    ): BatchPersistResult = synchronized(lock) {
+        // Snapshot for atomic rollback
+        val obsSnapshot = LinkedHashMap(this.observations)
+        val convSnapshot = LinkedHashMap(conversations)
+        val cursorSnapshot = this.cursors.toMutableMap()
+
+        val errors = mutableListOf<String>()
+
+        try {
+            // Persist observations first, then apply removals. This preserves arrival-order
+            // semantics for insert/update followed by removal in one atomic batch.
+            var successCount = 0
+            for (obs in observations) {
+                val result = persistObservation(obs)
+                if (result.isError) {
+                    errors.add((result as PersistResult.Error).message)
+                } else {
+                    successCount++
+                }
+            }
+
+            for ((key, removedAt) in removals) {
+                markRemoved(key, removedAt)
+            }
+
+            if (errors.isNotEmpty()) {
+                // Rollback everything — removals and writes
+                this.observations.clear()
+                this.observations.putAll(obsSnapshot)
+                conversations.clear()
+                conversations.putAll(convSnapshot)
+                this.cursors.clear()
+                this.cursors.putAll(cursorSnapshot)
+                return BatchPersistResult(0, removals.size + observations.size, errors)
+            }
+
+            for (cursor in cursors) {
+                checkpointCursor(cursor)
+            }
+
+            BatchPersistResult(removals.size + successCount, 0, emptyList())
+        } catch (e: Throwable) {
+            this.observations.clear()
+            this.observations.putAll(obsSnapshot)
+            conversations.clear()
+            conversations.putAll(convSnapshot)
+            this.cursors.clear()
+            this.cursors.putAll(cursorSnapshot)
+            BatchPersistResult(0, removals.size + observations.size, listOf(e.message ?: "Unknown error"))
+        }
+    }
+
     override fun persistObservationWithCursor(
         observation: ObservedNotification,
         cursor: IngestCursor,
@@ -229,6 +307,16 @@ class InMemoryObservationStore : ObservationStore {
         observations.values.find { it.notificationKey == notificationKey && !it.isRemoved }
     }
 
+    override fun getObservationByNotificationKeyIncludingRemoved(notificationKey: String): ObservedNotification? = synchronized(lock) {
+        observations.values.find { it.notificationKey == notificationKey }
+    }
+
+    override fun getObservationByNotificationIdIncludingRemoved(packageId: String, notificationId: Int): ObservedNotification? = synchronized(lock) {
+        observations.values
+            .filter { it.packageId == packageId && it.notificationId == notificationId }
+            .maxByOrNull { it.observedAt.epochMillis }
+    }
+
     override fun getObservation(id: ScopedId): ObservedNotification? = synchronized(lock) {
         observations[id.key]
     }
@@ -248,6 +336,9 @@ class InMemoryObservationStore : ObservationStore {
 
     /** Injected error simulation for testing: set to non-null to force persistObservation failures. */
     var simulatedPersistError: String? = null
+
+    /** Fail this many individual persistence attempts, then allow later attempts to succeed. */
+    var simulatedPersistFailuresRemaining: Int = 0
 
     override fun markRemoved(notificationKey: String, removedAt: UtcInstant): Int = synchronized(lock) {
         var count = 0

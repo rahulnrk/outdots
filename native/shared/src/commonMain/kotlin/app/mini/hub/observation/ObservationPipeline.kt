@@ -318,4 +318,9 @@ class NotificationDeduplicator(
     fun clear() = synchronized(lock) {
         recentNotifications.clear()
     }
+
+    /** Remove a key after an atomic removal has committed successfully. */
+    fun forget(notificationKey: String) = synchronized(lock) {
+        recentNotifications.remove(notificationKey)
+    }
 }

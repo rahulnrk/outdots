@@ -136,6 +136,65 @@ class DeliveryCorrectnessTest {
     }
 
     // -------------------------------------------------------------------------
+    // 2b. Atomic rollback against an already-persisted notification: a batch that
+    //    removes the existing row and inserts a new row must leave both the old
+    //    row and cursor unchanged when the batch transaction fails.
+    // -------------------------------------------------------------------------
+    @Test
+    fun testAtomicBatchRollbackPreservesAlreadyPersistedNotification() {
+        val store = InMemoryObservationStore()
+        val coord = makeCoordinator(store)
+        ledger.clear()
+
+        coord.enqueue(payload("already_persisted", id = 41, text = "Original"))
+        assertTrue(coord.processNext() is IngestProcessResult.Created)
+        val cursorBefore = store.getCursor("com.whatsapp")
+        assertNotNull(cursorBefore)
+
+        store.simulatedPersistError = "batch disk failure"
+        coord.enqueue(payload("already_persisted", id = 41, text = "", isRemoved = true))
+        coord.enqueue(payload("new_batch_row", id = 42, text = "Should rollback"))
+        assertEquals(2, coord.drainAndProcessAll(10))
+
+        val old = store.getObservationByNotificationKey("already_persisted")
+        assertNotNull(old, "Existing active row must survive a failed atomic batch")
+        assertEquals("Original", old.textFragments.single())
+        assertFalse(old.isRemoved)
+        assertNull(store.getObservationByNotificationKey("new_batch_row"),
+            "New row must not survive a failed atomic batch")
+        assertEquals(cursorBefore.processedCount, store.getCursor("com.whatsapp")?.processedCount,
+            "Cursor must roll back with the failed removal/write batch")
+    }
+
+    // -------------------------------------------------------------------------
+    // 2c. Batch writes use bounded automatic retry of the complete transaction.
+    //    A transient first transaction failure recovers without re-enqueueing.
+    // -------------------------------------------------------------------------
+    @Test
+    fun testBatchWriteRetriesAutomaticallyWithoutManualReenqueue() {
+        val store = InMemoryObservationStore()
+        val coord = makeCoordinator(store)
+        ledger.clear()
+
+        store.simulatedPersistFailuresRemaining = 1
+        store.simulatedPersistError = null
+        coord.enqueue(payload("batch_retry_1", id = 51, text = "Retry me"))
+        coord.enqueue(payload("batch_retry_2", id = 52, text = "Retry me too"))
+
+        assertEquals(2, coord.drainAndProcessAll(10))
+        assertEquals(2, store.recoverFromRestart().totalObservations,
+            "Batch retry must recover without manually re-enqueueing events")
+        assertNotNull(store.getObservationByNotificationKey("batch_retry_1"))
+        assertNotNull(store.getObservationByNotificationKey("batch_retry_2"))
+
+        val retryEvents = ledger.getEvents("batch_retry_1")
+        assertTrue(retryEvents.any { it.stage == PipelineStage.Error },
+            "Transient batch failure must be visible as Error before recovery")
+        assertTrue(retryEvents.any { it.stage == PipelineStage.DbCommitted },
+            "Recovered batch must record DbCommitted")
+    }
+
+    // -------------------------------------------------------------------------
     // 3. Retry: after a write failure, the deduplicator has NOT cached the key,
     //    so a second enqueue of the same notification succeeds on retry.
     // -------------------------------------------------------------------------
@@ -448,6 +507,289 @@ class DeliveryCorrectnessTest {
         PipelineStage.ReadbackVerified -> 6
         PipelineStage.UiNotified -> 7
         PipelineStage.Error -> 8
+    }
+
+    // -------------------------------------------------------------------------
+    // 13. Bounded retry: transient failure clears after N attempts and the item
+    //     succeeds automatically -- no manual re-enqueue required.
+    // -------------------------------------------------------------------------
+    @Test
+    fun testBoundedRetryRecoverWithoutManualResubmit() {
+        val store = InMemoryObservationStore()
+        var callCount = 0
+        // Intercept by wrapping with an error on the first 2 calls only
+        val wrappedStore = object : app.mini.hub.persistence.ObservationStore by store {
+            override fun persistObservationWithCursor(
+                observation: ObservedNotification,
+                cursor: app.mini.hub.observation.IngestCursor,
+            ): app.mini.hub.persistence.PersistResult {
+                callCount++
+                return if (callCount <= 2) {
+                    store.simulatedPersistError = "Transient I/O error"
+                    val r = store.persistObservationWithCursor(observation, cursor)
+                    store.simulatedPersistError = null
+                    r
+                } else {
+                    store.persistObservationWithCursor(observation, cursor)
+                }
+            }
+        }
+        val coord = ObservationIngestCoordinator(
+            queue = BoundedIngestQueue(512),
+            normalizer = NotificationNormalizer(idGen, digest),
+            deduplicator = NotificationDeduplicator(),
+            store = wrappedStore,
+            clock = clock,
+            ledger = ledger,
+            maxWriteRetries = 2, // allow up to 2 automatic retries (3 total attempts)
+        )
+        ledger.clear()
+
+        coord.enqueue(payload("retry_auto_key_1"))
+        val result = coord.processNext()
+
+        // Should succeed on 3rd attempt automatically without manual re-enqueue
+        assertTrue(result is IngestProcessResult.Created,
+            "Expected Created after automatic retry, got: $result")
+        assertEquals(1, store.recoverFromRestart().totalObservations,
+            "Observation must be persisted after automatic retry")
+
+        val events = ledger.getEvents("retry_auto_key_1")
+        // First 2 attempts logged as Error with "retrying", final as DbCommitted
+        val errorEvents = events.filter { it.stage == PipelineStage.Error }
+        assertTrue(errorEvents.size >= 2 && errorEvents.all { it.details?.contains("retrying") == true },
+            "Should have retry error events: $errorEvents")
+        assertTrue(events.any { it.stage == PipelineStage.DbCommitted },
+            "DbCommitted must be present after successful retry")
+        assertTrue(events.any { it.stage == PipelineStage.ReadbackVerified },
+            "ReadbackVerified must be present after successful retry")
+    }
+
+    // -------------------------------------------------------------------------
+    // 14. Bounded retry exhausted: after maxWriteRetries + 1 all-fail attempts
+    //     returns Error and does NOT cache in deduplicator.
+    // -------------------------------------------------------------------------
+    @Test
+    fun testBoundedRetryExhaustedReturnsErrorAndIsStillRetryable() {
+        val store = InMemoryObservationStore()
+        store.simulatedPersistError = "Permanent error"
+        val coord = ObservationIngestCoordinator(
+            queue = BoundedIngestQueue(512),
+            normalizer = NotificationNormalizer(idGen, digest),
+            deduplicator = NotificationDeduplicator(),
+            store = store,
+            clock = clock,
+            ledger = ledger,
+            maxWriteRetries = 2,
+        )
+        ledger.clear()
+
+        coord.enqueue(payload("retry_exhaust_key_1"))
+        val result = coord.processNext()
+        assertTrue(result is IngestProcessResult.Error, "Expected Error after exhausted retries")
+
+        // Deduplicator must NOT have cached the entry
+        store.simulatedPersistError = null
+        coord.enqueue(payload("retry_exhaust_key_1"))
+        val retryResult = coord.processNext()
+        assertTrue(retryResult is IngestProcessResult.Created,
+            "After clearing error, same key must succeed as Created, not DuplicateIgnored. Got: $retryResult")
+    }
+
+    // -------------------------------------------------------------------------
+    // 15. Genuine same-batch multi-op: Insert, Update, Duplicate, Remove for the
+    //     same notification key and one distinct key, all enqueued BEFORE a single
+    //     drainAndProcessAll() call.  Verifies intra-batch dedup resolution, final
+    //     DB state, and full ledger stage coverage without any sequential processNext.
+    // -------------------------------------------------------------------------
+    @Test
+    fun testMultiOpBatchPreservesOrderAndFinalState() {
+        val store = InMemoryObservationStore()
+        val coord = makeCoordinator(store)
+        ledger.clear()
+
+        val baseTime = 1_700_000_000_000L
+
+        // Enqueue 5 operations for the same batch (no processNext between them):
+        // op1: Insert key A (first post, v1)
+        coord.enqueue(payload("batch_key_A", id = 1, timeMs = baseTime, text = "v1"))
+        // op2: Update key A (same key, distinct postTime and text -> Update within batch)
+        coord.enqueue(payload("batch_key_A", id = 1, timeMs = baseTime + 10_000L, text = "v2"))
+        // op3: Duplicate of op2 (same postTime, same text -> Drop within batch)
+        coord.enqueue(payload("batch_key_A", id = 1, timeMs = baseTime + 10_000L, text = "v2"))
+        // op4: Insert distinct key B
+        coord.enqueue(payload("batch_key_B", id = 2, timeMs = baseTime, text = "distinct"))
+        // op5: Remove key A
+        coord.enqueue(payload("batch_key_A", id = 1, timeMs = baseTime + 20_000L, text = "", isRemoved = true))
+
+        val processed = coord.drainAndProcessAll(10)
+        assertEquals(5, processed, "All 5 operations should be reported as processed")
+
+        // Final DB state: key A is removed (not present in readback), key B exists
+        val readbackA = store.getObservationByNotificationKey("batch_key_A")
+        assertNull(readbackA, "batch_key_A must be absent (removed) from readback")
+
+        val readbackB = store.getObservationByNotificationKey("batch_key_B")
+        assertNotNull(readbackB, "batch_key_B must exist in readback")
+        assertEquals("batch_key_B", readbackB.notificationKey)
+        assertFalse(readbackB.isRemoved, "batch_key_B must not be marked removed")
+
+        // Ledger for key A must include all expected stages
+        val stagesA = ledger.getEvents("batch_key_A").map { it.stage }.toSet()
+        assertTrue(PipelineStage.DeduplicatedInsert in stagesA,
+            "Insert stage missing for batch_key_A: $stagesA")
+        assertTrue(PipelineStage.DeduplicatedUpdate in stagesA,
+            "Update stage missing for batch_key_A: $stagesA")
+        assertTrue(PipelineStage.DeduplicatedDrop in stagesA,
+            "Drop stage missing for batch_key_A: $stagesA")
+        assertTrue(PipelineStage.DeduplicatedRemove in stagesA,
+            "Remove stage missing for batch_key_A: $stagesA")
+        // DbCommitted: Remove writes to DB immediately; the Insert+Update result was cancelled by
+        // Remove removing it from the batch list before commit.
+        assertTrue(PipelineStage.DbCommitted in stagesA,
+            "DbCommitted missing for batch_key_A: $stagesA")
+    }
+
+    // -------------------------------------------------------------------------
+    // 16. Genuine same-batch 3 updates: Insert + 2 Updates all in one
+    //     drainAndProcessAll() call.  Final record in the DB must reflect the last
+    //     update's content (revision 2, because Insert+Update collapses to one
+    //     persistent record: the batch upsert replaces the slot).
+    // -------------------------------------------------------------------------
+    @Test
+    fun testThreeUpdatesInOneBatchProduceCorrectFinalRevision() {
+        val store = InMemoryObservationStore()
+        val coord = makeCoordinator(store)
+        ledger.clear()
+
+        val base = 1_700_000_000_000L
+        // All three enqueued before any processNext -- genuine batch.
+        coord.enqueue(payload("brev_key_1", id = 10, timeMs = base, text = "rev1"))
+        coord.enqueue(payload("brev_key_1", id = 10, timeMs = base + 1_000L, text = "rev2"))
+        coord.enqueue(payload("brev_key_1", id = 10, timeMs = base + 2_000L, text = "rev3"))
+
+        val processed = coord.drainAndProcessAll(10)
+        assertEquals(3, processed, "Three enqueued items should all be processed")
+
+        // The batch collapses Insert + 2 Updates to a single slot in the persistent list.
+        // Store should have exactly 1 observation for this key.
+        assertEquals(1, store.recoverFromRestart().totalObservations,
+            "Three batch updates to same key must result in exactly one persistent record")
+
+        // Readback shows final state
+        val obs = store.getObservationByNotificationKey("brev_key_1")
+        assertNotNull(obs, "Observation must exist after 3 batch updates")
+        assertFalse(obs.isRemoved)
+        // revision: Insert sets 1, each Update increments by 1 via intra-batch tracking -> 3
+        assertEquals(3L, obs.revision,
+            "Final revision must be 3 after Insert+2 Updates in one batch, got ${obs.revision}")
+
+        // Ledger stages must include all three dedup events
+        val stages = ledger.getEvents("brev_key_1").map { it.stage }.toSet()
+        assertTrue(PipelineStage.DeduplicatedInsert in stages, "Insert missing: $stages")
+        assertTrue(PipelineStage.DeduplicatedUpdate in stages, "Update missing: $stages")
+        assertTrue(PipelineStage.DbCommitted in stages, "DbCommitted missing: $stages")
+        assertTrue(PipelineStage.ReadbackVerified in stages, "ReadbackVerified missing: $stages")
+    }
+
+    // -------------------------------------------------------------------------
+    // 17. Full DB readback: all 3 operations in separate drainAndProcessAll batches.
+    //     Verifies exact notificationKey, textFragment content, revision, isRemoved,
+    //     and that removed keys return null from getObservationByNotificationKey().
+    // -------------------------------------------------------------------------
+    @Test
+    fun testFullDbReadbackVerifiesEveryExpectedRecord() {
+        val store = InMemoryObservationStore()
+        val coord = makeCoordinator(store)
+        ledger.clear()
+
+        val base = 1_700_000_000_000L
+        val textA1 = "Hello from A"
+        val textA2 = "Updated A message"
+        val textB  = "Hello from B"
+        val textC  = "Hello from C"
+
+        // Batch 1: Insert 3 distinct keys
+        coord.enqueue(payload("verify_A", id = 1, timeMs = base, text = textA1))
+        coord.enqueue(payload("verify_B", id = 2, timeMs = base, text = textB))
+        coord.enqueue(payload("verify_C", id = 3, timeMs = base, text = textC))
+        val b1 = coord.drainAndProcessAll(10)
+        assertEquals(3, b1, "Batch 1 must process 3 items")
+
+        // Batch 2: Update verify_A with new content (distinct postTime + text)
+        coord.enqueue(payload("verify_A", id = 1, timeMs = base + 5_000L, text = textA2))
+        val b2 = coord.drainAndProcessAll(10)
+        assertEquals(1, b2, "Batch 2 must process 1 item")
+
+        // Batch 3: Remove verify_C
+        coord.enqueue(payload("verify_C", id = 3, timeMs = base + 10_000L, text = "", isRemoved = true))
+        val b3 = coord.drainAndProcessAll(10)
+        assertEquals(1, b3, "Batch 3 must process 1 item")
+
+        // --- verify_A: present, revision=2, correct content, not removed ---
+        val obsA = store.getObservationByNotificationKey("verify_A")
+        assertNotNull(obsA, "verify_A must exist in readback")
+        assertEquals("verify_A", obsA.notificationKey)
+        assertFalse(obsA.isRemoved, "verify_A must not be removed")
+        assertEquals(2L, obsA.revision, "verify_A must be at revision 2 after update")
+        assertTrue(obsA.textFragments.contains(textA2) || obsA.textFragments.any { it.contains(textA2) },
+            "verify_A readback must contain updated text '$textA2', got: ${obsA.textFragments}")
+
+        // --- verify_B: present, revision=1, correct content, not removed ---
+        val obsB = store.getObservationByNotificationKey("verify_B")
+        assertNotNull(obsB, "verify_B must exist in readback")
+        assertEquals("verify_B", obsB.notificationKey)
+        assertFalse(obsB.isRemoved, "verify_B must not be removed")
+        assertEquals(1L, obsB.revision, "verify_B must be at revision 1 (no updates)")
+        assertTrue(obsB.textFragments.contains(textB) || obsB.textFragments.any { it.contains(textB) },
+            "verify_B readback must contain text '$textB', got: ${obsB.textFragments}")
+
+        // --- verify_C: removed, readback returns null ---
+        val obsC = store.getObservationByNotificationKey("verify_C")
+        assertNull(obsC, "verify_C must return null from readback after removal")
+
+        // --- Total store size: 3 (store retains removed records; only readback hides them) ---
+        val all = store.recoverFromRestart()
+        assertEquals(3, all.totalObservations,
+            "Store must hold 3 records (A active, B active, C removed)")
+    }
+
+    // -------------------------------------------------------------------------
+    // 18. CorrelationId threading: stages recorded under correlationId only, never
+    //     also under the raw OS notification key.
+    // -------------------------------------------------------------------------
+    @Test
+    fun testCorrelationIdThreadingRecordsStagesUnderCorrelationIdOnly() {
+        val store = InMemoryObservationStore()
+        val coord = makeCoordinator(store)
+        ledger.clear()
+
+        val p = payload("notif_os_key_1").copy(correlationId = "my_corr_id_abc")
+        coord.enqueue(p)
+        val result = coord.processNext()
+        assertTrue(result is IngestProcessResult.Created,
+            "Expected Created, got $result")
+
+        // All pipeline stages must be under correlationId
+        val byCorr = ledger.getEvents("my_corr_id_abc")
+        assertTrue(byCorr.any { it.stage == PipelineStage.QueueAdmitted },
+            "QueueAdmitted must be under correlationId")
+        assertTrue(byCorr.any { it.stage == PipelineStage.DbCommitted },
+            "DbCommitted must be under correlationId")
+        assertTrue(byCorr.any { it.stage == PipelineStage.ReadbackVerified },
+            "ReadbackVerified must be under correlationId")
+
+        // Nothing must appear under the raw OS key for these ingest-pipeline stages.
+        // (The raw key has no entry at all when correlationId is set.)
+        val byKey = ledger.getEvents("notif_os_key_1")
+        val pipelineStagesUnderRawKey = byKey.filter { it.stage in listOf(
+            PipelineStage.QueueAdmitted, PipelineStage.Normalized,
+            PipelineStage.DeduplicatedInsert, PipelineStage.DbCommitted,
+            PipelineStage.ReadbackVerified,
+        )}
+        assertTrue(pipelineStagesUnderRawKey.isEmpty(),
+            "No ingest-pipeline stages must be recorded under raw OS key when correlationId is set; " +
+                "found: $pipelineStagesUnderRawKey")
     }
 
     private fun makeObservation(notifKey: String): app.mini.hub.observation.ObservedNotification {

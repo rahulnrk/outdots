@@ -57,6 +57,13 @@ data class NotificationRawPayload(
     val appLabel: String? = null,
     val isRemoved: Boolean = false,
     val removedReason: Int? = null,
+    /**
+     * Optional caller-supplied correlation ID that binds this payload to a specific
+     * test operation regardless of what OS key is ultimately assigned to the notification.
+     * When present, the coordinator records all pipeline stages under this ID instead of
+     * the OS notification key, enabling end-to-end tracing across the broadcast/listener boundary.
+     */
+    val correlationId: String? = null,
 ) {
     init {
         require(key.isNotBlank()) { "Notification key must not be blank" }

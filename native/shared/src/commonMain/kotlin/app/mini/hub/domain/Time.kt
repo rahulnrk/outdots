@@ -78,4 +78,11 @@ object SystemClock : Clock {
     override fun now(): UtcInstant = UtcInstant(currentEpochMillis())
 }
 
+/**
+ * Returns monotonically increasing milliseconds since an arbitrary epoch (process start or
+ * platform monotonic counter). Suitable for elapsed-time latency measurements that must not
+ * be affected by wall-clock adjustments or NTP corrections. Do NOT use for absolute timestamps.
+ */
+expect fun monotonicMillis(): Long
+
 internal expect fun currentEpochMillis(): Long

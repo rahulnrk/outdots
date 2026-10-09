@@ -99,6 +99,8 @@ class MiniNotificationListenerService : NotificationListenerService() {
         val lines = extras?.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
             ?.mapNotNull { it?.toString() } ?: emptyList()
         val isGroup = extras?.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false) ?: false
+        // Carry caller-supplied correlation ID if present (set by SyntheticNotificationReceiver)
+        val correlationId = extras?.getString("mini_correlation_id")
 
         val textFragments = buildList {
             if (bigText != null && bigText != text) add(bigText)
@@ -121,9 +123,15 @@ class MiniNotificationListenerService : NotificationListenerService() {
             isOngoing = sbn.isOngoing,
             category = notification.category,
             isRemoved = false,
+            correlationId = correlationId,
         )
 
-        MiniHubRuntime.ledger.record(payload.key, app.mini.hub.observation.PipelineStage.ListenerReceived, System.currentTimeMillis())
+        val nowMs = System.currentTimeMillis()
+        // Record under exactly one ledger key: correlationId when the caller embedded one
+        // (synthetic test), or the OS notification key for organic notifications.
+        // Never record the same operation under both keys -- that would inflate total counts.
+        val listenerLedgerKey = correlationId ?: payload.key
+        MiniHubRuntime.ledger.record(listenerLedgerKey, app.mini.hub.observation.PipelineStage.ListenerReceived, nowMs)
         MiniHubRuntime.onNotificationReceived(payload)
     }
 
@@ -131,6 +139,15 @@ class MiniNotificationListenerService : NotificationListenerService() {
         if (sbn == null) return
         val pkg = sbn.packageName ?: return
         if (pkg == packageName && sbn.tag != "synthetic_test") return
+
+        // Android does not preserve notification extras in removal callbacks. Debug synthetic
+        // cancellations bridge that limitation through a bounded in-process side-channel keyed
+        // by package, tag, and notification ID. Organic removals simply have no correlation ID.
+        val correlationId = SyntheticNotificationReceiver.takeCancellationCorrelationId(
+            packageName = pkg,
+            tag = sbn.tag,
+            notificationId = sbn.id,
+        )
 
         val payload = NotificationRawPayload(
             key = sbn.key ?: "${pkg}_${sbn.id}",
@@ -142,9 +159,14 @@ class MiniNotificationListenerService : NotificationListenerService() {
             title = null,
             text = "",
             isRemoved = true,
+            correlationId = correlationId,
         )
 
-        MiniHubRuntime.ledger.record(payload.key, app.mini.hub.observation.PipelineStage.ListenerReceived, System.currentTimeMillis())
+        MiniHubRuntime.ledger.record(
+            correlationId ?: payload.key,
+            app.mini.hub.observation.PipelineStage.ListenerReceived,
+            System.currentTimeMillis(),
+        )
         MiniHubRuntime.onNotificationReceived(payload)
     }
 }

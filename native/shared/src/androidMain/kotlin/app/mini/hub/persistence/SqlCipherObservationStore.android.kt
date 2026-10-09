@@ -244,6 +244,43 @@ class SqlCipherObservationStore(
     }
 
     @Synchronized
+    override fun persistAtomicBatch(
+        removals: List<Pair<String, UtcInstant>>,
+        observations: List<ObservedNotification>,
+        cursors: List<IngestCursor>,
+    ): BatchPersistResult {
+        if (removals.isEmpty() && observations.isEmpty() && cursors.isEmpty()) {
+            return BatchPersistResult(0, 0, emptyList())
+        }
+        return try {
+            database.beginTransaction()
+            try {
+                // Writes precede removals so an insert/update followed by a removal in
+                // the same drain call ends in the removed state, all within this transaction.
+                for (obs in observations) {
+                    persistObservationRow(database, obs)
+                }
+                for ((notificationKey, removedAt) in removals) {
+                    markRemovedRow(database, notificationKey, removedAt)
+                }
+                for (cursor in cursors) {
+                    persistCursorRow(database, cursor)
+                }
+                database.setTransactionSuccessful()
+                BatchPersistResult(removals.size + observations.size, 0, emptyList())
+            } finally {
+                database.endTransaction()
+            }
+        } catch (e: Throwable) {
+            BatchPersistResult(
+                successCount = 0,
+                failedCount = removals.size + observations.size,
+                errors = listOf(e.message ?: "Database error"),
+            )
+        }
+    }
+
+    @Synchronized
     override fun persistObservationWithCursor(
         observation: ObservedNotification,
         cursor: IngestCursor,
@@ -270,6 +307,38 @@ class SqlCipherObservationStore(
             null,
             "notification_key = ? AND is_removed = 0",
             arrayOf(notificationKey),
+            null,
+            null,
+            "observed_at DESC",
+            "1",
+        ).use { cursor ->
+            if (cursor.moveToFirst()) mapObservation(cursor) else null
+        }
+    }
+
+    @Synchronized
+    override fun getObservationByNotificationKeyIncludingRemoved(notificationKey: String): ObservedNotification? {
+        return database.query(
+            "notification_observations",
+            null,
+            "notification_key = ?",
+            arrayOf(notificationKey),
+            null,
+            null,
+            "observed_at DESC",
+            "1",
+        ).use { cursor ->
+            if (cursor.moveToFirst()) mapObservation(cursor) else null
+        }
+    }
+
+    @Synchronized
+    override fun getObservationByNotificationIdIncludingRemoved(packageId: String, notificationId: Int): ObservedNotification? {
+        return database.query(
+            "notification_observations",
+            null,
+            "package_id = ? AND notification_id = ?",
+            arrayOf(packageId, notificationId.toString()),
             null,
             null,
             "observed_at DESC",
@@ -447,10 +516,19 @@ class SqlCipherObservationStore(
 
     @Synchronized
     override fun markRemoved(notificationKey: String, removedAt: UtcInstant): Int {
+        return markRemovedRow(database, notificationKey, removedAt)
+    }
+
+    /** Must be called inside the caller's transaction. */
+    private fun markRemovedRow(
+        db: SQLiteDatabase,
+        notificationKey: String,
+        removedAt: UtcInstant,
+    ): Int {
         val values = ContentValues().apply {
             put("is_removed", 1)
         }
-        return database.update(
+        return db.update(
             "notification_observations",
             values,
             "notification_key = ?",

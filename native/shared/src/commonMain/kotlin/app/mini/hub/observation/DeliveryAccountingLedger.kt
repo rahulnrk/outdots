@@ -1,5 +1,7 @@
 package app.mini.hub.observation
 
+import app.mini.hub.domain.monotonicMillis
+
 enum class PipelineStage {
     SourcePublished,
     ListenerReceived,
@@ -20,6 +22,8 @@ data class StageEvent(
     val correlationId: String,
     val stage: PipelineStage,
     val timestampMillis: Long,
+    /** Monotonic milliseconds at the time this event was recorded. Used for latency computation. */
+    val monotonicMs: Long = timestampMillis,
     val details: String? = null,
 )
 
@@ -57,12 +61,13 @@ class DeliveryAccountingLedger(
         stage: PipelineStage,
         timestampMillis: Long,
         details: String? = null,
+        monotonicMs: Long = monotonicMillis(),
     ): Unit = synchronized(lock) {
         if (correlationId.isBlank()) return
         if (stageEvents.size >= maxCapacity) {
             stageEvents.removeAt(0)
         }
-        stageEvents.add(StageEvent(correlationId, stage, timestampMillis, details))
+        stageEvents.add(StageEvent(correlationId, stage, timestampMillis, monotonicMs, details))
     }
 
     fun getEvents(correlationId: String): List<StageEvent> = synchronized(lock) {
@@ -101,9 +106,10 @@ class DeliveryAccountingLedger(
             val stages = evs.map { it.stage }
             if (PipelineStage.DbCommitted in stages || PipelineStage.DeduplicatedDrop in stages) {
                 fullyDelivered++
-                val first = evs.minOf { it.timestampMillis }
-                val commit = evs.find { it.stage == PipelineStage.DbCommitted }?.timestampMillis
-                    ?: evs.maxOf { it.timestampMillis }
+                // Use monotonic timestamps for latency to avoid wall-clock jumps.
+                val first = evs.minOf { it.monotonicMs }
+                val commit = evs.find { it.stage == PipelineStage.DbCommitted }?.monotonicMs
+                    ?: evs.maxOf { it.monotonicMs }
                 latencies.add((commit - first).coerceAtLeast(0L))
             }
         }

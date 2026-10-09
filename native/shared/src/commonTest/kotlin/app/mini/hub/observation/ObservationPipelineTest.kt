@@ -106,6 +106,34 @@ class ObservationPipelineTest {
     }
 
     @Test
+    fun testIdenticalContentWithNewerNotificationTimestampIsUpdate() {
+        val store = InMemoryObservationStore()
+        val coordinator = createCoordinator(store = store)
+
+        val first = NotificationRawPayload(
+            key = "wa_repost_timestamp",
+            packageId = "com.whatsapp",
+            notificationId = 110,
+            postTimeMillis = 1_700_000_000_000L,
+            senderHint = "Alice",
+            title = "Project Chat",
+            text = "Same content",
+        )
+        val repost = first.copy(postTimeMillis = first.postTimeMillis + 1_000L)
+
+        coordinator.enqueue(first)
+        assertTrue(coordinator.processNext() is IngestProcessResult.Created)
+
+        coordinator.enqueue(repost)
+        val result = coordinator.processNext()
+        assertTrue(result is IngestProcessResult.Updated,
+            "A repost with a newer OS post timestamp must be an Update, not a Drop")
+        assertEquals(2L, result.observation.revision)
+        assertEquals(repost.postTimeMillis, result.observation.postTime.epochMillis)
+        assertEquals(1, store.recoverFromRestart().totalObservations)
+    }
+
+    @Test
     fun testDistinctMessagesWithIdenticalTextPreserved() {
         val store = InMemoryObservationStore()
         val coordinator = createCoordinator(store = store)
