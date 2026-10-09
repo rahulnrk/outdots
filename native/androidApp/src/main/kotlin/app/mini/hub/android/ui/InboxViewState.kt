@@ -28,4 +28,9 @@ data class InboxViewState(
     val localDraftWarning: String? = null,
     val localDraftStatus: String? = null,
     val isLocalDraftInProgress: Boolean = false,
+    /** Local AI is paused after repeated failures; show "Retry local AI". */
+    val isLocalAiRetryAvailable: Boolean = false,
+    val isLocalAiRetryInProgress: Boolean = false,
+    /** Latest asynchronous resource release state, e.g. "Queued", "Released". */
+    val localAiReleaseStatus: String? = null,
 )

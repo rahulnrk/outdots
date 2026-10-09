@@ -2,6 +2,11 @@ package app.mini.hub.android.ui
 
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import app.mini.hub.android.intelligence.LocalAiTrace
+import app.mini.hub.android.intelligence.RecoveryResult
+import app.mini.hub.android.intelligence.ReleaseStatus
+import app.mini.hub.android.intelligence.onAndroidMainThread
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import app.mini.hub.action.ActionController
@@ -53,6 +58,39 @@ class InboxViewModel(
         Handler(Looper.getMainLooper())
     } catch (_: RuntimeException) {
         null
+    }
+
+    init {
+        localDraftExperiment?.setReleaseListener { ticket ->
+            postToMain("release") {
+                _state.value = _state.value.copy(localAiReleaseStatus = releaseLabel(ticket.status))
+            }
+        }
+    }
+
+    /**
+     * Delivers worker results on the main thread and records the real main-thread cost of
+     * applying them (dispatch delay and handler duration).
+     */
+    private fun postToMain(name: String, block: () -> Unit) {
+        val handler = mainHandler ?: run { block(); return }
+        val postedAt = SystemClock.elapsedRealtimeNanos()
+        handler.post {
+            val start = SystemClock.elapsedRealtimeNanos()
+            block()
+            val end = SystemClock.elapsedRealtimeNanos()
+            LocalAiTrace.log(
+                "MAIN_CALLBACK name=ui-$name mainThread=${onAndroidMainThread()} " +
+                    "dispatchDelayUs=${(start - postedAt) / 1_000} durationUs=${(end - start) / 1_000}",
+            )
+        }
+    }
+
+    private fun releaseLabel(status: ReleaseStatus): String = when (status) {
+        ReleaseStatus.Queued -> "Local AI cleanup queued."
+        ReleaseStatus.Released -> "Local AI resources released."
+        is ReleaseStatus.Quarantined -> "Local AI could not stop cleanly. Restart the app to free it."
+        is ReleaseStatus.Failed -> "Local AI cleanup failed. Restart the app before drafting."
     }
 
     fun refresh(isPermissionGranted: Boolean, isListenerConnected: Boolean) {
@@ -134,6 +172,8 @@ class InboxViewModel(
             localDraftWarning = null,
             localDraftStatus = null,
             isLocalDraftInProgress = false,
+            // The failure pause belongs to the runtime, not the conversation; keep offering retry.
+            isLocalAiRetryAvailable = localDraftExperiment?.needsRecovery == true,
         )
     }
 
@@ -169,6 +209,9 @@ class InboxViewModel(
             localDraftText = "",
             localDraftWarning = retrieved.coverageWarning.ifBlank { null },
             isLocalDraftInProgress = true,
+            isLocalAiRetryAvailable = false,
+            // A new draft reloads the model, so an earlier "released" line would be stale.
+            localAiReleaseStatus = null,
         )
         experiment.draftAsync(
             LocalDraftRequest(
@@ -197,12 +240,17 @@ class InboxViewModel(
                     )
                     is LocalDraftResult.Failed -> _state.value = _state.value.copy(
                         localDraftWarning = result.warning.ifBlank { null },
-                        localDraftStatus = "Local draft unavailable: ${result.reason}",
+                        localDraftStatus = when {
+                            result.cancelled -> "Local draft cancelled."
+                            result.needsRecovery || result.restartRequired -> result.reason
+                            else -> "Local draft unavailable: ${result.reason}"
+                        },
                         isLocalDraftInProgress = false,
+                        isLocalAiRetryAvailable = result.needsRecovery,
                     )
                 }
             }
-            mainHandler?.post(applyResult) ?: applyResult()
+            postToMain("draft-result", applyResult)
         }
     }
 
@@ -229,6 +277,33 @@ class InboxViewModel(
 
     fun updateLocalDraftText(text: String) {
         _state.value = _state.value.copy(localDraftText = text)
+    }
+
+    /**
+     * "Retry local AI" after repeated failures. Recovery runs on the inference worker; the
+     * model is not loaded until the next valid draft request.
+     */
+    fun retryLocalAi() {
+        val experiment = localDraftExperiment ?: return
+        if (_state.value.isLocalAiRetryInProgress) return
+        _state.value = _state.value.copy(isLocalAiRetryInProgress = true)
+        experiment.retryLocalAi { result ->
+            postToMain("retry-result") {
+                val message = when (result) {
+                    RecoveryResult.Recovered -> "Local AI is ready. The model loads when you draft again."
+                    RecoveryResult.NotNeeded -> "Local AI is already available."
+                    RecoveryResult.Background -> "Open the app to retry local AI."
+                    RecoveryResult.MemoryPressure -> "The device is low on memory. Try again shortly."
+                    RecoveryResult.RestartRequired -> "Local AI did not stop cleanly. Restart the app before drafting again."
+                }
+                _state.value = _state.value.copy(
+                    isLocalAiRetryInProgress = false,
+                    isLocalAiRetryAvailable = result == RecoveryResult.MemoryPressure ||
+                        result == RecoveryResult.Background,
+                    localDraftStatus = message,
+                )
+            }
+        }
     }
 
     fun releaseLocalDraftResources() {

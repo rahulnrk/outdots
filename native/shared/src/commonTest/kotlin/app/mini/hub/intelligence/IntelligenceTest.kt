@@ -118,7 +118,7 @@ class IntelligenceTest {
 
         // Recovery resets to Unloaded (lazy, no model load yet)
         flaky.throwError = false
-        supervisor.recoverFromFailure()
+        assertTrue(supervisor.recoverFromFailure())
         assertEquals(0, supervisor.consecutiveFailures)
         assertTrue(supervisor.state is SupervisorState.Unloaded)
         // Next submit triggers lazy load and succeeds
@@ -126,6 +126,62 @@ class IntelligenceTest {
         val proposal = supervisor.runNext()
         assertNotNull(proposal)
         assertEquals(t3.id, proposal.taskId)
+    }
+
+    @Test fun cancellationIsNotCountedAsEngineFailure() {
+        class CancellingEngine : DeterministicInferenceEngine() {
+            override fun run(task: InferenceTask): ModelProposal =
+                throw kotlin.coroutines.cancellation.CancellationException("stopped")
+        }
+        val supervisor = ResourceSupervisor(CancellingEngine(), "m", DeviceResourceBudget.Tier1LowEnd, maxFailureThreshold = 2)
+        repeat(4) { i ->
+            assertEquals(SubmitResult.Accepted, supervisor.submit(task("c$i")))
+            assertEquals(null, supervisor.runNext())
+            assertTrue(supervisor.lastRunCancelled)
+        }
+        assertEquals(0, supervisor.consecutiveFailures)
+        assertFalse(supervisor.state is SupervisorState.Degraded)
+    }
+
+    @Test fun failurePauseSurvivesPressureAndReleaseUntilExplicitRecovery() {
+        class FailingEngine : DeterministicInferenceEngine() {
+            var fail = true
+            override fun run(task: InferenceTask): ModelProposal =
+                if (fail) throw IllegalStateException("boom") else super.run(task)
+        }
+        val engine = FailingEngine()
+        val supervisor = ResourceSupervisor(engine, "m", DeviceResourceBudget.Tier1LowEnd, maxFailureThreshold = 2)
+        repeat(2) { i -> supervisor.submit(task("f$i")); supervisor.runNext() }
+        assertTrue(supervisor.state is SupervisorState.Degraded)
+
+        assertEquals(UnloadOutcome.Released, supervisor.release())
+        assertTrue(supervisor.state is SupervisorState.Degraded, "release must not clear the pause")
+
+        supervisor.onMemoryPressure()
+        assertFalse(supervisor.recoverFromFailure(), "recovery refused under pressure")
+        supervisor.resumeAfterPressure()
+        assertTrue(supervisor.state is SupervisorState.Degraded, "pause restored after pressure")
+
+        engine.fail = false
+        assertTrue(supervisor.recoverFromFailure())
+        assertEquals(SupervisorState.Unloaded, supervisor.state)
+        assertEquals(SubmitResult.Accepted, supervisor.submit(task("ok")))
+        assertNotNull(supervisor.runNext())
+    }
+
+    @Test fun unloadOutcomesArePropagated() {
+        class QuarantiningEngine : DeterministicInferenceEngine() {
+            override fun unloadWithOutcome(): UnloadOutcome = UnloadOutcome.Quarantined("busy")
+        }
+        val supervisor = ResourceSupervisor(QuarantiningEngine(), "m")
+        assertEquals(UnloadOutcome.Quarantined("busy"), supervisor.release())
+        assertEquals(UnloadOutcome.Quarantined("busy"), supervisor.onMemoryPressure())
+
+        class ThrowingEngine : DeterministicInferenceEngine() {
+            override fun unload() = throw IllegalStateException("close failed")
+        }
+        val outcome = ResourceSupervisor(ThrowingEngine(), "m").release()
+        assertTrue(outcome is UnloadOutcome.Failed && outcome.reason.contains("close failed"))
     }
 
     @Test fun qualityEvaluationHarnessEvaluatesStandardSuite() {

@@ -6,7 +6,10 @@ import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Bundle
+import android.os.SystemClock
+import app.mini.hub.android.intelligence.LocalAiTrace
 import app.mini.hub.android.intelligence.LocalDraftExperiment
+import app.mini.hub.android.intelligence.onAndroidMainThread
 import app.mini.hub.action.ActionController
 import app.mini.hub.action.DigestProvider
 import app.mini.hub.action.DomainActionIdGenerator
@@ -117,12 +120,12 @@ object MiniHubRuntime {
             app.registerComponentCallbacks(object : ComponentCallbacks2 {
                 override fun onTrimMemory(level: Int) {
                     if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
-                        localDraftExperiment.onMemoryPressure()
+                        timedCallback("onTrimMemory level=$level") { localDraftExperiment.onMemoryPressure() }
                     }
                 }
                 override fun onConfigurationChanged(newConfig: Configuration) {}
                 override fun onLowMemory() {
-                    localDraftExperiment.onMemoryPressure()
+                    timedCallback("onLowMemory") { localDraftExperiment.onMemoryPressure() }
                 }
             })
 
@@ -131,13 +134,13 @@ object MiniHubRuntime {
 
                 override fun onActivityStarted(activity: Activity) {
                     foregroundActivities++
-                    localDraftExperiment.setForeground(true)
+                    timedCallback("onActivityStarted") { localDraftExperiment.setForeground(true) }
                 }
 
                 override fun onActivityStopped(activity: Activity) {
                     foregroundActivities--
                     if (foregroundActivities <= 0) {
-                        localDraftExperiment.setForeground(false)
+                        timedCallback("onActivityStopped") { localDraftExperiment.setForeground(false) }
                     }
                 }
 
@@ -150,6 +153,17 @@ object MiniHubRuntime {
 
             isInitialized = true
         }
+    }
+
+    /**
+     * Runs a lifecycle callback's local-AI work and logs how long it held the calling thread.
+     * Measured with SystemClock.elapsedRealtimeNanos on the real callback thread.
+     */
+    private inline fun timedCallback(name: String, block: () -> Unit) {
+        val start = SystemClock.elapsedRealtimeNanos()
+        block()
+        val micros = (SystemClock.elapsedRealtimeNanos() - start) / 1_000
+        LocalAiTrace.log("MAIN_CALLBACK name=$name mainThread=${onAndroidMainThread()} durationUs=$micros")
     }
 
     /**

@@ -67,11 +67,37 @@ class ProposalValidator {
     }
 }
 
+/** Result of asking an engine to free its resources. */
+sealed class UnloadOutcome {
+    /** Native and managed resources were closed. */
+    data object Released : UnloadOutcome()
+
+    /** Resources were deliberately not closed because native work was still active. */
+    data class Quarantined(val reason: String) : UnloadOutcome()
+
+    /** Closing failed; the runtime must not be reused in this process. */
+    data class Failed(val reason: String) : UnloadOutcome()
+}
+
 interface InferenceEngine {
     fun load(modelId: String): Boolean
     fun run(task: InferenceTask): ModelProposal
     fun cancel(taskId: String): Boolean
     fun unload()
+
+    /** Unloads and reports whether resources were actually freed. */
+    fun unloadWithOutcome(): UnloadOutcome = try {
+        unload()
+        UnloadOutcome.Released
+    } catch (e: Throwable) {
+        UnloadOutcome.Failed(e.message ?: e::class.simpleName ?: "unload failed")
+    }
+
+    /** True when this runtime cannot be reused in the current process. */
+    val isQuarantined: Boolean get() = false
+
+    /** Optional signal invoked once per task when the model produces its first output. */
+    fun setGenerationStartedListener(listener: ((taskId: String) -> Unit)?) {}
 }
 
 /** Deterministic backend-free engine useful for wiring and tests, not a real model. */

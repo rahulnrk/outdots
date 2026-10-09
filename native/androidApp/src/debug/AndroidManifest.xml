@@ -20,5 +20,14 @@
                 <action android:name="app.mini.hub.RUN_LOCAL_DRAFT_EVALUATION" />
             </intent-filter>
         </receiver>
+        <receiver
+            android:name=".intelligence.LocalAiDebugReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="app.mini.hub.debug.LOCAL_AI_FAULT" />
+                <action android:name="app.mini.hub.debug.LOCAL_AI_SIMULATE_PRESSURE" />
+                <action android:name="app.mini.hub.debug.LOCAL_AI_STATUS" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

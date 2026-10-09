@@ -171,7 +171,7 @@ class ForegroundRecoveryTest {
         assertFalse(exp.recoverFromDegraded(), "recovery must be blocked under memory pressure")
         val draft = exp.draftBlocking(request())
         assertIs<LocalDraftResult.Failed>(draft)
-        assertTrue(draft.reason.contains("pressured"))
+        assertTrue(draft.reason.contains("low on memory"))
         assertEquals(loadsBefore, engine.loads.get(), "blocked recovery must not load the model")
         assertEquals(runsBefore, engine.runs.get(), "pressured draft must not run the model")
         exp.release()

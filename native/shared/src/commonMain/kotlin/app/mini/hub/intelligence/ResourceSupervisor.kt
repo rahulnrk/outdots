@@ -1,5 +1,7 @@
 package app.mini.hub.intelligence
 
+import kotlin.coroutines.cancellation.CancellationException
+
 sealed class SupervisorState {
     data object Unloaded : SupervisorState()
     data object Ready : SupervisorState()
@@ -16,6 +18,8 @@ class ResourceSupervisor(
     private val modelId: String,
     val budget: DeviceResourceBudget = DeviceResourceBudget.Tier2MidRange,
     private val maxFailureThreshold: Int = 3,
+    /** User or lifecycle cancellation is not an engine failure and never counts toward Degraded. */
+    private val isCancellation: (Throwable) -> Boolean = { it is CancellationException },
 ) {
     private val maxQueue: Int = budget.maxQueueSize
     private val maxCacheEntries: Int = budget.maxProposalCacheEntries
@@ -35,6 +39,9 @@ class ResourceSupervisor(
         private set
     var lastError: String? = null
         private set
+    /** True when the most recent runNext ended because the task was cancelled. */
+    var lastRunCancelled: Boolean = false
+        private set
 
     var activeScope: CompartmentId? = null
         private set
@@ -43,6 +50,8 @@ class ResourceSupervisor(
     private val queue = ArrayDeque<Job>()
     private val cache = LinkedHashMap<String, ModelProposal>()
     private val cancelled = mutableSetOf<String>()
+    // Repeated failures stay paused through memory pressure and only clear on explicit recovery.
+    private var degradedBeforePressure: SupervisorState.Degraded? = null
 
     fun ensureReady(): Boolean {
         if (state is SupervisorState.Degraded) return false
@@ -67,8 +76,12 @@ class ResourceSupervisor(
     }
 
     fun runNext(): ModelProposal? {
+        lastRunCancelled = false
         val job = queue.removeFirstOrNull() ?: return null
-        if (job.task.id in cancelled) return null
+        if (job.task.id in cancelled) {
+            lastRunCancelled = true
+            return null
+        }
         val scope = activeScope
         if (scope != null && scope != job.task.compartment) return null
         activeScope = job.task.compartment
@@ -79,11 +92,15 @@ class ResourceSupervisor(
             while (cache.size > maxCacheEntries) cache.remove(cache.entries.first().key)
             proposal
         } catch (e: Throwable) {
-            consecutiveFailures++
-            lastError = e.message ?: e::class.simpleName ?: "unknown error"
-            if (consecutiveFailures >= maxFailureThreshold) {
-                state = SupervisorState.Degraded(consecutiveFailures, lastError ?: "repeated failures")
-                engine.unload()
+            if (isCancellation(e)) {
+                lastRunCancelled = true
+            } else {
+                consecutiveFailures++
+                lastError = e.message ?: e::class.simpleName ?: "unknown error"
+                if (consecutiveFailures >= maxFailureThreshold) {
+                    state = SupervisorState.Degraded(consecutiveFailures, lastError ?: "repeated failures")
+                    engine.unload()
+                }
             }
             null
         } finally {
@@ -97,32 +114,47 @@ class ResourceSupervisor(
         return found || engine.cancel(taskId)
     }
 
-    fun onMemoryPressure() {
+    fun onMemoryPressure(): UnloadOutcome {
+        (state as? SupervisorState.Degraded)?.let { degradedBeforePressure = it }
         state = SupervisorState.Pressured
-        consecutiveFailures = 0
+        if (degradedBeforePressure == null) consecutiveFailures = 0
         queue.removeAll { cancelled += it.task.id; true }
         cache.clear()
         activeScope = null
-        engine.unload()
+        return engine.unloadWithOutcome()
     }
 
+    /** Leaves Pressured without loading. A failure pause that existed before pressure is restored. */
     fun resumeAfterPressure() {
         if (state == SupervisorState.Pressured) {
-            state = SupervisorState.Unloaded
+            state = degradedBeforePressure ?: SupervisorState.Unloaded
+            degradedBeforePressure = null
         }
     }
 
-    /** Reset from Degraded to Unloaded. Does not load the model; next submit() will load lazily. */
-    fun recoverFromFailure() {
+    /**
+     * Clears a failure pause without loading the model; the next submit() loads lazily.
+     * Refused while memory pressure is active.
+     */
+    fun recoverFromFailure(): Boolean {
+        if (state == SupervisorState.Pressured) return false
         consecutiveFailures = 0
         lastError = null
+        degradedBeforePressure = null
         state = SupervisorState.Unloaded
+        return true
     }
 
-    fun release() {
+    /** Frees resources. A failure pause or memory pressure survives release. */
+    fun release(): UnloadOutcome {
         queue.clear(); cache.clear(); cancelled.clear(); activeScope = null
-        consecutiveFailures = 0
-        lastError = null
-        engine.unload(); state = SupervisorState.Unloaded
+        val outcome = engine.unloadWithOutcome()
+        val current = state
+        if (current !is SupervisorState.Degraded && current != SupervisorState.Pressured) {
+            consecutiveFailures = 0
+            lastError = null
+            state = SupervisorState.Unloaded
+        }
+        return outcome
     }
 }

@@ -55,7 +55,7 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
         val artifactCases = JSONArray()
         val artifact = JSONObject()
             .put("syntheticOnly", true)
-            .put("artifactVersion", 2)
+            .put("artifactVersion", 3)
             .put("startedAtEpochMillis", System.currentTimeMillis())
             .put("processId", android.os.Process.myPid())
             .put("inferenceOwner", "MiniHubRuntime")
@@ -131,13 +131,31 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
             )
         }
         artifact.put("memoryWhileResidentPssKb", readPssKb(context))
-        experiment.release()
+        // This runs on the evaluator's worker thread, never the Android main thread. Memory after
+        // release is only measured once the inference worker confirms the native resources closed.
+        val releaseTicket = experiment.release()
+        val releaseStatus = releaseTicket.await(RELEASE_AWAIT_MILLIS)
+        val released = releaseStatus == ReleaseStatus.Released
         artifact
-            .put("memoryAfterReleasePssKb", readPssKb(context))
-            .put("released", true)
+            .put("releaseStatus", releaseStatus.label)
+            .put("releaseCompletedAfterMs", releaseTicket.completedAfterMillis)
+            .put("released", released)
+        if (released) {
+            artifact.put("memoryAfterReleasePssKb", readPssKb(context))
+        } else {
+            artifact.put("memoryAfterReleasePssKb", JSONObject.NULL)
+            artifact.put(
+                "releaseDetail",
+                when (releaseStatus) {
+                    is ReleaseStatus.Quarantined -> releaseStatus.reason
+                    is ReleaseStatus.Failed -> releaseStatus.reason
+                    else -> "Release did not complete within $RELEASE_AWAIT_MILLIS ms."
+                },
+            )
+        }
         writeArtifact(artifactFile, artifact)
         Log.i("MiniDraftEval", "REVIEW_ARTIFACT path=${artifactFile.absolutePath}")
-        Log.i("MiniDraftEval", "EVAL_END released=true offlineBoundary=caller-controlled")
+        Log.i("MiniDraftEval", "EVAL_END released=$released releaseStatus=${releaseStatus.label} offlineBoundary=caller-controlled")
     }
 
     private fun reviewArtifactFile(context: Context, selectedCaseId: String?): File = File(
@@ -317,6 +335,7 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
         private val DEVANAGARI = '\u0900'..'\u097F'
         private val TELUGU = '\u0C00'..'\u0C7F'
         const val ACTION_RUN_LOCAL_DRAFT_EVALUATION = "app.mini.hub.RUN_LOCAL_DRAFT_EVALUATION"
+        private const val RELEASE_AWAIT_MILLIS = 15_000L
         const val EXTRA_CASE_ID = "case_id"
         const val EXTRA_TIMEOUT_MILLIS = "timeout_ms"
         const val EXTRA_VERIFY_TIMEOUT_RECOVERY = "verify_timeout_recovery"

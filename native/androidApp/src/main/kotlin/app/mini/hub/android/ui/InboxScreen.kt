@@ -158,10 +158,14 @@ fun InboxScreen(
                     localDraftWarning = state.localDraftWarning,
                     localDraftStatus = state.localDraftStatus,
                     isLocalDraftInProgress = state.isLocalDraftInProgress,
+                    isLocalAiRetryAvailable = state.isLocalAiRetryAvailable,
+                    isLocalAiRetryInProgress = state.isLocalAiRetryInProgress,
+                    localAiReleaseStatus = state.localAiReleaseStatus,
                     onBack = { viewModel.clearSelection() },
                     onLocalDraftRequested = { intent -> viewModel.requestLocalDraft(intent) },
                     onLocalDraftChanged = { text -> viewModel.updateLocalDraftText(text) },
                     onLocalDraftCancelled = { viewModel.cancelLocalDraft() },
+                    onRetryLocalAi = { viewModel.retryLocalAi() },
                     onDraftPrepared = { body, recip -> viewModel.prepareDraft(body, recip) },
                     onAttentionAction = { action -> viewModel.applyAttentionAction(state.selectedConversation!!.conversationId, action) },
                 )
@@ -347,10 +351,14 @@ fun ConversationDetailView(
     localDraftWarning: String?,
     localDraftStatus: String?,
     isLocalDraftInProgress: Boolean,
+    isLocalAiRetryAvailable: Boolean,
+    isLocalAiRetryInProgress: Boolean,
+    localAiReleaseStatus: String?,
     onBack: () -> Unit,
     onLocalDraftRequested: (String) -> Unit,
     onLocalDraftChanged: (String) -> Unit,
     onLocalDraftCancelled: () -> Unit,
+    onRetryLocalAi: () -> Unit,
     onDraftPrepared: (String, String) -> Unit,
     onAttentionAction: (AttentionAction) -> Unit,
 ) {
@@ -505,7 +513,7 @@ fun ConversationDetailView(
         ) {
             Button(
                 onClick = { onLocalDraftRequested(replyIntent) },
-                enabled = replyIntent.isNotBlank() && !isLocalDraftInProgress,
+                enabled = replyIntent.isNotBlank() && !isLocalDraftInProgress && !isLocalAiRetryAvailable,
                 modifier = Modifier.weight(1f),
             ) {
                 Text("Draft on device")
@@ -515,12 +523,27 @@ fun ConversationDetailView(
                     Text("Cancel")
                 }
             }
+            if (isLocalAiRetryAvailable) {
+                OutlinedButton(
+                    onClick = onRetryLocalAi,
+                    enabled = !isLocalAiRetryInProgress,
+                ) {
+                    Text(if (isLocalAiRetryInProgress) "Retrying…" else "Retry local AI")
+                }
+            }
         }
         localDraftStatus?.let { status ->
             Text(
                 text = status,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(vertical = 4.dp),
+            )
+        }
+        localAiReleaseStatus?.let { status ->
+            Text(
+                text = status,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
             )
         }
         localDraftWarning?.let { warning ->

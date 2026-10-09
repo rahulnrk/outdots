@@ -7,6 +7,7 @@ import app.mini.hub.intelligence.InferenceEngine
 import app.mini.hub.intelligence.InferenceTask
 import app.mini.hub.intelligence.ModelProposal
 import app.mini.hub.intelligence.ProposedAction
+import app.mini.hub.intelligence.UnloadOutcome
 import java.io.File
 import java.util.concurrent.CancellationException
 import java.util.concurrent.Future
@@ -27,6 +28,7 @@ class MediaPipeInferenceEngine(
     private val activeFuture = AtomicReference<Future<String>?>(null)
     private val activeSession = AtomicReference<LlmInferenceSession?>(null)
     @Volatile private var unsafeToReuse = false
+    @Volatile private var generationStartedListener: ((String) -> Unit)? = null
     internal var generationTimeoutMillis: Long = MAX_INFERENCE_MILLIS
     private var inference: LlmInference? = null
     private var loadedModelId: String? = null
@@ -72,7 +74,13 @@ class MediaPipeInferenceEngine(
                 "Prompt is $promptTokens tokens; limit is ${MAX_MODEL_TOKENS - MIN_OUTPUT_TOKENS}."
             }
             session.addQueryChunk(task.prompt)
-            future = session.generateResponseAsync()
+            val startedSignalled = java.util.concurrent.atomic.AtomicBoolean(false)
+            future = session.generateResponseAsync { partial, done ->
+                // First streamed output proves native generation is running for this task.
+                if (!done && partial.isNotEmpty() && startedSignalled.compareAndSet(false, true)) {
+                    generationStartedListener?.invoke(task.id)
+                }
+            }
             activeFuture.set(future)
             // Cancellation may arrive between publishing the session and starting generation.
             if (activeTask.get() != task.id) session.cancelGenerateResponseAsync()
@@ -91,6 +99,13 @@ class MediaPipeInferenceEngine(
                 evidence = task.context.evidence,
                 proposedAction = ProposedAction.Draft(),
             )
+        } catch (e: Throwable) {
+            // After cancel() the task is no longer active. Whatever MediaPipe reports for the
+            // stopped generation is a cancellation, not a model failure.
+            if (activeTask.get() != task.id && e !is CancellationException) {
+                throw CancellationException("inference cancelled").apply { initCause(e) }
+            }
+            throw e
         } finally {
             // Never delete a session while its native callback is still active. Quarantine
             // the runtime if cancellation did not reach done=true within the drain deadline.
@@ -125,19 +140,36 @@ class MediaPipeInferenceEngine(
     }
 
     override fun unload() {
+        unloadWithOutcome()
+    }
+
+    override val isQuarantined: Boolean get() = unsafeToReuse
+
+    override fun setGenerationStartedListener(listener: ((taskId: String) -> Unit)?) {
+        generationStartedListener = listener
+    }
+
+    override fun unloadWithOutcome(): UnloadOutcome {
         activeTask.get()?.let { cancel(it) }
         synchronized(lock) {
             val pending = activeFuture.get()
             if (pending != null && !pending.isDone) {
+                // Closing now would delete a session whose native callback is still running.
                 unsafeToReuse = true
-                return
+                return UnloadOutcome.Quarantined("Native generation had not stopped; resources kept until restart.")
             }
-            activeSession.getAndSet(null)?.close()
-            activeFuture.set(null)
-            inference?.close()
-            inference = null
-            loadedModelId = null
-            unsafeToReuse = false
+            return try {
+                activeSession.getAndSet(null)?.close()
+                activeFuture.set(null)
+                inference?.close()
+                inference = null
+                loadedModelId = null
+                unsafeToReuse = false
+                UnloadOutcome.Released
+            } catch (e: Throwable) {
+                unsafeToReuse = true
+                UnloadOutcome.Failed(e.message ?: e::class.simpleName ?: "close failed")
+            }
         }
     }
 
