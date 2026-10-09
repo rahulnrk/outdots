@@ -47,6 +47,12 @@ class MediaPipeInferenceEngine(
     override fun run(task: InferenceTask): ModelProposal {
         val model = synchronized(lock) { inference } ?: error("model is not loaded")
         check(task.context.inputTokens <= task.budget.inputTokens) { "input budget exceeded" }
+        // MediaPipe counts prompt and output together. Check with the real tokenizer so an
+        // oversized prompt is reported clearly instead of surfacing as an empty proposal.
+        val promptTokens = model.sizeInTokens(task.prompt)
+        check(promptTokens + MIN_OUTPUT_TOKENS <= MAX_MODEL_TOKENS) {
+            "Prompt is $promptTokens tokens; limit is ${MAX_MODEL_TOKENS - MIN_OUTPUT_TOKENS}."
+        }
         if (activeTask.get() != null) error("another inference is active")
         check(activeTask.compareAndSet(null, task.id)) { "another inference is active" }
         val future = model.generateResponseAsync(task.prompt)
@@ -56,6 +62,7 @@ class MediaPipeInferenceEngine(
             if (Thread.currentThread().isInterrupted || activeTask.get() != task.id) {
                 throw CancellationException("inference cancelled")
             }
+            check(text.isNotEmpty()) { "The local model returned no text." }
             ModelProposal(
                 taskId = task.id,
                 compartment = task.compartment,
@@ -88,9 +95,11 @@ class MediaPipeInferenceEngine(
     companion object {
         const val MODEL_FILE_NAME = "qwen2.5-0.5b-instruct-q8.task"
         const val MODEL_ID = "qwen2.5-0.5b-instruct-q8-mediapipe"
-        // MediaPipe counts input and output together. This leaves room for the bounded prompt
-        // while keeping the generated reply short enough for an editable preview.
-        private const val MAX_MODEL_TOKENS = 320
+        // MediaPipe counts input and output together. The selected artifact is built with a
+        // 1280-entry KV cache (ekv1280), so 1024 stays inside it while fitting a multi-message
+        // conversation. The previous 320 overflowed once a thread had about four messages.
+        const val MAX_MODEL_TOKENS = 1024
+        const val MIN_OUTPUT_TOKENS = 128
         private const val MAX_TOP_K = 20
         private const val MAX_INFERENCE_MILLIS = 60_000L
 

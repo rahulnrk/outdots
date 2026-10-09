@@ -140,3 +140,38 @@ So this is not an app crash. The receiver calls `goAsync().finish()` immediately
 Product impact, checked separately: a fully cold app (force-stopped) opened by the user, then drafting from the conversation screen, succeeded ("Local draft ready (6154 ms)", correct Rs 500 draft) with no process death, because the activity is foreground. Any future background drafting (for example triggered from a notification or after the user leaves the screen) must run in a foreground service or WorkManager expedited job, or it will be killed on low-RAM devices. The debug evaluator itself is only reliable while the listener is bound or the app is in the foreground.
 
 The listener permission was temporarily revoked for this test and restored afterwards (verified in `enabled_notification_listeners`).
+
+## Final whole-result verification pass (HEAD build)
+
+All checks were re-run against the final code rather than the intermediate builds.
+
+Build and packaging (`clean` + `--rerun-tasks`): `:shared:jvmTest`, `:androidApp:testDebugUnitTest`, `:androidApp:assembleDebug`, `:androidApp:assembleRelease` succeeded. JUnit XML: 12 suites, 66 tests, 0 failures, 0 errors, 0 skipped. `aapt2 dump xmltree` confirms the release APK contains neither `LocalDraftEvaluationReceiver` nor `SyntheticNotificationReceiver`. Both exist only in the debug APK.
+
+### New defect found: context window overflow on multi-message threads
+
+With four synthetic messages in one conversation, the UI showed "Local draft unavailable: Proposal rejected: EmptyText". MediaPipe logged `Input is too long for the model to process: current_step(0) + input_size(323) was not less than maxTokens(320)`. The engine's `maxTokens` was 320 (prompt plus output), so any real thread of about four messages failed, and the failure was misreported as an empty proposal.
+
+Fix in `MediaPipeInferenceEngine`:
+- `MAX_MODEL_TOKENS` raised to 1024. The artifact is built with a 1280-entry KV cache (`ekv1280`), so this stays inside it.
+- The prompt is measured with the model tokenizer (`sizeInTokens`) before generation. An oversize prompt now fails with "Prompt is N tokens; limit is 896." instead of an empty proposal.
+- An empty model output is reported as "The local model returned no text."
+
+Regression case `11-multi-message` (six messages) was added to the evaluator. Result on the OPPO: SUCCESS, "I would like to proceed with the order in full, as ₹500 including delivery is quoted. Let's confirm your address." `exactPricePreserved=true`.
+
+### New defect found: raw timestamps leaked into drafts
+
+After the window fix, a draft began with `1791529918963 total is ?100.`. The prompt included each observation's epoch milliseconds, and the 0.5B model copied them. The prompt now lists evidence oldest-first by position with `sender: text` only. A `noTimestampLeak` deterministic check was added. It passes on all 11 cases.
+
+### Final evaluator run (11 cases, HEAD build)
+
+`EVAL_END released=true`. Deterministic checks: latest corrected fact, exact price (04 and 11), no invented deadline, no unsupported promise, missing-context warning, draft-only proposal, and no timestamp leak all pass. Remaining deterministic failures: 05 echoes the incoming message, and 07 Telugu contains byte-level token artifacts. Hindi no longer shows byte artifacts, but its output (`छें।`) is meaningless.
+
+The prompt format change shifted outputs. 03, 08 and 11 got better. 01 ("available at any time in the USA"), 04 ("How many more cents…") and 09 (invents a reason for the omission) got worse. Overall usefulness is still roughly 4 to 5 of 10 generated drafts. This is a model-capacity limit of Qwen2.5-0.5B at Q8, not a pipeline defect. The artifact in `review-artifacts/` is this final run.
+
+### Final UI pass (HEAD build)
+
+- Synthetic conversation with four messages: draft generated in 4.8 s ("The quoted total is Rs 500 and no further steps are required."). Price correct, but the intent to ask whether to proceed was not followed.
+- Edit appended " Thanks". The Exact Action Review dialog showed recipient "Synthetic Sender" and the edited text verbatim. Dismissed with Cancel. Focus returned to MainActivity, and no other app opened.
+- Cancel at 0.8 s: "Local draft cancelled.", stable for 6 s. Draft field empty. Review button `enabled=false`.
+
+Test-procedure note: during one UI run a fixed-coordinate tap opened a real (non-synthetic) inbox conversation, because a new real notification had moved the synthetic row down. A local draft was generated on device for it (output "17"). Nothing was approved, sent, or stored in an artifact, and its content was not recorded. That run is excluded from the results above. Later runs located the synthetic row by text before tapping.

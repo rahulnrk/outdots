@@ -15,18 +15,19 @@
         }
       ],
       "userIntent": "Acknowledge and ask what location they prefer.",
-      "generatedDraft": "Sure, I'd be happy to meet your next meeting at Synthetic Sender's location.",
+      "generatedDraft": "I am available at any time in the USA.\\nIf there's a specific location preferred, please let me know.",
       "warning": "",
       "outcome": "SUCCESS",
       "reason": "",
-      "latencyMs": 4551,
+      "latencyMs": 4295,
       "cold": true,
       "humanReviewRequired": true,
       "humanReviewReason": "Subjective usefulness requires human review.",
       "deterministicChecks": {
         "executionSucceeded": true,
         "subjectiveUsefulness": "HUMAN_REVIEW_REQUIRED",
-        "notEchoOfIncoming": true
+        "notEchoOfIncoming": true,
+        "noTimestampLeak": true
       }
     },
     {
@@ -65,11 +66,11 @@
         }
       ],
       "userIntent": "Acknowledge the latest change without adding a time.",
-      "generatedDraft": "The meeting has been shifted to Thursday.",
+      "generatedDraft": "The meeting has been shifted to Thursday. Is there anything else we should know before proceeding?",
       "warning": "",
       "outcome": "SUCCESS",
       "reason": "",
-      "latencyMs": 2516,
+      "latencyMs": 3541,
       "cold": false,
       "humanReviewRequired": true,
       "humanReviewReason": "Subjective usefulness requires human review.",
@@ -77,7 +78,8 @@
         "executionSucceeded": true,
         "subjectiveUsefulness": "HUMAN_REVIEW_REQUIRED",
         "latestCorrectedFactUsed": true,
-        "notEchoOfIncoming": true
+        "notEchoOfIncoming": true,
+        "noTimestampLeak": true
       }
     },
     {
@@ -92,11 +94,11 @@
         }
       ],
       "userIntent": "Repeat the quoted total and ask whether they want to proceed.",
-      "generatedDraft": "The quoted total is ₹500 and not ₹1.",
+      "generatedDraft": "The total is ₹500. How many more cents does the user want to pay?",
       "warning": "",
       "outcome": "SUCCESS",
       "reason": "",
-      "latencyMs": 2753,
+      "latencyMs": 3248,
       "cold": false,
       "humanReviewRequired": true,
       "humanReviewReason": "Subjective usefulness requires human review.",
@@ -104,7 +106,8 @@
         "executionSucceeded": true,
         "subjectiveUsefulness": "HUMAN_REVIEW_REQUIRED",
         "exactPricePreserved": true,
-        "notEchoOfIncoming": true
+        "notEchoOfIncoming": true,
+        "noTimestampLeak": true
       }
     },
     {
@@ -123,7 +126,7 @@
       "warning": "",
       "outcome": "SUCCESS",
       "reason": "",
-      "latencyMs": 2461,
+      "latencyMs": 2333,
       "cold": false,
       "humanReviewRequired": true,
       "humanReviewReason": "Subjective usefulness requires human review.",
@@ -131,7 +134,8 @@
         "executionSucceeded": true,
         "subjectiveUsefulness": "HUMAN_REVIEW_REQUIRED",
         "noInventedDeadline": true,
-        "notEchoOfIncoming": false
+        "notEchoOfIncoming": false,
+        "noTimestampLeak": true
       }
     },
     {
@@ -146,11 +150,11 @@
         }
       ],
       "userIntent": "हिंदी में विनम्रता से समय पूछें।",
-      "generatedDraft": "काĠà¤²ोकĠà¤¦ कन्�² पद।",
+      "generatedDraft": "छें।",
       "warning": "",
       "outcome": "SUCCESS",
       "reason": "",
-      "latencyMs": 4888,
+      "latencyMs": 2189,
       "cold": false,
       "humanReviewRequired": true,
       "humanReviewReason": "Requested-language naturalness and subjective usefulness require human review.",
@@ -158,9 +162,10 @@
         "executionSucceeded": true,
         "subjectiveUsefulness": "HUMAN_REVIEW_REQUIRED",
         "requestedScriptPresent": true,
-        "noByteLevelTokenArtifacts": false,
+        "noByteLevelTokenArtifacts": true,
         "naturalness": "HUMAN_REVIEW_REQUIRED",
-        "notEchoOfIncoming": true
+        "notEchoOfIncoming": true,
+        "noTimestampLeak": true
       }
     },
     {
@@ -175,21 +180,22 @@
         }
       ],
       "userIntent": "తెలుగులో మర్యాదగా సమయం అడగండి.",
-      "generatedDraft": ".\n\n.",
+      "generatedDraft": "The answer is:\n\"\"\n\nడబà°¿బడà°¿à°Ĥదà°¿.",
       "warning": "",
       "outcome": "SUCCESS",
       "reason": "",
-      "latencyMs": 3261,
+      "latencyMs": 3383,
       "cold": false,
       "humanReviewRequired": true,
       "humanReviewReason": "Requested-language naturalness and subjective usefulness require human review.",
       "deterministicChecks": {
         "executionSucceeded": true,
         "subjectiveUsefulness": "HUMAN_REVIEW_REQUIRED",
-        "requestedScriptPresent": false,
-        "noByteLevelTokenArtifacts": true,
+        "requestedScriptPresent": true,
+        "noByteLevelTokenArtifacts": false,
         "naturalness": "HUMAN_REVIEW_REQUIRED",
-        "notEchoOfIncoming": true
+        "notEchoOfIncoming": true,
+        "noTimestampLeak": true
       }
     },
     {
@@ -204,11 +210,11 @@
         }
       ],
       "userIntent": "Ask for clarification and do not make a refund promise.",
-      "generatedDraft": "I appreciate your honesty and trust. Please tell me more about this scenario.",
+      "generatedDraft": "I don't understand. Please provide the clarification to proceed.",
       "warning": "",
       "outcome": "SUCCESS",
       "reason": "",
-      "latencyMs": 2960,
+      "latencyMs": 2771,
       "cold": false,
       "humanReviewRequired": true,
       "humanReviewReason": "Subjective usefulness requires human review.",
@@ -216,7 +222,8 @@
         "executionSucceeded": true,
         "subjectiveUsefulness": "HUMAN_REVIEW_REQUIRED",
         "noUnsupportedPromise": true,
-        "notEchoOfIncoming": true
+        "notEchoOfIncoming": true,
+        "noTimestampLeak": true
       }
     },
     {
@@ -231,11 +238,11 @@
         }
       ],
       "userIntent": "Acknowledge what is known and ask for the missing context.",
-      "generatedDraft": "The thread is missing.",
+      "generatedDraft": "The latest context was omitted due to the recent decision to focus solely on synthetic threads. Please provide the missing part if you wish to proceed with the query.",
       "warning": "Some recent context was omitted due to the bounded experiment.",
       "outcome": "SUCCESS",
       "reason": "",
-      "latencyMs": 3219,
+      "latencyMs": 4157,
       "cold": false,
       "humanReviewRequired": true,
       "humanReviewReason": "Subjective usefulness requires human review.",
@@ -243,7 +250,8 @@
         "executionSucceeded": true,
         "subjectiveUsefulness": "HUMAN_REVIEW_REQUIRED",
         "missingContextWarningShown": true,
-        "notEchoOfIncoming": true
+        "notEchoOfIncoming": true,
+        "noTimestampLeak": true
       }
     },
     {
@@ -262,7 +270,7 @@
       "warning": "",
       "outcome": "SUCCESS",
       "reason": "",
-      "latencyMs": 3859,
+      "latencyMs": 2399,
       "cold": false,
       "humanReviewRequired": true,
       "humanReviewReason": "Subjective usefulness requires human review.",
@@ -270,12 +278,71 @@
         "executionSucceeded": true,
         "subjectiveUsefulness": "HUMAN_REVIEW_REQUIRED",
         "draftOnlyProposal": true,
-        "notEchoOfIncoming": true
+        "notEchoOfIncoming": true,
+        "noTimestampLeak": true
+      }
+    },
+    {
+      "id": "11-multi-message",
+      "category": "long-thread",
+      "evidence": [
+        {
+          "observedAt": 1760000000000,
+          "revision": 1,
+          "sender": "Synthetic Sender",
+          "text": "Hi, following up on the order we discussed last week."
+        },
+        {
+          "observedAt": 1760000000001,
+          "revision": 2,
+          "sender": "Synthetic Sender",
+          "text": "The quoted total is ₹500 including delivery."
+        },
+        {
+          "observedAt": 1760000000002,
+          "revision": 3,
+          "sender": "Synthetic Sender",
+          "text": "We can deliver on Thursday if you confirm."
+        },
+        {
+          "observedAt": 1760000000003,
+          "revision": 4,
+          "sender": "Synthetic Sender",
+          "text": "Please also tell us the delivery address."
+        },
+        {
+          "observedAt": 1760000000004,
+          "revision": 5,
+          "sender": "Synthetic Sender",
+          "text": "Let me know if you want to go ahead."
+        },
+        {
+          "observedAt": 1760000000005,
+          "revision": 6,
+          "sender": "Synthetic Sender",
+          "text": "Thanks, waiting for your reply."
+        }
+      ],
+      "userIntent": "Confirm we want to proceed at the quoted total and say I will share the address.",
+      "generatedDraft": "I would like to proceed with the order in full, as ₹500 including delivery is quoted. Let's confirm your address.",
+      "warning": "",
+      "outcome": "SUCCESS",
+      "reason": "",
+      "latencyMs": 5475,
+      "cold": false,
+      "humanReviewRequired": true,
+      "humanReviewReason": "Subjective usefulness requires human review.",
+      "deterministicChecks": {
+        "executionSucceeded": true,
+        "subjectiveUsefulness": "HUMAN_REVIEW_REQUIRED",
+        "exactPricePreserved": true,
+        "notEchoOfIncoming": true,
+        "noTimestampLeak": true
       }
     }
   ],
-  "memoryBeforeLoadPssKb": 114657,
-  "memoryWhileResidentPssKb": 701326,
-  "memoryAfterReleasePssKb": 206853,
+  "memoryBeforeLoadPssKb": 772638,
+  "memoryWhileResidentPssKb": 921840,
+  "memoryAfterReleasePssKb": 910883,
   "released": true
 }

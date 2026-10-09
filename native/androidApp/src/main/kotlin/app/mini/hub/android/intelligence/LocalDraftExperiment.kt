@@ -151,13 +151,13 @@ class LocalDraftExperiment(context: Context) {
         appendLine("Conversation: ${request.conversationLabel}")
         appendLine("Sender: ${request.sender}")
         appendLine("Context warning: ${request.coverageWarning.ifBlank { "none" }}")
-        appendLine("Evidence:")
-        request.observations.forEachIndexed { index, observation ->
+        appendLine("Evidence (oldest first; the last line is the most recent):")
+        // Raw epoch timestamps were copied into drafts by the small model on device, so the
+        // prompt carries order only. Recency is expressed by position.
+        request.observations.sortedBy { it.observedAt.epochMillis }.forEachIndexed { index, observation ->
             append("[${index + 1}] ")
-            append(observation.observedAt.epochMillis)
-            append(" sender=")
             append(observation.senderHint)
-            append(" text=")
+            append(": ")
             appendLine(observation.textFragments.joinToString(" "))
         }
         appendLine("User reply intent: ${request.userIntent.trim()}")
