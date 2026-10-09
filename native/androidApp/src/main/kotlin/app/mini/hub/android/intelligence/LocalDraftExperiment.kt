@@ -8,6 +8,7 @@ import app.mini.hub.intelligence.DeviceResourceBudget
 import app.mini.hub.intelligence.EvidenceRef
 import app.mini.hub.intelligence.InferenceBudget
 import app.mini.hub.intelligence.InferenceTask
+import app.mini.hub.intelligence.InferenceEngine
 import app.mini.hub.intelligence.ModelProposal
 import app.mini.hub.intelligence.ProposalValidator
 import app.mini.hub.intelligence.ResourceSupervisor
@@ -16,6 +17,10 @@ import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import java.util.concurrent.Callable
+import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /** Input assembled by trusted retrieval code plus a user-supplied reply intent. */
 data class LocalDraftRequest(
@@ -44,25 +49,68 @@ sealed class LocalDraftResult {
  * Small local-only drafting experiment. It does not dispatch actions and does not own message
  * retrieval. The caller supplies bounded evidence, making the trust boundary explicit.
  */
-class LocalDraftExperiment(context: Context) {
-    private val applicationContext = context.applicationContext
-    private val modelFile = MediaPipeInferenceEngine.defaultModelFile(applicationContext)
-    private val engine = MediaPipeInferenceEngine(applicationContext, modelFile)
+class LocalDraftExperiment internal constructor(
+    private val engine: InferenceEngine,
+    private val modelPath: String,
+    private val executor: ExecutorService = Executors.newSingleThreadExecutor(),
+    private val nowMillis: () -> Long = { SystemClock.elapsedRealtime() },
+) {
+    internal constructor(context: Context) : this(
+        MediaPipeInferenceEngine(context.applicationContext, MediaPipeInferenceEngine.defaultModelFile(context)),
+        MediaPipeInferenceEngine.defaultModelFile(context).absolutePath,
+    )
     private val supervisor = ResourceSupervisor(
         engine = engine,
         modelId = MediaPipeInferenceEngine.MODEL_ID,
         budget = DeviceResourceBudget.Tier3HighEnd,
     )
-    private val executor: ExecutorService = Executors.newSingleThreadExecutor()
-    private var activeTaskId: String? = null
+    private val workerThread = AtomicReference<Thread?>(null)
+    private val activeTaskId = AtomicReference<String?>(null)
+    private val cancelled = AtomicBoolean(false)
+    private val cancellationEpoch = AtomicLong(0L)
+    private val isForeground = AtomicBoolean(true) // assume foreground until told otherwise
 
-    fun draftAsync(request: LocalDraftRequest, callback: (LocalDraftResult) -> Unit): Future<*> =
-        executor.submit {
-            callback(draftBlocking(request))
+    fun setForeground(foreground: Boolean) {
+        val wasForeground = isForeground.getAndSet(foreground)
+        if (wasForeground && !foreground) {
+            cancel()
+            serializedAsync { supervisor.release() }
+        } else if (!wasForeground && foreground) {
+            serializedAsync { supervisor.resumeAfterPressure() }
         }
+    }
+
+    fun draftAsync(request: LocalDraftRequest, callback: (LocalDraftResult) -> Unit): Future<*> {
+        val epoch = cancellationEpoch.get()
+        return executor.submit {
+            workerThread.set(Thread.currentThread())
+            callback(executeDraft(request, epoch))
+        }
+    }
 
     fun draftBlocking(request: LocalDraftRequest): LocalDraftResult {
+        val epoch = cancellationEpoch.get()
+        return serialized { executeDraft(request, epoch) }
+    }
+
+    internal fun evaluateWithTimeout(request: LocalDraftRequest, timeoutMillis: Long): LocalDraftResult = serialized {
+        require(timeoutMillis in 1L..60_000L)
+        val runtime = engine as? MediaPipeInferenceEngine ?: return@serialized executeDraft(request)
+        val previous = runtime.generationTimeoutMillis
+        try {
+            runtime.generationTimeoutMillis = timeoutMillis
+            executeDraft(request)
+        } finally {
+            runtime.generationTimeoutMillis = previous
+        }
+    }
+
+    private fun executeDraft(request: LocalDraftRequest, epoch: Long = cancellationEpoch.get()): LocalDraftResult {
         val warning = buildWarning(request)
+        if (epoch != cancellationEpoch.get()) return LocalDraftResult.Failed("Draft cancelled.", warning)
+        if (!isForeground.get()) return LocalDraftResult.Refused("Drafting is not permitted while the app is in the background.", warning)
+        if (supervisor.state == app.mini.hub.intelligence.SupervisorState.Pressured) return LocalDraftResult.Failed("Resource supervisor is pressured.", warning)
+        
         if (request.userIntent.isBlank()) return LocalDraftResult.Refused("Reply intent is required.", warning)
         if (request.context.evidence.isEmpty()) {
             return LocalDraftResult.Refused("No grounded evidence is available for a safe draft.", warning)
@@ -72,11 +120,12 @@ class LocalDraftExperiment(context: Context) {
         }
 
         val taskId = "local-draft-${UUID.randomUUID()}"
-        activeTaskId = taskId
+        cancelled.set(false)
+        activeTaskId.set(taskId)
         val prompt = buildPrompt(request)
         val inputTokens = estimateTokens(prompt)
         if (inputTokens > DeviceResourceBudget.Tier3HighEnd.maxInputTokens) {
-            activeTaskId = null
+            activeTaskId.set(null)
             return LocalDraftResult.Refused("Draft prompt exceeded the bounded input budget.", warning)
         }
         val task = InferenceTask(
@@ -90,8 +139,12 @@ class LocalDraftExperiment(context: Context) {
             prompt = prompt,
         )
 
+        // Attempt automatic recovery from degraded state (e.g. repeated inference errors).
+        // Does not override 'Pressured' state which must be resumed explicitly via setForeground.
+        supervisor.recoverFromFailure()
+
         val cold = supervisor.state is app.mini.hub.intelligence.SupervisorState.Unloaded
-        val started = SystemClock.elapsedRealtime()
+        val started = nowMillis()
         return try {
             when (supervisor.submit(task)) {
                 app.mini.hub.intelligence.SubmitResult.Accepted -> Unit
@@ -99,6 +152,10 @@ class LocalDraftExperiment(context: Context) {
                     return LocalDraftResult.Failed("Resource supervisor is pressured.", warning)
                 }
                 else -> return LocalDraftResult.Failed("Draft task was not admitted.", warning)
+            }
+            if (cancelled.get() || epoch != cancellationEpoch.get()) {
+                supervisor.release()
+                return LocalDraftResult.Failed("Draft cancelled.", warning)
             }
             val proposal = supervisor.runNext()
                 ?: return LocalDraftResult.Failed(
@@ -113,10 +170,11 @@ class LocalDraftExperiment(context: Context) {
             if (safetyIssue != null) {
                 return LocalDraftResult.Failed(safetyIssue, warning)
             }
+            if (cancelled.get() || epoch != cancellationEpoch.get()) return LocalDraftResult.Failed("Draft cancelled.", warning)
             LocalDraftResult.Success(
                 proposal = proposal,
                 warning = warning,
-                latencyMs = SystemClock.elapsedRealtime() - started,
+                latencyMs = nowMillis() - started,
                 wasCold = cold,
             )
         } catch (e: InterruptedException) {
@@ -125,21 +183,44 @@ class LocalDraftExperiment(context: Context) {
         } catch (e: Throwable) {
             LocalDraftResult.Failed(e.message ?: e::class.simpleName ?: "Local inference failed.", warning)
         } finally {
-            activeTaskId = null
+            activeTaskId.set(null)
         }
     }
 
     fun cancel(): Boolean {
-        val taskId = activeTaskId ?: return false
-        return supervisor.cancel(taskId)
+        cancellationEpoch.incrementAndGet()
+        val taskId = activeTaskId.get() ?: return false
+        cancelled.set(true)
+        engine.cancel(taskId)
+        return true
+    }
+
+    fun onMemoryPressure() {
+        cancel()
+        serializedAsync { supervisor.onMemoryPressure() }
     }
 
     fun release() {
-        activeTaskId?.let { supervisor.cancel(it) }
-        supervisor.release()
+        cancel()
+        serializedAsync { supervisor.release() }
     }
 
-    fun modelPath(): String = modelFile.absolutePath
+    fun modelPath(): String = modelPath
+
+    private fun serializedAsync(block: () -> Unit) {
+        executor.submit {
+            workerThread.set(Thread.currentThread())
+            block()
+        }
+    }
+
+    private fun <T> serialized(block: () -> T): T {
+        if (Thread.currentThread() == workerThread.get()) return block()
+        return executor.submit(Callable {
+            workerThread.set(Thread.currentThread())
+            block()
+        }).get()
+    }
 
     private fun buildPrompt(request: LocalDraftRequest): String = buildString {
         appendLine("You are a private, local drafting assistant.")

@@ -1,6 +1,11 @@
 package app.mini.hub.android
 
+import android.app.Activity
+import android.app.Application
+import android.content.ComponentCallbacks2
 import android.content.Context
+import android.content.res.Configuration
+import android.os.Bundle
 import app.mini.hub.android.intelligence.LocalDraftExperiment
 import app.mini.hub.action.ActionController
 import app.mini.hub.action.DigestProvider
@@ -107,6 +112,41 @@ object MiniHubRuntime {
                 ids = DomainActionIdGenerator(idGen),
             )
             localDraftExperiment = LocalDraftExperiment(context.applicationContext)
+
+            val app = context.applicationContext as Application
+            app.registerComponentCallbacks(object : ComponentCallbacks2 {
+                override fun onTrimMemory(level: Int) {
+                    if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+                        localDraftExperiment.onMemoryPressure()
+                    }
+                }
+                override fun onConfigurationChanged(newConfig: Configuration) {}
+                override fun onLowMemory() {
+                    localDraftExperiment.onMemoryPressure()
+                }
+            })
+
+            app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+                private var foregroundActivities = 0
+
+                override fun onActivityStarted(activity: Activity) {
+                    foregroundActivities++
+                    localDraftExperiment.setForeground(true)
+                }
+
+                override fun onActivityStopped(activity: Activity) {
+                    foregroundActivities--
+                    if (foregroundActivities <= 0) {
+                        localDraftExperiment.setForeground(false)
+                    }
+                }
+
+                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+                override fun onActivityResumed(activity: Activity) {}
+                override fun onActivityPaused(activity: Activity) {}
+                override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+                override fun onActivityDestroyed(activity: Activity) {}
+            })
 
             isInitialized = true
         }

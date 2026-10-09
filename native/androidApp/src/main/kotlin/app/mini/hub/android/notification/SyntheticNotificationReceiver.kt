@@ -68,6 +68,58 @@ class SyntheticNotificationReceiver : BroadcastReceiver() {
                 }
             }
 
+            ACTION_SET_ATTENTION -> {
+                val actionType = intent.getStringExtra("action_type") ?: ""
+                val convKey = intent.getStringExtra("conv_key") ?: return
+                val parsedConvId = app.mini.hub.domain.ScopedId.parse(convKey)
+                
+                // Security boundary: Never modify real conversation records via adb broadcasts
+                if (!parsedConvId.account.localId.contains("dev_test") && !parsedConvId.account.localId.contains("synthetic")) {
+                    Log.w("MiniHubAttention", "Rejecting debug SET_ATTENTION for non-synthetic account: $convKey")
+                    return
+                }
+                
+                val action = when (actionType) {
+                    "priority_important" -> app.mini.hub.attention.AttentionAction.SetPriority(app.mini.hub.attention.ConversationPriority.Important)
+                    "priority_normal" -> app.mini.hub.attention.AttentionAction.SetPriority(app.mini.hub.attention.ConversationPriority.Normal)
+                    "needs_attention" -> app.mini.hub.attention.AttentionAction.MarkNeedsAttention
+                    "waiting" -> app.mini.hub.attention.AttentionAction.MarkWaiting
+                    "done" -> app.mini.hub.attention.AttentionAction.MarkDone
+                    "snooze" -> app.mini.hub.attention.AttentionAction.Snooze(app.mini.hub.domain.UtcInstant(System.currentTimeMillis() + 4 * 3600 * 1000L))
+                    else -> return
+                }
+                
+                // Get existing
+                val loadRes = MiniHubRuntime.attentionStore.loadAll()
+                if (loadRes is app.mini.hub.attention.AttentionStoreResult.Ok) {
+                    val existing = loadRes.value[convKey] ?: app.mini.hub.attention.AttentionRules.default(parsedConvId, app.mini.hub.domain.UtcInstant(System.currentTimeMillis()))
+                    val decision = app.mini.hub.attention.AttentionRules.apply(existing, action, null, app.mini.hub.domain.UtcInstant(System.currentTimeMillis()))
+                    if (decision is app.mini.hub.attention.AttentionDecision.Applied) {
+                        MiniHubRuntime.attentionStore.saveAll(listOf(decision.record))
+                        Log.i("MiniHubAttention", "Applied action $actionType to $convKey. Resulting state: ${decision.record.status.name} / ${decision.record.priority.name}")
+                    } else {
+                        Log.i("MiniHubAttention", "Rejected action $actionType to $convKey: ${(decision as app.mini.hub.attention.AttentionDecision.Rejected).reason}")
+                    }
+                } else {
+                    Log.i("MiniHubAttention", "Failed to load store: ${(loadRes as app.mini.hub.attention.AttentionStoreResult.Failed).message}")
+                }
+            }
+
+            ACTION_DUMP_ATTENTION -> {
+                val loadRes = MiniHubRuntime.attentionStore.loadAll()
+                if (loadRes is app.mini.hub.attention.AttentionStoreResult.Ok) {
+                    val syntheticRecords = loadRes.value.filterKeys { 
+                        it.contains("dev_test") || it.contains("synthetic") 
+                    }
+                    Log.i("MiniHubAttention", "DUMP: Found ${syntheticRecords.size} synthetic records")
+                    for ((k, v) in syntheticRecords) {
+                        Log.i("MiniHubAttention", "RECORD: $k -> status=${v.status.name}, priority=${v.priority.name}, snoozedUntil=${v.snoozedUntil?.epochMillis}, resurfacedFrom=${v.resurfacedFrom?.name}")
+                    }
+                } else {
+                    Log.i("MiniHubAttention", "DUMP Failed: ${(loadRes as app.mini.hub.attention.AttentionStoreResult.Failed).message}")
+                }
+            }
+
             ACTION_CANCEL_SYNTHETIC -> {
                 val notifId = readNotificationId(intent, 1001)
                 // Generate a cancellation correlationId so the removal can be traced end-to-end.
@@ -180,6 +232,8 @@ class SyntheticNotificationReceiver : BroadcastReceiver() {
         const val ACTION_QUERY_ACCOUNTING = "app.mini.hub.QUERY_DELIVERY_ACCOUNTING"
         /** Debug-only readback of synthetic content, revision, and removal state. */
         const val ACTION_DUMP_SYNTHETIC_STATE = "app.mini.hub.DUMP_SYNTHETIC_STATE"
+        const val ACTION_SET_ATTENTION = "app.mini.hub.SET_ATTENTION"
+        const val ACTION_DUMP_ATTENTION = "app.mini.hub.DUMP_ATTENTION"
         const val EXTRA_SENDER = "sender"
         const val EXTRA_TEXT = "text"
         const val EXTRA_ID = "id"
