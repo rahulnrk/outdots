@@ -42,12 +42,12 @@ class GmailOAuthClient(context: Context) {
     private val connector = GmailApiConnector()
 
     private val configuration: OAuthPublicClientConfiguration?
-        get() = BuildConfig.GOOGLE_OAUTH_CLIENT_ID.trim().takeIf { it.isNotBlank() }?.let {
+        get() = BuildConfig.GOOGLE_OAUTH_CLIENT_ID.trim().takeIf { it.isGoogleClientId() }?.let {
             OAuthPublicClientConfiguration(
                 clientId = it,
                 authorizationEndpoint = "https://accounts.google.com/o/oauth2/v2/auth",
                 tokenEndpoint = "https://oauth2.googleapis.com/token",
-                redirectUri = REDIRECT_URI,
+                redirectUri = redirectUriFor(it),
                 scopes = setOf("https://www.googleapis.com/auth/gmail.readonly"),
             )
         }
@@ -56,12 +56,16 @@ class GmailOAuthClient(context: Context) {
     val setupStatus: String get() = if (isConfigured) {
         "Gmail uses official read-only OAuth and stores tokens in Android Keystore. Reply/send is not connected yet."
     } else {
-        "Gmail setup missing: build with -Pmini.googleOAuthClientId=<Android public client ID>. Never add a client secret to Android."
+        "Gmail setup missing: build with -Pmini.googleOAuthClientId=<Android client ID ending in .apps.googleusercontent.com>. Never add a client secret to Android."
     }
+
+    fun acceptsRedirect(uri: Uri): Boolean = configuration?.let { config ->
+        uri.path == REDIRECT_PATH && uri.scheme == Uri.parse(config.redirectUri).scheme
+    } == true
 
     fun launch(activity: Activity): GmailOAuthOutcome {
         val config = configuration ?: return GmailOAuthOutcome.Blocked(
-            "Gmail setup is incomplete. Supply -Pmini.googleOAuthClientId with the Android public OAuth client ID; no client secret is needed.",
+            "Gmail setup is incomplete. Supply a valid Android client ID with -Pmini.googleOAuthClientId; no client secret is needed.",
         )
         val state = randomUrlSafe(32)
         val verifier = randomUrlSafe(64)
@@ -165,8 +169,17 @@ class GmailOAuthClient(context: Context) {
         Regex("\\\"${Regex.escape(name)}\\\"\\s*:\\s*(?:\\\"((?:\\\\.|[^\\\"])*)\\\"|([0-9]+))")
             .find(json)?.let { it.groupValues[1].ifBlank { it.groupValues[2] } }
 
+    private fun String.isGoogleClientId(): Boolean =
+        endsWith(".apps.googleusercontent.com") &&
+            substringBeforeLast(".apps.googleusercontent.com").isNotBlank()
+
+    private fun redirectUriFor(clientId: String): String {
+        val prefix = clientId.substringBeforeLast(".apps.googleusercontent.com")
+        return "com.googleusercontent.apps.$prefix:$REDIRECT_PATH"
+    }
+
     companion object {
-        const val REDIRECT_URI = "app.mini.hub:/oauth2redirect/google"
+        const val REDIRECT_PATH = "/oauth2redirect/google"
         private const val FILE = "mini_gmail_oauth_session"
         private const val KEY_STATE = "state"
         private const val KEY_VERIFIER = "code_verifier"

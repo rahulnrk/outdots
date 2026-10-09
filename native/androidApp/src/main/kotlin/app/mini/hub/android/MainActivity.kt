@@ -103,7 +103,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleOAuthIntent(intent: android.content.Intent?) {
         val uri = intent?.data ?: return
-        if (uri.scheme != "app.mini.hub" || uri.path != "/oauth2redirect/google") return
+        if (!gmailOAuth.acceptsRedirect(uri)) return
         connectionStatus.value = when (val outcome = gmailOAuth.handleRedirect(uri)) {
             is GmailOAuthOutcome.Connected -> "Gmail account connected: ${outcome.account.displayName ?: outcome.account.providerAccountId}"
             is GmailOAuthOutcome.Blocked -> outcome.reason

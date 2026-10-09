@@ -24,7 +24,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
                     android:path="/oauth2redirect/google"
-                    android:scheme="app.mini.hub" />
+                    android:scheme="${gmailRedirectScheme}" />
             </intent-filter>
         </activity>
 

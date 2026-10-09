@@ -7,6 +7,15 @@ android {
     namespace = "app.mini.hub.android"
     compileSdk = 34
 
+    val googleOAuthClientId = providers.gradleProperty("mini.googleOAuthClientId").orNull.orEmpty()
+    val googleOAuthClientPrefix = googleOAuthClientId
+        .takeIf { it.endsWith(".apps.googleusercontent.com") }
+        ?.substringBeforeLast(".apps.googleusercontent.com")
+        ?.takeIf { it.isNotBlank() }
+    val googleOAuthRedirectScheme = googleOAuthClientPrefix
+        ?.let { "com.googleusercontent.apps.$it" }
+        ?: "app.mini.hub"
+
     defaultConfig {
         applicationId = "app.mini.hub"
         minSdk = 26
@@ -14,13 +23,13 @@ android {
         versionCode = 1
         versionName = "0.1.0-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["gmailRedirectScheme"] = googleOAuthRedirectScheme
     }
 
     buildFeatures {
         compose = true
         buildConfig = true
     }
-    val googleOAuthClientId = providers.gradleProperty("mini.googleOAuthClientId").orNull.orEmpty()
     buildTypes {
         getByName("debug") {
             buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", "\"${googleOAuthClientId.replace("\"", "\\\"")}\"")

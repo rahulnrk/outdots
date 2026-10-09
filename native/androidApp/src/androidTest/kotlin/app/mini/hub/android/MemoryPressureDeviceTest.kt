@@ -100,7 +100,14 @@ class MemoryPressureDeviceTest {
 
         // 6. Draft attempts while pressured should fail without loading model
         val pressureResult = experiment.draftBlocking(request)
-        assertTrue("Should be pressured, got: $pressureResult", pressureResult is LocalDraftResult.Failed && pressureResult.reason.contains("pressured"))
+        // The runtime reports the user-facing low-memory reason, not its internal Pressured state name.
+        assertTrue(
+            "Should be refused under memory pressure, got: $pressureResult",
+            pressureResult is LocalDraftResult.Failed &&
+                pressureResult.reason.contains("low on memory") &&
+                !pressureResult.cancelled &&
+                !pressureResult.needsRecovery,
+        )
 
         // 7. Recover by transitioning to foreground again
         experiment.setForeground(true)
