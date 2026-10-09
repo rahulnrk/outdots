@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import app.mini.hub.android.MiniHubRuntime
 import app.mini.hub.domain.AccountId
 import app.mini.hub.domain.Provider
 import app.mini.hub.domain.ScopedId
@@ -26,9 +27,12 @@ import java.util.concurrent.atomic.AtomicLong
 class LocalDraftEvaluationReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent?.action != ACTION_RUN_LOCAL_DRAFT_EVALUATION) return
+        val selectedCaseId = intent.getStringExtra(EXTRA_CASE_ID)
+        val forcedTimeoutMillis = intent.getLongExtra(EXTRA_TIMEOUT_MILLIS, 0L)
+        val verifyTimeoutRecovery = intent.getBooleanExtra(EXTRA_VERIFY_TIMEOUT_RECOVERY, false)
         val pending = goAsync()
         Thread {
-            runEvaluation(context.applicationContext)
+            runEvaluation(context.applicationContext, selectedCaseId, forcedTimeoutMillis, verifyTimeoutRecovery)
         }.start()
         // This is a debug-only long-running harness. Release the broadcast token immediately
         // so Android does not classify model evaluation as a receiver ANR. The notification
@@ -36,20 +40,33 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
         pending.finish()
     }
 
-    private fun runEvaluation(context: Context) {
-        val experiment = LocalDraftExperiment(context)
-        val cases = syntheticCases()
-        val artifactFile = reviewArtifactFile(context)
+    private fun runEvaluation(context: Context, selectedCaseId: String?, forcedTimeoutMillis: Long, verifyTimeoutRecovery: Boolean) {
+        MiniHubRuntime.init(context)
+        val experiment = MiniHubRuntime.localDraftExperiment
+        val selectedCases = syntheticCases().filter { selectedCaseId == null || it.id == selectedCaseId }
+        if (selectedCases.isEmpty()) {
+            Log.w("MiniDraftEval", "No matching synthetic case; evaluation skipped.")
+            return
+        }
+        val recoveryRun = verifyTimeoutRecovery && selectedCases.size == 1 && forcedTimeoutMillis in 1L..60_000L
+        val cases = if (recoveryRun) selectedCases + selectedCases.single().copy(id = "$selectedCaseId-after-timeout") else selectedCases
+        val artifactId = if (recoveryRun) "$selectedCaseId-timeout-recovery" else selectedCaseId
+        val artifactFile = reviewArtifactFile(context, artifactId)
         val artifactCases = JSONArray()
         val artifact = JSONObject()
             .put("syntheticOnly", true)
-            .put("artifactVersion", 1)
+            .put("artifactVersion", 2)
+            .put("startedAtEpochMillis", System.currentTimeMillis())
+            .put("processId", android.os.Process.myPid())
+            .put("inferenceOwner", "MiniHubRuntime")
+            .put("forcedTimeoutMillis", forcedTimeoutMillis)
+            .put("verifyTimeoutRecovery", recoveryRun)
             .put("modelId", MediaPipeInferenceEngine.MODEL_ID)
             .put("cases", artifactCases)
             .put("memoryBeforeLoadPssKb", readPssKb(context))
         writeArtifact(artifactFile, artifact)
         Log.i("MiniDraftEval", "EVAL_START cases=${cases.size} modelPath=${experiment.modelPath()}")
-        cases.forEach { testCase ->
+        cases.forEachIndexed { index, testCase ->
             val peakPssKb = AtomicLong(readPssKb(context))
             val sampling = AtomicBoolean(true)
             val sampler = Thread {
@@ -59,7 +76,11 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
                 }
             }
             sampler.start()
-            val result = experiment.draftBlocking(testCase.request)
+            val result = if (forcedTimeoutMillis in 1L..60_000L && (!recoveryRun || index == 0)) {
+                experiment.evaluateWithTimeout(testCase.request, forcedTimeoutMillis)
+            } else {
+                experiment.draftBlocking(testCase.request)
+            }
             sampling.set(false)
             sampler.join(250L)
             val outcome = when (result) {
@@ -119,9 +140,9 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
         Log.i("MiniDraftEval", "EVAL_END released=true offlineBoundary=caller-controlled")
     }
 
-    private fun reviewArtifactFile(context: Context): File = File(
+    private fun reviewArtifactFile(context: Context, selectedCaseId: String?): File = File(
         context.getExternalFilesDir("review") ?: File(context.filesDir, "review"),
-        "local-draft-review.json",
+        if (selectedCaseId == null) "local-draft-review.json" else "local-draft-review-$selectedCaseId.json",
     )
 
     private fun writeArtifact(file: File, artifact: JSONObject) {
@@ -151,7 +172,7 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
         val checks = JSONObject()
             .put("executionSucceeded", result is LocalDraftResult.Success)
             .put("subjectiveUsefulness", "HUMAN_REVIEW_REQUIRED")
-        when (testCase.id) {
+        when (testCase.id.removeSuffix("-after-timeout")) {
             "03-changed-facts" -> checks.put(
                 "latestCorrectedFactUsed",
                 draft.contains("Thursday", ignoreCase = true) && !draft.contains("Tuesday", ignoreCase = true),
@@ -296,5 +317,8 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
         private val DEVANAGARI = '\u0900'..'\u097F'
         private val TELUGU = '\u0C00'..'\u0C7F'
         const val ACTION_RUN_LOCAL_DRAFT_EVALUATION = "app.mini.hub.RUN_LOCAL_DRAFT_EVALUATION"
+        const val EXTRA_CASE_ID = "case_id"
+        const val EXTRA_TIMEOUT_MILLIS = "timeout_ms"
+        const val EXTRA_VERIFY_TIMEOUT_RECOVERY = "verify_timeout_recovery"
     }
 }

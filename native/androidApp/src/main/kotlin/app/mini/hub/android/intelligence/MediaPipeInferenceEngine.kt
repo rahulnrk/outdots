@@ -2,6 +2,7 @@ package app.mini.hub.android.intelligence
 
 import android.content.Context
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import app.mini.hub.intelligence.InferenceEngine
 import app.mini.hub.intelligence.InferenceTask
 import app.mini.hub.intelligence.ModelProposal
@@ -10,6 +11,7 @@ import java.io.File
 import java.util.concurrent.CancellationException
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -23,11 +25,15 @@ class MediaPipeInferenceEngine(
     private val lock = Any()
     private val activeTask = AtomicReference<String?>(null)
     private val activeFuture = AtomicReference<Future<String>?>(null)
+    private val activeSession = AtomicReference<LlmInferenceSession?>(null)
+    @Volatile private var unsafeToReuse = false
+    internal var generationTimeoutMillis: Long = MAX_INFERENCE_MILLIS
     private var inference: LlmInference? = null
     private var loadedModelId: String? = null
 
     override fun load(modelId: String): Boolean {
         synchronized(lock) {
+            check(!unsafeToReuse) { "Local runtime did not stop cleanly. Restart the app before drafting." }
             if (loadedModelId == modelId && inference != null) return true
             if (!modelFile.isFile || modelFile.length() <= 0L) return false
             inference?.close()
@@ -45,20 +51,35 @@ class MediaPipeInferenceEngine(
     }
 
     override fun run(task: InferenceTask): ModelProposal {
+        check(!unsafeToReuse) { "Local runtime did not stop cleanly. Restart the app before drafting." }
         val model = synchronized(lock) { inference } ?: error("model is not loaded")
         check(task.context.inputTokens <= task.budget.inputTokens) { "input budget exceeded" }
-        // MediaPipe counts prompt and output together. Check with the real tokenizer so an
-        // oversized prompt is reported clearly instead of surfacing as an empty proposal.
-        val promptTokens = model.sizeInTokens(task.prompt)
-        check(promptTokens + MIN_OUTPUT_TOKENS <= MAX_MODEL_TOKENS) {
-            "Prompt is $promptTokens tokens; limit is ${MAX_MODEL_TOKENS - MIN_OUTPUT_TOKENS}."
-        }
         if (activeTask.get() != null) error("another inference is active")
         check(activeTask.compareAndSet(null, task.id)) { "another inference is active" }
-        val future = model.generateResponseAsync(task.prompt)
-        activeFuture.set(future)
+        var session: LlmInferenceSession? = null
+        var future: Future<String>? = null
         return try {
-            val text = future.get(MAX_INFERENCE_MILLIS, TimeUnit.MILLISECONDS).trim()
+            session = LlmInferenceSession.createFromOptions(
+                model,
+                LlmInferenceSession.LlmInferenceSessionOptions.builder().build(),
+            )
+            activeSession.set(session)
+            if (activeTask.get() != task.id) throw CancellationException("inference cancelled")
+            // Count on this same session; model.sizeInTokens would create a second implicit
+            // session. Prompt and output still share the verified total context limit.
+            val promptTokens = session.sizeInTokens(task.prompt)
+            check(promptTokens + MIN_OUTPUT_TOKENS <= MAX_MODEL_TOKENS) {
+                "Prompt is $promptTokens tokens; limit is ${MAX_MODEL_TOKENS - MIN_OUTPUT_TOKENS}."
+            }
+            session.addQueryChunk(task.prompt)
+            future = session.generateResponseAsync()
+            activeFuture.set(future)
+            // Cancellation may arrive between publishing the session and starting generation.
+            if (activeTask.get() != task.id) session.cancelGenerateResponseAsync()
+            val runningSession = session
+            val text = NativeGenerationWait.await(future, generationTimeoutMillis) {
+                runningSession.cancelGenerateResponseAsync()
+            }.trim()
             if (Thread.currentThread().isInterrupted || activeTask.get() != task.id) {
                 throw CancellationException("inference cancelled")
             }
@@ -71,7 +92,22 @@ class MediaPipeInferenceEngine(
                 proposedAction = ProposedAction.Draft(),
             )
         } finally {
-            activeFuture.compareAndSet(future, null)
+            // Never delete a session while its native callback is still active. Quarantine
+            // the runtime if cancellation did not reach done=true within the drain deadline.
+            if (future == null || future.isDone) {
+                try {
+                    session?.close()
+                } catch (e: Throwable) {
+                    unsafeToReuse = true
+                    throw e
+                } finally {
+                    activeSession.compareAndSet(session, null)
+                    activeFuture.compareAndSet(future, null)
+                    activeTask.compareAndSet(task.id, null)
+                }
+            } else {
+                unsafeToReuse = true
+            }
             activeTask.compareAndSet(task.id, null)
         }
     }
@@ -79,16 +115,29 @@ class MediaPipeInferenceEngine(
     override fun cancel(taskId: String): Boolean {
         if (activeTask.get() != taskId) return false
         activeTask.compareAndSet(taskId, null)
-        return activeFuture.getAndSet(null)?.cancel(true) == true
+        try {
+            activeSession.get()?.cancelGenerateResponseAsync()
+        } catch (_: IllegalStateException) {
+            // The worker may have completed and closed the session after our task check.
+            return false
+        }
+        return true
     }
 
     override fun unload() {
-        activeFuture.getAndSet(null)?.cancel(true)
-        activeTask.set(null)
+        activeTask.get()?.let { cancel(it) }
         synchronized(lock) {
+            val pending = activeFuture.get()
+            if (pending != null && !pending.isDone) {
+                unsafeToReuse = true
+                return
+            }
+            activeSession.getAndSet(null)?.close()
+            activeFuture.set(null)
             inference?.close()
             inference = null
             loadedModelId = null
+            unsafeToReuse = false
         }
     }
 
@@ -107,5 +156,38 @@ class MediaPipeInferenceEngine(
             context.getExternalFilesDir("models") ?: File(context.filesDir, "models"),
             MODEL_FILE_NAME,
         )
+    }
+}
+
+/** A Java Future cancellation does not stop MediaPipe's native session or release its lock. */
+internal object NativeGenerationWait {
+    fun await(
+        future: Future<String>,
+        timeoutMillis: Long,
+        drainMillis: Long = 5_000L,
+        cancelNative: () -> Unit,
+    ): String = try {
+        future.get(timeoutMillis, TimeUnit.MILLISECONDS)
+    } catch (e: TimeoutException) {
+        cancelAndDrain(future, drainMillis, cancelNative)
+        throw TimeoutException("Local inference timed out after $timeoutMillis ms.")
+    } catch (e: InterruptedException) {
+        cancelAndDrain(future, drainMillis, cancelNative)
+        Thread.currentThread().interrupt()
+        throw e
+    }
+
+    private fun cancelAndDrain(future: Future<String>, drainMillis: Long, cancelNative: () -> Unit) {
+        cancelNative()
+        // Keep the future alive so MediaPipe's done=true callback can release the native lock.
+        try {
+            future.get(drainMillis, TimeUnit.MILLISECONDS)
+        } catch (_: java.util.concurrent.ExecutionException) {
+            // A terminal failure is safe to close; the generation is no longer active.
+        } catch (_: CancellationException) {
+            // Caller cancellation also leaves the future terminal.
+        } catch (_: TimeoutException) {
+            // The adapter checks isDone and quarantines this engine rather than closing it.
+        }
     }
 }
