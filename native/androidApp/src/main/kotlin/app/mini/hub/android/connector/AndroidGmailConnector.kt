@@ -4,11 +4,12 @@ import android.content.Context
 import app.mini.hub.action.DigestProvider
 import app.mini.hub.connector.ConnectedAccount
 import app.mini.hub.connector.ConnectorObservationFactory
+import app.mini.hub.connector.ConnectorHttpException
+import app.mini.hub.connector.ConnectionState
 import app.mini.hub.connector.GmailApiConnector
 import app.mini.hub.connector.ProviderHttpResponse
 import app.mini.hub.connector.ProviderHttpTransport
 import app.mini.hub.connector.SyncCheckpoint
-import app.mini.hub.domain.IdGenerator
 import app.mini.hub.observation.IngestCursor
 import app.mini.hub.persistence.ObservationStore
 import java.net.HttpURLConnection
@@ -35,7 +36,6 @@ class AndroidProviderHttpTransport : ProviderHttpTransport {
 class AndroidGmailConnector(
     context: Context,
     private val observationStore: ObservationStore,
-    private val ids: IdGenerator,
     private val digest: DigestProvider,
 ) {
     private val accounts = AndroidConnectedAccountStore(context)
@@ -45,11 +45,36 @@ class AndroidGmailConnector(
 
     fun sync(account: ConnectedAccount, checkpoint: SyncCheckpoint, nowMillis: Long): SyncCheckpoint {
         require(account.id.provider == app.mini.hub.domain.Provider.GMAIL)
-        val token = tokens.get(account.id) ?: error("Gmail account requires OAuth access-token setup")
-        check(!token.isExpired(nowMillis)) { "Gmail access token expired; refresh or reconnect this account" }
+        val token = tokens.get(account.id) ?: run {
+            accounts.upsert(account.copy(state = ConnectionState.AuthorizationRequired, userActionRequired = "Reconnect Gmail to resume this account. Local history is preserved."))
+            error("Gmail account requires OAuth access-token setup")
+        }
+        if (token.isExpired(nowMillis)) {
+            accounts.upsert(account.copy(state = ConnectionState.Expired, userActionRequired = "Reconnect Gmail to resume this account. Local history is preserved."))
+            error("Gmail access token expired; refresh or reconnect this account")
+        }
         check(accounts.get(account.id)?.providerAccountId == account.providerAccountId) { "Account metadata changed" }
-        val result = connector.sync(account, token, checkpoint, transport)
-        val factory = ConnectorObservationFactory(ids, digest)
+        val result = try {
+            connector.sync(account, token, checkpoint, transport)
+        } catch (error: ConnectorHttpException) {
+            val state = if (error.statusCode == 401 || error.statusCode == 403) {
+                ConnectionState.Expired
+            } else {
+                ConnectionState.Degraded
+            }
+            accounts.upsert(
+                account.copy(
+                    state = state,
+                    userActionRequired = if (state == ConnectionState.Expired) {
+                        "Reconnect Gmail to resume this account. Local history is preserved."
+                    } else {
+                        "Gmail is temporarily unavailable; MINI will retry with backoff."
+                    },
+                ),
+            )
+            throw error
+        }
+        val factory = ConnectorObservationFactory(digest)
         val observations = result.messages
             .map { factory.fromMessage(account.id, it, nowMillis) }
             .filter { observationStore.getObservationByNotificationKey(it.notificationKey) == null }

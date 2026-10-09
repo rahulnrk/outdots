@@ -65,6 +65,7 @@ data class ConnectedAccount(
 data class StoredAccessToken(
     val value: String,
     val expiresAtMillis: Long?,
+    val refreshToken: String? = null,
 ) {
     fun isExpired(nowMillis: Long): Boolean = expiresAtMillis != null && expiresAtMillis <= nowMillis
 }

@@ -1,10 +1,14 @@
 package app.mini.hub.connector
 
+import app.mini.hub.action.DigestProvider
 import app.mini.hub.domain.AccountId
+import app.mini.hub.domain.IdGenerator
 import app.mini.hub.domain.Provider
+import app.mini.hub.persistence.InMemoryObservationStore
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class GmailApiConnectorTest {
@@ -89,5 +93,61 @@ class GmailApiConnectorTest {
         assertTrue(StoredAccessToken("expired", 99L).isExpired(100L))
         assertEquals(false, StoredAccessToken("live", 101L).isExpired(100L))
         assertEquals(false, StoredAccessToken("non-expiring", null).isExpired(Long.MAX_VALUE))
+    }
+
+    @Test
+    fun reconnectPreservesAccountIdAndDisconnectsOnlyItsCredential() {
+        val accounts = InMemoryConnectedAccountStore()
+        val tokens = InMemoryAccessTokenStore()
+        var next = 0
+        val manager = AccountConnectionManager(accounts, tokens, IdGenerator { "local-${++next}" })
+        val identity = ProviderAccountIdentity(Provider.GMAIL, "owner@example.com", "Owner", AccountType.GoogleConsumer)
+        val first = manager.attach(identity, ConnectorRoute.OfficialProviderApi, setOf("gmail.readonly"))
+        tokens.put(first.id, StoredAccessToken("first", null, "refresh-first"))
+        manager.markHealth(first.id, ConnectionState.Expired, "Reconnect")
+
+        val reconnected = manager.attach(identity, ConnectorRoute.OfficialProviderApi, setOf("gmail.readonly"))
+        assertEquals(first.id, reconnected.id)
+        assertEquals(ConnectionState.Authorized, reconnected.state)
+        assertEquals(null, reconnected.userActionRequired)
+        assertEquals(true, manager.disconnect(reconnected.id))
+        assertEquals(null, accounts.get(first.id))
+        assertEquals(null, tokens.get(first.id))
+    }
+
+    @Test
+    fun providerMessageObservationIdIsStableForDuplicateDelivery() {
+        val factory = ConnectorObservationFactory(DigestProvider { "digest" })
+        val account = AccountId(Provider.GMAIL, "local-a")
+        val message = ProviderMessage("m1", "t1", "Sender", "Subject", "Hello", 1_700_000_000_000L)
+        val first = factory.fromMessage(account, message, 1_700_000_001_000L)
+        val duplicate = factory.fromMessage(account, message, 1_700_000_002_000L)
+        val otherAccount = factory.fromMessage(AccountId(Provider.GMAIL, "local-b"), message, 1_700_000_002_000L)
+        assertEquals(first.id, duplicate.id)
+        assertEquals(first.notificationKey, duplicate.notificationKey)
+        assertTrue(first.id != otherAccount.id)
+        assertTrue(first.notificationKey != otherAccount.notificationKey)
+    }
+
+    @Test
+    fun disconnectPreservesLocalProviderHistory() {
+        val accounts = InMemoryConnectedAccountStore()
+        val tokens = InMemoryAccessTokenStore()
+        val manager = AccountConnectionManager(accounts, tokens, IdGenerator { "local-account" })
+        val account = manager.attach(
+            ProviderAccountIdentity(Provider.GMAIL, "owner@example.com", "Owner", AccountType.GoogleConsumer),
+            ConnectorRoute.OfficialProviderApi,
+            setOf("gmail.readonly"),
+        )
+        val observation = ConnectorObservationFactory(DigestProvider { "digest" }).fromMessage(
+            account.id,
+            ProviderMessage("m1", "t1", "Sender", "Subject", "Hello", 1_700_000_000_000L),
+            1_700_000_001_000L,
+        )
+        val history = InMemoryObservationStore()
+        assertTrue(history.persistObservation(observation).isSuccess)
+
+        assertTrue(manager.disconnect(account.id))
+        assertNotNull(history.getObservation(observation.id))
     }
 }

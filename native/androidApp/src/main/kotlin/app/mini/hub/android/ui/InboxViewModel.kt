@@ -180,6 +180,7 @@ class InboxViewModel(
             localDraftText = "",
             localDraftWarning = null,
             localDraftStatus = null,
+            localDraftFeedback = null,
             isLocalDraftInProgress = false,
             // The failure pause belongs to the runtime, not the conversation; keep offering retry.
             isLocalAiRetryAvailable = localDraftExperiment?.needsRecovery == true,
@@ -198,6 +199,7 @@ class InboxViewModel(
             localDraftText = "",
             localDraftWarning = null,
             localDraftStatus = null,
+            localDraftFeedback = null,
             isLocalDraftInProgress = false,
         )
     }
@@ -218,6 +220,7 @@ class InboxViewModel(
             localDraftText = "",
             localDraftWarning = retrieved.coverageWarning.ifBlank { null },
             isLocalDraftInProgress = true,
+            localDraftFeedback = null,
             isLocalAiRetryAvailable = false,
             // A new draft reloads the model, so an earlier "released" line would be stale.
             localAiReleaseStatus = null,
@@ -284,8 +287,31 @@ class InboxViewModel(
         )
     }
 
+    /** Called by the host when Android backgrounds the app; typed/generated text remains visible. */
+    fun onAppBackgrounded() {
+        if (!_state.value.isLocalDraftInProgress) return
+        localDraftGeneration++
+        localDraftExperiment?.cancel()
+        _state.value = _state.value.copy(
+            localDraftStatus = "Draft paused when MINI left the foreground. Your text was kept; tap Draft on device to try again.",
+            isLocalDraftInProgress = false,
+        )
+    }
+
     fun updateLocalDraftText(text: String) {
         _state.value = _state.value.copy(localDraftText = text)
+    }
+
+    fun recordDraftUsefulness(feedback: DraftUsefulnessFeedback) {
+        if (_state.value.localDraftText.isBlank()) return
+        _state.value = _state.value.copy(
+            localDraftFeedback = feedback,
+            localDraftStatus = when (feedback) {
+                DraftUsefulnessFeedback.Useful -> "Marked useful. Review and approve before opening the native app."
+                DraftUsefulnessFeedback.NeedsEditing -> "Marked needs editing. Your edits stay local and are not learned automatically."
+                DraftUsefulnessFeedback.NotUseful -> "Marked not useful. Try a clearer intent or reply manually."
+            },
+        )
     }
 
     /**

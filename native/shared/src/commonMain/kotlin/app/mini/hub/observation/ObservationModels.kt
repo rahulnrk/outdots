@@ -26,7 +26,9 @@ enum class ObservationProvenance {
 }
 
 fun coverageFor(provenance: ObservationProvenance): ConversationCoverage = when (provenance) {
-    ObservationProvenance.OfficialProviderApi -> ConversationCoverage.FullProviderSync
+    // The first Gmail connector is bounded/page-based. A future history-complete adapter may use
+    // FullProviderSync, but an official endpoint alone is not proof of complete mailbox history.
+    ObservationProvenance.OfficialProviderApi -> ConversationCoverage.PartialApiSync
     ObservationProvenance.ThirdPartyBridge -> ConversationCoverage.PartialApiSync
     ObservationProvenance.UserImport -> ConversationCoverage.UserImportedSnapshot
     ObservationProvenance.AndroidNotificationListener,
@@ -35,8 +37,8 @@ fun coverageFor(provenance: ObservationProvenance): ConversationCoverage = when 
 
 fun coverageExplanationFor(provenance: ObservationProvenance, gapCount: Long = 0L): String = when (provenance) {
     ObservationProvenance.OfficialProviderApi ->
-        if (gapCount > 0) "Synchronized through the official provider API; $gapCount recovery gap(s) require another backfill."
-        else "Synchronized through the official provider API for this authorized account."
+        if (gapCount > 0) "Synchronized through the official provider API with bounded coverage; $gapCount recovery gap(s) require another backfill."
+        else "Synchronized through the official provider API with bounded/page coverage for this authorized account."
     ObservationProvenance.ThirdPartyBridge ->
         "Synchronized through a third-party bridge; coverage, retention and provider policy limits apply."
     ObservationProvenance.UserImport -> "Imported by explicit user action; it is not a live synchronized inbox."

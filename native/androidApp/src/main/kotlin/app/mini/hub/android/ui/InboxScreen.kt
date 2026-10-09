@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +44,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.mini.hub.action.HandoffLauncher
 import app.mini.hub.android.CommunicationSourcePreferences
+import app.mini.hub.connector.ConnectedAccount
+import app.mini.hub.connector.ConnectedAccountStore
 import app.mini.hub.attention.AttentionAction
 import app.mini.hub.attention.AttentionView
 import app.mini.hub.attention.ConversationAttention
@@ -61,10 +64,16 @@ fun InboxScreen(
     handoffLauncher: HandoffLauncher,
     onRequestPermission: () -> Unit,
     sourcePreferences: CommunicationSourcePreferences,
+    accountStore: ConnectedAccountStore,
+    gmailCanConnect: Boolean,
+    gmailSetupStatus: String,
+    connectionStatus: String?,
+    onConnectGmail: () -> Unit,
     onSourceSelectionChanged: () -> Unit,
 ) {
     val state by viewModel.state
     var showSourceSettings by remember { mutableStateOf(false) }
+    var showAccountSettings by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -76,6 +85,9 @@ fun InboxScreen(
                 actions = {
                     TextButton(onClick = { showSourceSettings = true }) {
                         Text("Sources")
+                    }
+                    TextButton(onClick = { showAccountSettings = true }) {
+                        Text("Accounts")
                     }
                     val statusText = if (state.isListenerConnected) "Listener Active" else "Listener Idle"
                     val statusColor = if (state.isListenerConnected) Color(0xFF2E7D32) else Color(0xFFC62828)
@@ -166,6 +178,7 @@ fun InboxScreen(
                     localDraftText = state.localDraftText,
                     localDraftWarning = state.localDraftWarning,
                     localDraftStatus = state.localDraftStatus,
+                    localDraftFeedback = state.localDraftFeedback,
                     isLocalDraftInProgress = state.isLocalDraftInProgress,
                     isLocalAiRetryAvailable = state.isLocalAiRetryAvailable,
                     isLocalAiRetryInProgress = state.isLocalAiRetryInProgress,
@@ -174,6 +187,7 @@ fun InboxScreen(
                     onLocalDraftRequested = { intent -> viewModel.requestLocalDraft(intent) },
                     onLocalDraftChanged = { text -> viewModel.updateLocalDraftText(text) },
                     onLocalDraftCancelled = { viewModel.cancelLocalDraft() },
+                    onDraftUsefulness = { feedback -> viewModel.recordDraftUsefulness(feedback) },
                     onRetryLocalAi = { viewModel.retryLocalAi() },
                     onDraftPrepared = { body, recip -> viewModel.prepareDraft(body, recip) },
                     onAttentionAction = { action -> viewModel.applyAttentionAction(state.selectedConversation!!.conversationId, action) },
@@ -194,6 +208,17 @@ fun InboxScreen(
             preferences = sourcePreferences,
             onDismiss = { showSourceSettings = false },
             onChanged = onSourceSelectionChanged,
+        )
+    }
+
+    if (showAccountSettings) {
+        ConnectedAccountSettingsDialog(
+            accounts = accountStore.list(),
+            gmailCanConnect = gmailCanConnect,
+            gmailSetupStatus = gmailSetupStatus,
+            connectionStatus = connectionStatus,
+            onConnectGmail = onConnectGmail,
+            onDismiss = { showAccountSettings = false },
         )
     }
 
@@ -245,6 +270,63 @@ private fun CommunicationSourceSettingsDialog(
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("Done") }
         },
+    )
+}
+
+@Composable
+private fun ConnectedAccountSettingsDialog(
+    accounts: List<ConnectedAccount>,
+    gmailCanConnect: Boolean,
+    gmailSetupStatus: String,
+    connectionStatus: String?,
+    onConnectGmail: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Connected accounts") },
+        text = {
+            Column {
+                Text(
+                    "Connected accounts use provider authorization and are separate from notification-source choices.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                if (accounts.isEmpty()) {
+                    Text("No authenticated accounts are connected yet.", style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    accounts.forEach { account ->
+                        Text(
+                            "${account.providerAccountId} · ${account.state.name}",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            "Official provider route · ${account.accountType.name}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+                Text("Gmail", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(gmailSetupStatus, style = MaterialTheme.typography.bodySmall)
+                Spacer(modifier = Modifier.height(6.dp))
+                Button(onClick = onConnectGmail, enabled = gmailCanConnect) {
+                    Text(if (gmailCanConnect) "Connect Gmail (read-only)" else "Gmail setup required")
+                }
+                connectionStatus?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Notification observations remain available without an authenticated account and may not identify the mailbox account.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
     )
 }
 
@@ -371,8 +453,15 @@ fun ConversationItemCard(
                 }
 
                 // Truthful coverage & category badge
+                val coverageLabel = when (conversation.coverage) {
+                    app.mini.hub.observation.ConversationCoverage.FullProviderSync -> "Connected provider sync"
+                    app.mini.hub.observation.ConversationCoverage.PartialApiSync -> "Partial provider sync"
+                    app.mini.hub.observation.ConversationCoverage.UserImportedSnapshot -> "User import"
+                    app.mini.hub.observation.ConversationCoverage.StaleOrDisconnected -> "Disconnected or stale"
+                    app.mini.hub.observation.ConversationCoverage.NotificationOnly -> "Notification observation"
+                }
                 Text(
-                    text = "$categoryLabel · Partial Observation",
+                    text = "$categoryLabel · $coverageLabel",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.secondary,
                 )
@@ -408,6 +497,7 @@ fun ConversationDetailView(
     localDraftText: String,
     localDraftWarning: String?,
     localDraftStatus: String?,
+    localDraftFeedback: DraftUsefulnessFeedback?,
     isLocalDraftInProgress: Boolean,
     isLocalAiRetryAvailable: Boolean,
     isLocalAiRetryInProgress: Boolean,
@@ -416,11 +506,12 @@ fun ConversationDetailView(
     onLocalDraftRequested: (String) -> Unit,
     onLocalDraftChanged: (String) -> Unit,
     onLocalDraftCancelled: () -> Unit,
+    onDraftUsefulness: (DraftUsefulnessFeedback) -> Unit,
     onRetryLocalAi: () -> Unit,
     onDraftPrepared: (String, String) -> Unit,
     onAttentionAction: (AttentionAction) -> Unit,
 ) {
-    var replyIntent by remember { mutableStateOf("") }
+    var replyIntent by rememberSaveable { mutableStateOf("") }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -595,6 +686,25 @@ fun ConversationDetailView(
                 text = status,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(vertical = 4.dp),
+            )
+        }
+        if (localDraftText.isNotBlank() && !isLocalDraftInProgress) {
+            Text("Was this draft useful?", style = MaterialTheme.typography.labelSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(onClick = { onDraftUsefulness(DraftUsefulnessFeedback.Useful) }) { Text("Useful") }
+                OutlinedButton(onClick = { onDraftUsefulness(DraftUsefulnessFeedback.NeedsEditing) }) { Text("Needs edits") }
+                OutlinedButton(onClick = { onDraftUsefulness(DraftUsefulnessFeedback.NotUseful) }) { Text("Not useful") }
+            }
+        }
+        localDraftFeedback?.let { feedback ->
+            Text(
+                text = when (feedback) {
+                    DraftUsefulnessFeedback.Useful -> "Feedback recorded: useful"
+                    DraftUsefulnessFeedback.NeedsEditing -> "Feedback recorded: needs editing"
+                    DraftUsefulnessFeedback.NotUseful -> "Feedback recorded: not useful"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.secondary,
             )
         }
         localAiReleaseStatus?.let { status ->

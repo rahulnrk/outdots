@@ -22,7 +22,7 @@ MINI therefore uses this sequence:
 
 | Network | Account types that are genuinely supportable | Preferred route | Phone-local feasibility | Limitation and release gate |
 |---|---|---|---|---|
-| **Gmail** | Google consumer Gmail and Google Workspace user mailboxes, subject to consent and restricted-scope review | **Official Gmail REST API + OAuth**. `users/me/profile`, message/thread reads, history cursor and later drafts/send | **High for bounded foreground/periodic reads.** Use Android TLS transport, Keystore token storage and bounded work. Gmail push requires server-side Google Cloud Pub/Sub, so it is not a phone-local-only dependency | Restricted/sensitive scopes, consent-screen verification, refresh/revocation, history-gap recovery, pagination and duplicate handling. Current implementation is read-only adapter plus Android runner, not OAuth UI or live account proof |
+| **Gmail** | Google consumer Gmail and Google Workspace user mailboxes, subject to consent and restricted-scope review | **Official Gmail REST API + OAuth**. `users/me/profile`, message/thread reads, history cursor and later drafts/send | **High for bounded foreground/periodic reads.** Use Android TLS transport, Keystore token storage and bounded work. Gmail push requires server-side Google Cloud Pub/Sub, so it is not a phone-local-only dependency | Restricted/sensitive scopes, consent-screen verification, refresh/revocation, history-gap recovery, pagination and duplicate handling. The repository now has a public-client PKCE/browser callback path and read-only adapter, but no configured client ID or live account proof |
 | **Outlook** | Microsoft consumer accounts and Microsoft 365 work/school accounts, subject to Entra app configuration and tenant consent | **Official Microsoft Graph delegated OAuth + PKCE**. Mail folders/messages, delta, later send | **High for bounded reads.** Graph change notifications require a reachable webhook, so local polling/delta recovery is the initial path | Personal/work tenants differ. Admin consent, throttling, subscription renewal and immutable message IDs must be handled. Implement after Gmail contract tests |
 | **Teams** | Primarily Microsoft 365 work/school tenants and organizational users. Do not infer that a consumer Teams identity has the same Graph coverage | **Official Microsoft Graph only where the tenant/app permissions qualify**. Chat and channel messages are separately permissioned | **Conditional.** Foreground/periodic reads can be local, but broad chat/channel notifications and protected permissions may require tenant/server setup | Qualify separately from Outlook. Admin consent, protected/special permissions, tenant policy, incomplete message visibility, chat/channel scope and send policy are release blockers. Notification-only fallback remains truthful |
 | **WhatsApp personal** | Personal WhatsApp account linked to a phone; not a WhatsApp Business Platform account | No broad official personal-inbox API verified. Current MINI route is **Android notification observation** and native handoff. Beeper's on-device route uses a third-party bridge/device-link approach | **Notification/local observation: feasible.** A full bridge is not yet a safe Android-library dependency. It would need an isolated process, device-link lifecycle and battery work | Do not substitute Cloud API: it is for business onboarding, webhooks and business messaging, not a user's complete consumer inbox. `mautrix/whatsapp` is AGPL-3.0 at the checked `main` LICENSE, but provider terms, reverse-engineered protocol risk, battery and Android packaging remain unqualified |
@@ -32,18 +32,19 @@ MINI therefore uses this sequence:
 
 ### Gmail first real connector implemented in this increment
 
-The shared connector package now provides:
+The shared connector package and Android host now provide:
 
 - `ConnectedAccount` metadata with provider account ID, account type, route, state, scopes, health and user-action status.
 - `ConnectedAccountStore` and `AccessTokenStore` boundaries, with in-memory implementations for deterministic tests.
 - `SyncCheckpoint`, bounded `ProviderMessage`, transport abstraction and explicit HTTP failure states.
 - `GmailApiConnector`, which uses only the official REST API, discovers the authorized mailbox identity, lists bounded messages, fetches metadata, returns a page cursor and maps 401/403/429/5xx without pretending success.
 - `ConnectorObservationFactory`, which preserves the connected account ID and marks data as `OfficialProviderApi`; it is not mislabeled as an Android notification.
-- Android metadata persistence and an Android Keystore AES-GCM access-token store. No token is put in the account metadata record or logs.
-- Android `HttpURLConnection` transport and an account-scoped bounded Gmail sync runner that atomically persists observations and a Gmail cursor through the existing observation store.
+- Android public-client OAuth with PKCE, browser launch, state and callback validation, and a configurable Google client ID. The client secret is intentionally not modeled or accepted by the Android build.
+- Android metadata persistence and an Android Keystore AES-GCM access-token store. Access and refresh tokens are account-scoped and no token is put in the account metadata record or logs.
+- Android `HttpURLConnection` token exchange and an account-scoped bounded Gmail sync runner that atomically persists observations and a Gmail cursor through the existing observation store.
 - Coverage summaries that distinguish `FullProviderSync`, `PartialApiSync`, imported snapshots and notification-only observations.
 
-No OAuth client, redirect URI, refresh-token exchange, consent screen or live provider account is present in this repository. The code is therefore independently testable but not a claim that a user can press Connect yet.
+The authorization path and account lifecycle are independently testable, but there is no configured Google client ID, approved test-account result, or live device result in this repository. Live authorization and two-account sync are therefore still blocked by provider and device setup.
 
 ## Later networks from the Beeper screenshot
 
@@ -73,7 +74,7 @@ AGPL compliance would require source/legal-notice and network-source obligations
 
 - Every official account has a separate stable `AccountId`, provider account ID, Keystore token reference, scopes, cursor, health and deletion operation.
 - Notification observations keep account identity unknown (`local_user`) unless the provider observation establishes it. Selecting a source package is never treated as account authorization.
-- Provider sync data is marked `OfficialProviderApi` and displayed with full-provider coverage. Notification data remains notification-only. Existing source allow-list behavior, attention state and hidden-data preservation remain unchanged.
+- Provider sync data is marked `OfficialProviderApi` and displayed with partial coverage while the current adapter is page-bounded. Notification data remains notification-only. Existing source allow-list behavior, attention state and hidden-data preservation remain unchanged.
 - AI receives only the selected account/conversation compartment and evidence revisions already allowed by the existing local runtime. No connector sends message content to a publisher, bridge, diagnostics endpoint or remote model. English remains MVP; romanized Hindi/Telugu tests remain deferred.
 - Outbound send is not enabled by the first Gmail connector. Exact action approval, recipient/account binding, current permission recheck and ambiguous-outcome handling remain mandatory before adding send.
 
@@ -82,12 +83,12 @@ AGPL compliance would require source/legal-notice and network-source obligations
 ### Gmail
 
 1. Google Cloud project with Gmail API enabled.
-2. Android OAuth client configured for this application identity and release signing identity.
-3. OAuth consent/branding, redirect/deep-link/PKCE flow and least-privilege scopes.
-4. Decision and review for Gmail sensitive/restricted scopes, including any required verification/security assessment.
-5. Two real test accounts or a consumer plus Workspace account, with approved consent.
-6. Refresh-token exchange, expiry/revocation/disconnect handling and provider-account identity readback.
-7. Device test of Keystore persistence, bounded sync, history/cursor gap recovery, duplicate messages, process death and account deletion.
+2. Android public OAuth client configured for this application identity and signing certificate, with the accepted redirect/deep-link configuration.
+3. Build-time public client ID supplied as `-Pmini.googleOAuthClientId=<id>`. No client secret is needed or accepted by Android.
+4. OAuth consent/branding, PKCE flow and least-privilege scopes.
+5. Decision and review for Gmail sensitive/restricted scopes, including any required verification/security assessment.
+6. Two real test accounts or a consumer plus Workspace account, with approved consent.
+7. Live validation of refresh/expiry/revocation, provider-account identity readback, bounded sync, history/cursor gap recovery, duplicate messages, process death and account deletion on a test device.
 
 ### Outlook and Teams
 

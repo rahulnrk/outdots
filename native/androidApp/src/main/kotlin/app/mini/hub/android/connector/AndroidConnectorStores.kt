@@ -73,14 +73,19 @@ class AndroidKeystoreAccessTokenStore(context: Context) : AccessTokenStore {
             val plain = Cipher.getInstance(TRANSFORMATION).apply {
                 init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, iv))
             }.doFinal(ciphertext).toString(StandardCharsets.UTF_8)
-            val delimiter = plain.indexOf('|')
-            StoredAccessToken(plain.substring(delimiter + 1), plain.substring(0, delimiter).toLongOrNull())
+            val values = plain.split('|', limit = 3)
+            val legacy = values.size == 2
+            StoredAccessToken(
+                value = if (legacy) values[1] else values.getOrNull(2).orEmpty(),
+                expiresAtMillis = values.getOrNull(0)?.toLongOrNull(),
+                refreshToken = if (legacy) null else values.getOrNull(1)?.ifBlank { null },
+            )
         }.getOrNull()
     }
 
     override fun put(accountId: AccountId, token: StoredAccessToken) = synchronized(this) {
         val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, secretKey()) }
-        val plain = "${token.expiresAtMillis ?: ""}|${token.value}".toByteArray(StandardCharsets.UTF_8)
+        val plain = "${token.expiresAtMillis ?: ""}|${token.refreshToken.orEmpty()}|${token.value}".toByteArray(StandardCharsets.UTF_8)
         val payload = Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(cipher.doFinal(plain), Base64.NO_WRAP)
         prefs.edit().putString(key(accountId), payload).apply()
     }

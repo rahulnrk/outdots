@@ -20,6 +20,15 @@ android {
         compose = true
         buildConfig = true
     }
+    val googleOAuthClientId = providers.gradleProperty("mini.googleOAuthClientId").orNull.orEmpty()
+    buildTypes {
+        getByName("debug") {
+            buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", "\"${googleOAuthClientId.replace("\"", "\\\"")}\"")
+        }
+        getByName("release") {
+            buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", "\"${googleOAuthClientId.replace("\"", "\\\"")}\"")
+        }
+    }
     composeOptions {
         kotlinCompilerExtensionVersion = libs.versions.composeCompiler.get()
     }

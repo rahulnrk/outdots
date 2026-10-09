@@ -155,6 +155,27 @@ class InboxViewModelTest {
     }
 
     @Test
+    fun testDraftUsefulnessFeedbackKeepsEditedTextLocal() {
+        val observations = InMemoryObservationStore()
+        val vm = InboxViewModel(
+            observationStore = observations,
+            retrievalEngine = ScopedRetrievalEngine(observations),
+            styleEngine = AdaptiveStyleEngine(),
+            actionController = ActionController(clock, digest, DomainActionIdGenerator(idGen)),
+            actionStore = InMemoryActionStore(),
+            clock = clock,
+            attentionStore = InMemoryAttentionStore(),
+        )
+
+        vm.updateLocalDraftText("Edited locally before review")
+        vm.recordDraftUsefulness(DraftUsefulnessFeedback.NeedsEditing)
+
+        assertEquals("Edited locally before review", vm.state.value.localDraftText)
+        assertEquals(DraftUsefulnessFeedback.NeedsEditing, vm.state.value.localDraftFeedback)
+        assertTrue(vm.state.value.localDraftStatus?.contains("local") == true)
+    }
+
+    @Test
     fun testAttentionActionsAndStorageFailure() {
         val obsStore = InMemoryObservationStore()
         val attentionStore = InMemoryAttentionStore()

@@ -5,6 +5,10 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
+import app.mini.hub.android.connector.GmailOAuthClient
+import app.mini.hub.android.connector.GmailOAuthOutcome
+import app.mini.hub.android.connector.AndroidConnectedAccountStore
 import app.mini.hub.android.notification.MiniNotificationListenerService
 import app.mini.hub.android.ui.AndroidNativeHandoffLauncher
 import app.mini.hub.android.ui.InboxScreen
@@ -17,6 +21,8 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var viewModel: InboxViewModel
     private lateinit var handoffLauncher: AndroidNativeHandoffLauncher
+    private lateinit var gmailOAuth: GmailOAuthClient
+    private val connectionStatus = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -24,6 +30,8 @@ class MainActivity : ComponentActivity() {
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
 
         MiniHubRuntime.init(applicationContext)
+        gmailOAuth = GmailOAuthClient(applicationContext)
+        handleOAuthIntent(intent)
 
         viewModel = InboxViewModel(
             observationStore = MiniHubRuntime.observationStore,
@@ -48,6 +56,17 @@ class MainActivity : ComponentActivity() {
                         startActivity(MiniNotificationListenerService.createSettingsIntent())
                     },
                     sourcePreferences = MiniHubRuntime.communicationSourcePreferences,
+                    accountStore = AndroidConnectedAccountStore(applicationContext),
+                    gmailCanConnect = gmailOAuth.isConfigured,
+                    gmailSetupStatus = gmailOAuth.setupStatus,
+                    connectionStatus = connectionStatus.value,
+                    onConnectGmail = {
+                        connectionStatus.value = when (val outcome = gmailOAuth.launch(this)) {
+                            is GmailOAuthOutcome.Started -> "Google authorization opened in your browser. Return here to finish the account connection."
+                            is GmailOAuthOutcome.Blocked -> outcome.reason
+                            is GmailOAuthOutcome.Connected -> "Gmail account connected: ${outcome.account.displayName ?: outcome.account.providerAccountId}"
+                        }
+                    },
                     onSourceSelectionChanged = {
                         viewModel.refresh(
                             isPermissionGranted = MiniNotificationListenerService.isPermissionGranted(this),
@@ -76,8 +95,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleOAuthIntent(intent)
+    }
+
+    private fun handleOAuthIntent(intent: android.content.Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme != "app.mini.hub" || uri.path != "/oauth2redirect/google") return
+        connectionStatus.value = when (val outcome = gmailOAuth.handleRedirect(uri)) {
+            is GmailOAuthOutcome.Connected -> "Gmail account connected: ${outcome.account.displayName ?: outcome.account.providerAccountId}"
+            is GmailOAuthOutcome.Blocked -> outcome.reason
+            is GmailOAuthOutcome.Started -> "Google authorization is already in progress."
+        }
+    }
+
     override fun onPause() {
         super.onPause()
+        if (::viewModel.isInitialized) viewModel.onAppBackgrounded()
         MiniHubRuntime.ingestCoordinator.setUiListener(null)
     }
 }
