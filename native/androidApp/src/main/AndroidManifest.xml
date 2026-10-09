@@ -3,6 +3,7 @@
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Private stores are excluded from backup (architecture section 11). -->
     <application
@@ -27,6 +28,11 @@
                     android:scheme="${gmailRedirectScheme}" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".connector.GmailSyncJobService"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="false" />
 
         <service
             android:name=".notification.MiniNotificationListenerService"

@@ -70,6 +70,9 @@ fun InboxScreen(
     connectionStatus: String?,
     onConnectGmail: () -> Unit,
     onSourceSelectionChanged: () -> Unit,
+    onDisconnectAccount: (ConnectedAccount) -> Unit = {},
+    onSyncNow: () -> Unit = {},
+    accountsVersion: Int = 0,
 ) {
     val state by viewModel.state
     var showSourceSettings by remember { mutableStateOf(false) }
@@ -217,11 +220,13 @@ fun InboxScreen(
 
     if (showAccountSettings) {
         ConnectedAccountSettingsDialog(
-            accounts = accountStore.list(),
+            accounts = remember(accountsVersion, connectionStatus) { accountStore.list() },
             gmailCanConnect = gmailCanConnect,
             gmailSetupStatus = gmailSetupStatus,
             connectionStatus = connectionStatus,
             onConnectGmail = onConnectGmail,
+            onDisconnect = onDisconnectAccount,
+            onSyncNow = onSyncNow,
             onDismiss = { showAccountSettings = false },
         )
     }
@@ -284,8 +289,27 @@ private fun ConnectedAccountSettingsDialog(
     gmailSetupStatus: String,
     connectionStatus: String?,
     onConnectGmail: () -> Unit,
+    onDisconnect: (ConnectedAccount) -> Unit,
+    onSyncNow: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var pendingDisconnect by remember { mutableStateOf<ConnectedAccount?>(null) }
+    pendingDisconnect?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingDisconnect = null },
+            title = { Text("Disconnect this Gmail account?") },
+            text = {
+                Text(
+                    "MINI stops syncing ${target.displayName ?: "this account"} and deletes its stored access. " +
+                        "Messages already in MINI are kept. Other accounts are not affected.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { onDisconnect(target); pendingDisconnect = null }) { Text("Disconnect") }
+            },
+            dismissButton = { TextButton(onClick = { pendingDisconnect = null }) { Text("Cancel") } },
+        )
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Connected accounts") },
@@ -301,7 +325,7 @@ private fun ConnectedAccountSettingsDialog(
                 } else {
                     accounts.forEach { account ->
                         Text(
-                            "${account.providerAccountId} · ${account.state.name}",
+                            "${account.displayName ?: account.providerAccountId} · ${accountStateLabel(account.state)}",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
@@ -309,8 +333,15 @@ private fun ConnectedAccountSettingsDialog(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        account.userActionRequired?.let {
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                        }
+                        if (account.state != app.mini.hub.connector.ConnectionState.Disconnected) {
+                            TextButton(onClick = { pendingDisconnect = account }) { Text("Disconnect") }
+                        }
                         Spacer(modifier = Modifier.height(6.dp))
                     }
+                    TextButton(onClick = onSyncNow) { Text("Sync Gmail now") }
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
                 Text("Gmail", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
@@ -332,6 +363,17 @@ private fun ConnectedAccountSettingsDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
     )
+}
+
+private fun accountStateLabel(state: app.mini.hub.connector.ConnectionState): String = when (state) {
+    app.mini.hub.connector.ConnectionState.Authorized,
+    app.mini.hub.connector.ConnectionState.Healthy -> "Connected"
+    app.mini.hub.connector.ConnectionState.Syncing -> "Syncing"
+    app.mini.hub.connector.ConnectionState.Disconnected -> "Disconnected"
+    app.mini.hub.connector.ConnectionState.Revoked -> "Access removed"
+    app.mini.hub.connector.ConnectionState.Expired -> "Sign-in expired"
+    app.mini.hub.connector.ConnectionState.AuthorizationRequired -> "Needs permission"
+    app.mini.hub.connector.ConnectionState.Degraded -> "Temporarily unavailable"
 }
 
 @Composable

@@ -35,7 +35,7 @@ class GmailLiveSyncDeviceTest {
         val firstResults = accounts.map { account ->
             connector.sync(account, SyncCheckpoint(), System.currentTimeMillis())
         }
-        assertTrue("Each account must return at least one Gmail message for duplicate verification", firstResults.all { it.processedCount > 0 })
+        assertTrue("Each account must return at least one Gmail message for duplicate verification", firstResults.all { it.fetched > 0 })
         val firstCounts = accounts.associateWith { observationCount(it) }
         assertTrue("Each account must retain account-scoped history", firstCounts.values.all { it > 0 })
 

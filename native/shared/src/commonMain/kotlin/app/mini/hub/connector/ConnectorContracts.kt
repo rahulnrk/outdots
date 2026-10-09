@@ -150,4 +150,9 @@ interface AccountConnector {
     ): SyncResult
 }
 
-class ConnectorHttpException(val statusCode: Int, message: String) : RuntimeException(message)
+class ConnectorHttpException(
+    val statusCode: Int,
+    message: String,
+    /** Provider reason code (for example insufficientPermissions). Never contains message content. */
+    val reason: String? = null,
+) : RuntimeException(message)

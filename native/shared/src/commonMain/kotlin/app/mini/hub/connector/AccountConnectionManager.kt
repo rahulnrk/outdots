@@ -40,9 +40,30 @@ class AccountConnectionManager(
         accounts.get(id)?.let { accounts.upsert(it.copy(state = state, userActionRequired = action)) }
     }
 
-    /** Disconnects only this account's token and metadata. Existing observations remain local. */
+    /**
+     * Disconnects only this account's credential. The metadata record is kept in the Disconnected
+     * state so a later reconnect of the same provider identity reuses the same local account ID,
+     * which keeps existing history attached and prevents a second copy of every message.
+     */
     fun disconnect(id: AccountId): Boolean {
         tokens.remove(id)
+        val existing = accounts.get(id) ?: return false
+        accounts.upsert(
+            existing.copy(
+                state = ConnectionState.Disconnected,
+                userActionRequired = DISCONNECTED_ACTION,
+            ),
+        )
+        return true
+    }
+
+    /** Permanently forgets the account metadata. Local message history is still not deleted here. */
+    fun forget(id: AccountId): Boolean {
+        tokens.remove(id)
         return accounts.remove(id)
+    }
+
+    companion object {
+        const val DISCONNECTED_ACTION = "Disconnected. Local history is kept. Reconnect to resume syncing."
     }
 }

@@ -417,12 +417,19 @@ class SqlCipherObservationStore(
             put("coverage", coverageFor(obs.provenance).name)
             put("coverage_explanation", coverageExplanation)
             put("latest_event_at", obs.observedAt.epochMillis)
-            put("observation_count", 1)
-            put("unread_count", if (obs.isRemoved) 0 else 1)
+            // Derive counts from the stored rows. A constant 1 here made every conversation report a
+            // single message regardless of how many observations it contains.
+            put("observation_count", countRows(db, "conversation_key = ?", obs.conversationId.key))
+            put("unread_count", countRows(db, "conversation_key = ? AND is_removed = 0", obs.conversationId.key))
             put("is_removed", if (obs.isRemoved) 1 else 0)
         }
         db.insertWithOnConflict("conversation_summaries", null, convValues, SQLiteDatabase.CONFLICT_REPLACE)
     }
+
+    private fun countRows(db: SQLiteDatabase, where: String, arg: String): Int =
+        db.rawQuery("SELECT COUNT(*) FROM notification_observations WHERE $where", arrayOf(arg)).use { c ->
+            if (c.moveToFirst()) c.getInt(0) else 0
+        }
 
     /**
      * Writes one cursor row. Must be called inside an active transaction.

@@ -61,17 +61,17 @@ class GmailApiConnector(
 
     private fun get(transport: ProviderHttpTransport, url: String, token: StoredAccessToken): String {
         val result = transport.get(url, mapOf("Authorization" to "Bearer ${token.value}"))
-        if (result.statusCode == 401) throw ConnectorHttpException(401, "Gmail authorization expired or revoked")
+        val reason = Regex("\"reason\"\\s*:\\s*\"([A-Za-z_]+)\"").find(result.body)?.groupValues?.get(1)
+        if (result.statusCode == 401) throw ConnectorHttpException(401, "Gmail authorization expired or revoked", reason)
         if (result.statusCode == 403) {
             // Google's reason code (e.g. accessNotConfigured, insufficientPermissions) is non-sensitive and
             // distinguishes a disabled Gmail API from a consent screen where the Gmail scope was unticked.
-            val reason = Regex("\"reason\"\\s*:\\s*\"([A-Za-z_]+)\"").find(result.body)?.groupValues?.get(1) ?: "unknown"
             val hint = when (reason) {
                 "accessNotConfigured", "SERVICE_DISABLED" -> "Gmail API is not enabled for this Google Cloud project"
                 "insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT" -> "Gmail read permission was not granted on the consent screen"
                 else -> "Gmail permission denied for this account"
             }
-            throw ConnectorHttpException(403, "$hint ($reason)")
+            throw ConnectorHttpException(403, "$hint (${reason ?: "unknown"})", reason)
         }
         if (result.statusCode == 429 || result.statusCode >= 500) {
             throw ConnectorHttpException(result.statusCode, "Gmail temporarily unavailable; retry with backoff")
@@ -86,10 +86,22 @@ private fun String.objects(field: String): List<String> {
     val start = indexOf(marker).takeIf { it >= 0 } ?: return emptyList()
     val open = indexOf('[', start).takeIf { it >= 0 } ?: return emptyList()
     val close = matchingBracket(open).takeIf { it >= 0 } ?: return emptyList()
-    val body = substring(open + 1, close)
-    return body.split("},{", limit = 100).map { raw ->
-        raw.trim().removePrefix("{").removeSuffix("}") .let { "{$it}" }
-    }.filter { it != "{}" }
+    // Walk top-level objects by bracket depth. Splitting on a literal "},{" breaks on
+    // pretty-printed responses ("},\n  {"), which Gmail returns, and silently keeps only one item.
+    val result = mutableListOf<String>()
+    var i = open + 1
+    while (i < close) {
+        val c = this[i]
+        if (c == '{') {
+            val end = matchingBracket(i)
+            if (end < 0 || end > close) break
+            result += substring(i, end + 1)
+            i = end + 1
+        } else {
+            i++
+        }
+    }
+    return result
 }
 
 private fun String.matchingBracket(open: Int): Int {

@@ -53,6 +53,51 @@ class GmailApiConnectorTest {
     }
 
     @Test
+    fun prettyPrintedListReturnsEveryMessage() {
+        val list = """
+            {
+              "messages": [
+                {
+                  "id": "m1",
+                  "threadId": "t1"
+                },
+                {
+                  "id": "m2",
+                  "threadId": "t1"
+                },
+                {
+                  "id": "m3",
+                  "threadId": "t3"
+                }
+              ],
+              "resultSizeEstimate": 3
+            }
+        """.trimIndent()
+        val transport = ProviderHttpTransport { url, _ ->
+            when {
+                url.contains("/messages?") -> ProviderHttpResponse(200, list)
+                url.contains("/messages/") -> {
+                    val id = url.substringAfter("/messages/").substringBefore("?")
+                    ProviderHttpResponse(
+                        200,
+                        "{\n  \"id\": \"$id\",\n  \"snippet\": \"s\",\n  \"payload\": {\n    \"headers\": [\n      {\n        \"name\": \"Subject\",\n        \"value\": \"x\"\n      },\n      {\n        \"name\": \"From\",\n        \"value\": \"f\"\n      }\n    ]\n  }\n}",
+                    )
+                }
+                else -> error("Unexpected URL")
+            }
+        }
+        val account = ConnectedAccount(
+            AccountId(Provider.GMAIL, "local-a"), "owner@example.com", "Owner", AccountType.GoogleConsumer,
+            ConnectorRoute.OfficialProviderApi, ConnectionState.Authorized,
+        )
+        val result = GmailApiConnector("https://gmail.test/users/me")
+            .sync(account, StoredAccessToken("t", null), SyncCheckpoint(), transport, maxMessages = 10)
+        assertEquals(listOf("m1", "m2", "m3"), result.messages.map { it.providerMessageId })
+        assertEquals(listOf("t1", "t1", "t3"), result.messages.map { it.conversationId })
+        assertEquals("f", result.messages.first().sender)
+    }
+
+    @Test
     fun authorizationAndTransientFailuresAreExplicit() {
         val connector = GmailApiConnector("https://gmail.test/users/me")
         val token = StoredAccessToken("access-token", null)
@@ -111,8 +156,16 @@ class GmailApiConnectorTest {
         assertEquals(ConnectionState.Authorized, reconnected.state)
         assertEquals(null, reconnected.userActionRequired)
         assertEquals(true, manager.disconnect(reconnected.id))
-        assertEquals(null, accounts.get(first.id))
+        assertEquals(ConnectionState.Disconnected, accounts.get(first.id)?.state)
         assertEquals(null, tokens.get(first.id))
+
+        // Reconnecting after a disconnect must reuse the same local ID so history stays attached.
+        val afterDisconnect = manager.attach(identity, ConnectorRoute.OfficialProviderApi, setOf("gmail.readonly"))
+        assertEquals(first.id, afterDisconnect.id)
+        assertEquals(ConnectionState.Authorized, afterDisconnect.state)
+
+        assertEquals(true, manager.forget(first.id))
+        assertEquals(null, accounts.get(first.id))
     }
 
     @Test

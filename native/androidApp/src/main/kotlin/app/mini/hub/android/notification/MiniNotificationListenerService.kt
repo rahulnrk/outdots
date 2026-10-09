@@ -90,6 +90,13 @@ class MiniNotificationListenerService : NotificationListenerService() {
         if (pkg == packageName && sbn.tag != "synthetic_test") return
         if (pkg != packageName && !MiniHubRuntime.isCommunicationSourcePackageSelected(pkg)) return
 
+        // A Gmail notification hints that new mail arrived. Ask the connector to fetch it
+        // authoritatively instead of relying only on notification text.
+        if (pkg == "com.google.android.gm") {
+            android.util.Log.i("MiniGmailSync", "gmail app notification observed; requesting sync")
+            app.mini.hub.android.connector.GmailSyncJobService.requestSoon(applicationContext, "gmail_notification")
+        }
+
         val notification = sbn.notification ?: return
         val extras = notification.extras
 
