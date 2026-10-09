@@ -130,7 +130,14 @@ fun InboxScreen(
                 ConversationDetailView(
                     summary = state.selectedConversation!!,
                     timeline = state.selectedTimeline,
+                    localDraftText = state.localDraftText,
+                    localDraftWarning = state.localDraftWarning,
+                    localDraftStatus = state.localDraftStatus,
+                    isLocalDraftInProgress = state.isLocalDraftInProgress,
                     onBack = { viewModel.clearSelection() },
+                    onLocalDraftRequested = { intent -> viewModel.requestLocalDraft(intent) },
+                    onLocalDraftChanged = { text -> viewModel.updateLocalDraftText(text) },
+                    onLocalDraftCancelled = { viewModel.cancelLocalDraft() },
                     onDraftPrepared = { body, recip -> viewModel.prepareDraft(body, recip) },
                 )
             } else {
@@ -252,10 +259,17 @@ fun ConversationItemCard(
 fun ConversationDetailView(
     summary: ConversationObservationSummary,
     timeline: List<ObservedNotification>,
+    localDraftText: String,
+    localDraftWarning: String?,
+    localDraftStatus: String?,
+    isLocalDraftInProgress: Boolean,
     onBack: () -> Unit,
+    onLocalDraftRequested: (String) -> Unit,
+    onLocalDraftChanged: (String) -> Unit,
+    onLocalDraftCancelled: () -> Unit,
     onDraftPrepared: (String, String) -> Unit,
 ) {
-    var draftText by remember { mutableStateOf("") }
+    var replyIntent by remember { mutableStateOf("") }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -330,26 +344,72 @@ fun ConversationDetailView(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Quick Draft Composer
+        // Small local drafting experiment. The generated text remains editable and enters the
+        // existing exact-action review only when the user explicitly chooses it.
         OutlinedTextField(
-            value = draftText,
-            onValueChange = { draftText = it },
-            label = { Text("Draft reply (requires your approval before opening)") },
+            value = replyIntent,
+            onValueChange = { replyIntent = it },
+            label = { Text("Reply intent for local draft") },
+            placeholder = { Text("e.g. acknowledge and ask for the missing time") },
             modifier = Modifier.fillMaxWidth(),
-            maxLines = 3,
+            maxLines = 2,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Button(
+                onClick = { onLocalDraftRequested(replyIntent) },
+                enabled = replyIntent.isNotBlank() && !isLocalDraftInProgress,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Draft on device")
+            }
+            if (isLocalDraftInProgress) {
+                OutlinedButton(onClick = onLocalDraftCancelled) {
+                    Text("Cancel")
+                }
+            }
+        }
+        localDraftStatus?.let { status ->
+            Text(
+                text = status,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(vertical = 4.dp),
+            )
+        }
+        localDraftWarning?.let { warning ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            ) {
+                Text(
+                    text = "Context warning: $warning",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(8.dp),
+                )
+            }
+        }
+        OutlinedTextField(
+            value = localDraftText,
+            onValueChange = onLocalDraftChanged,
+            label = { Text("Editable local draft") },
+            modifier = Modifier.fillMaxWidth(),
+            maxLines = 5,
         )
 
         Spacer(modifier = Modifier.height(6.dp))
         Button(
             onClick = {
-                if (draftText.isNotBlank()) {
-                    onDraftPrepared(draftText, summary.senderHint)
+                if (localDraftText.isNotBlank()) {
+                    onDraftPrepared(localDraftText, summary.senderHint)
                 }
             },
-            enabled = draftText.isNotBlank(),
+            enabled = localDraftText.isNotBlank() && !isLocalDraftInProgress,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Review & Approve Draft")
+            Text("Review local draft before opening")
         }
     }
 }

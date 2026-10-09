@@ -32,6 +32,7 @@ class MainActivity : ComponentActivity() {
             actionController = MiniHubRuntime.actionController,
             actionStore = MiniHubRuntime.actionStore,
             clock = MiniHubRuntime.clock,
+            localDraftExperiment = MiniHubRuntime.localDraftExperiment,
         )
 
         handoffLauncher = AndroidNativeHandoffLauncher(this)

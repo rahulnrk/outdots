@@ -18,4 +18,8 @@ data class InboxViewState(
     val activeReviewPayload: ExactActionPayload? = null,
     val outboxStatusMessage: String? = null,
     val isLoading: Boolean = false,
+    val localDraftText: String = "",
+    val localDraftWarning: String? = null,
+    val localDraftStatus: String? = null,
+    val isLocalDraftInProgress: Boolean = false,
 )

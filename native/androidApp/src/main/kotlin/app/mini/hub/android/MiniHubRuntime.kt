@@ -1,6 +1,7 @@
 package app.mini.hub.android
 
 import android.content.Context
+import app.mini.hub.android.intelligence.LocalDraftExperiment
 import app.mini.hub.action.ActionController
 import app.mini.hub.action.DigestProvider
 import app.mini.hub.action.DomainActionIdGenerator
@@ -46,6 +47,8 @@ object MiniHubRuntime {
     lateinit var styleEngine: AdaptiveStyleEngine
         private set
     lateinit var actionController: ActionController
+        private set
+    lateinit var localDraftExperiment: LocalDraftExperiment
         private set
 
     private val backgroundExecutor = Executors.newSingleThreadExecutor()
@@ -95,6 +98,7 @@ object MiniHubRuntime {
                 digest = digest,
                 ids = DomainActionIdGenerator(idGen),
             )
+            localDraftExperiment = LocalDraftExperiment(context.applicationContext)
 
             isInitialized = true
         }

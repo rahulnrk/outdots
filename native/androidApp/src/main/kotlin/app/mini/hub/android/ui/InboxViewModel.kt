@@ -1,5 +1,7 @@
 package app.mini.hub.android.ui
 
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import app.mini.hub.action.ActionController
@@ -7,6 +9,9 @@ import app.mini.hub.action.ActionRoute
 import app.mini.hub.action.ExactActionPayload
 import app.mini.hub.action.HandoffLauncher
 import app.mini.hub.action.OutboxState
+import app.mini.hub.android.intelligence.LocalDraftExperiment
+import app.mini.hub.android.intelligence.LocalDraftRequest
+import app.mini.hub.android.intelligence.LocalDraftResult
 import app.mini.hub.domain.Clock
 import app.mini.hub.intelligence.CompartmentId
 import app.mini.hub.observation.ConversationObservationSummary
@@ -28,9 +33,15 @@ class InboxViewModel(
     private val actionController: ActionController,
     private val actionStore: ActionStore,
     private val clock: Clock,
+    private val localDraftExperiment: LocalDraftExperiment? = null,
 ) {
     private val _state = mutableStateOf(InboxViewState())
     val state: State<InboxViewState> get() = _state
+    private val mainHandler: Handler? = try {
+        Handler(Looper.getMainLooper())
+    } catch (_: RuntimeException) {
+        null
+    }
 
     fun refresh(isPermissionGranted: Boolean, isListenerConnected: Boolean) {
         val summaries = observationStore.getConversationSummaries()
@@ -66,6 +77,10 @@ class InboxViewModel(
             activeStyleProfile = style,
             activeReviewPayload = null,
             outboxStatusMessage = null,
+            localDraftText = "",
+            localDraftWarning = null,
+            localDraftStatus = null,
+            isLocalDraftInProgress = false,
         )
     }
 
@@ -77,7 +92,78 @@ class InboxViewModel(
             activeStyleProfile = null,
             activeReviewPayload = null,
             outboxStatusMessage = null,
+            localDraftText = "",
+            localDraftWarning = null,
+            localDraftStatus = null,
+            isLocalDraftInProgress = false,
         )
+    }
+
+    fun requestLocalDraft(userIntent: String) {
+        val selected = _state.value.selectedConversation ?: return
+        val retrieved = _state.value.retrievedContext ?: return
+        val experiment = localDraftExperiment ?: run {
+            _state.value = _state.value.copy(
+                localDraftStatus = "Local drafting is unavailable in this build.",
+                isLocalDraftInProgress = false,
+            )
+            return
+        }
+        _state.value = _state.value.copy(
+            localDraftStatus = "Generating locally on this device…",
+            localDraftWarning = retrieved.coverageWarning.ifBlank { null },
+            isLocalDraftInProgress = true,
+        )
+        experiment.draftAsync(
+            LocalDraftRequest(
+                conversationLabel = selected.title,
+                sender = selected.senderHint,
+                compartment = CompartmentId(selected.accountId.key),
+                context = retrieved.contextBundle,
+                observations = retrieved.retrievedObservations,
+                coverageWarning = retrieved.coverageWarning,
+                userIntent = userIntent,
+            ),
+        ) { result ->
+            val applyResult = {
+                when (result) {
+                    is LocalDraftResult.Success -> _state.value = _state.value.copy(
+                        localDraftText = result.proposal.text,
+                        localDraftWarning = result.warning.ifBlank { null },
+                        localDraftStatus = "Local draft ready (${result.latencyMs} ms). Review it before use.",
+                        isLocalDraftInProgress = false,
+                    )
+                    is LocalDraftResult.Refused -> _state.value = _state.value.copy(
+                        localDraftWarning = result.warning.ifBlank { null },
+                        localDraftStatus = result.reason,
+                        isLocalDraftInProgress = false,
+                    )
+                    is LocalDraftResult.Failed -> _state.value = _state.value.copy(
+                        localDraftWarning = result.warning.ifBlank { null },
+                        localDraftStatus = "Local draft unavailable: ${result.reason}",
+                        isLocalDraftInProgress = false,
+                    )
+                }
+            }
+            mainHandler?.post(applyResult) ?: applyResult()
+        }
+    }
+
+    fun cancelLocalDraft() {
+        if (localDraftExperiment?.cancel() == true) {
+            _state.value = _state.value.copy(
+                localDraftStatus = "Local draft cancelled.",
+                isLocalDraftInProgress = false,
+            )
+        }
+    }
+
+    fun updateLocalDraftText(text: String) {
+        _state.value = _state.value.copy(localDraftText = text)
+    }
+
+    fun releaseLocalDraftResources() {
+        localDraftExperiment?.release()
     }
 
     fun prepareDraft(body: String, recipient: String) {

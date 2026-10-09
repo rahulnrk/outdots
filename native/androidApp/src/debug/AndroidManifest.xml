@@ -13,5 +13,12 @@
                 <action android:name="app.mini.hub.QUERY_DELIVERY_ACCOUNTING" />
             </intent-filter>
         </receiver>
+        <receiver
+            android:name=".intelligence.LocalDraftEvaluationReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="app.mini.hub.RUN_LOCAL_DRAFT_EVALUATION" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
