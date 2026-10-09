@@ -68,6 +68,18 @@ The following are verified repository limitations:
 
 Until this setup is available, the honest status is independently testable connector code with live authorization and two-account sync blocked by environment configuration.
 
-## Next validation gate
+## Device verification run: 2026-10-09
 
-Run the two-account device matrix, inspect account-scoped history after revoking and reconnecting only one identity, and record notification delivery while MINI and AI are not in the foreground. After that gate passes, design Gmail send separately, then qualify Outlook Graph and Teams permissions. Social and bridge candidates remain roadmap work and are not silently promoted to official connectors.
+The Android SDK `adb` tool was available and one connected Pixel 10 Pro was detected. The debug APK was built and installed on that device. The generated `BuildConfig.GOOGLE_OAUTH_CLIENT_ID` was empty, so no Google authorization flow was started and no Gmail account data was accessed.
+
+Live device checks that did run:
+
+- `AttentionWorkflowDeviceTest`: 2 of 2 passed on the Pixel 10 Pro. This is live device evidence for attention persistence and failure isolation, not Gmail account evidence.
+- `CommunicationSourcePreferencesDeviceTest`: 1 of 1 passed on the Pixel 10 Pro. This is live device evidence for source preference persistence, not provider authorization.
+- The complete four-test instrumentation suite produced 3 passes and 1 failure. `MemoryPressureDeviceTest` failed because the device returned `Failed(reason=Local AI paused because the device is low on memory)` where the test expected a `Pressured` result. This failure is unrelated to Gmail account access and is not being relabeled as a Gmail defect.
+
+Gmail-specific live requirements remain unrun: two account authorizations, independent mailbox sync, account-scoped duplicate checks, restart and reconnect history checks, single-account revoke or disconnect, and visible recovery from provider failures. These require the missing public client configuration and approved test accounts below.
+
+## Send qualification gate
+
+Read-only Gmail sync must pass first. A separate send qualification must then verify the least-privilege grant change from `gmail.readonly` to the reviewed send scope, exact account and recipient review immediately before handoff, explicit user approval, provider response handling, and an idempotency or outbox key that prevents a retry from sending twice. No Gmail send or reply claim is made by this increment.
