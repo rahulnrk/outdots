@@ -116,4 +116,27 @@ Tapping Cancel about 0.8 s into a live generation showed "Local draft unavailabl
 - Late callbacks were applied unconditionally, so a cancelled or superseded request, or one from a previously selected conversation, could overwrite current state.
 - A new request did not clear the old draft, so a stale draft looked like a current result.
 
-Fix: a generation token invalidates in-flight callbacks on cancel, on conversation change, and on back; cancel always shows "Local draft cancelled."; starting a draft clears the old text. Build and unit tests pass. On-device re-verification of the fix was blocked because the phone dropped off ADB (`offline`, then absent after `adb reconnect` and server restart).
+Fix: a generation token invalidates in-flight callbacks on cancel, on conversation change, and on back; cancel always shows "Local draft cancelled."; starting a draft clears the old text. Build and unit tests pass.
+
+### On-device re-verification of the cancellation fix
+
+After the phone reconnected, the fixed APK was installed (app data, model file, and permissions preserved) and re-tested through the UI:
+
+| Scenario | Observed |
+| --- | --- |
+| Baseline draft, then "Draft on device" and Cancel after 0.8 s | Status "Local draft cancelled.", stable for 8 s. Editable draft emptied. "Review local draft before opening" disabled (`enabled=false`). No late result appeared. |
+| Draft again after a cancel | "Local draft ready (3019 ms)", correct draft. Engine reusable after cancel. |
+| Start a draft, tap "Back to Inbox" at 0.8 s, reopen the conversation | Clean screen: empty intent, empty draft, no status. No late result leaked into the reopened conversation. |
+
+## Cold-start process death: root cause
+
+Reproduced with Android's own exit record (`dumpsys activity exit-info app.mini.hub`):
+
+- Force-stopped app, notification listener **enabled**, evaluator broadcast: process survived and all ten cases completed (`EVAL_END released=true`). The bound listener service keeps the process at a protected priority.
+- Force-stopped app, notification listener **disabled**, evaluator broadcast: `EVAL_START` at 12:30:56.5, then `Process app.mini.hub has died: cch+5` at 12:30:58.8. Exit info: `reason=3 (LOW_MEMORY)`, `importance=400`, `state=empty`. The first failure at 11:41:48 has the same `LOW_MEMORY` / `importance=400` record.
+
+So this is not an app crash. The receiver calls `goAsync().finish()` immediately and loads a ~0.8 GB model on a plain thread, leaving the process in the cached/empty state. On a 3.6 GB device, lowmemorykiller reclaims it within about 2 s. On the 16 GB Pixel the same pattern happened to survive.
+
+Product impact, checked separately: a fully cold app (force-stopped) opened by the user, then drafting from the conversation screen, succeeded ("Local draft ready (6154 ms)", correct Rs 500 draft) with no process death, because the activity is foreground. Any future background drafting (for example triggered from a notification or after the user leaves the screen) must run in a foreground service or WorkManager expedited job, or it will be killed on low-RAM devices. The debug evaluator itself is only reliable while the listener is bound or the app is in the foreground.
+
+The listener permission was temporarily revoked for this test and restored afterwards (verified in `enabled_notification_listeners`).
