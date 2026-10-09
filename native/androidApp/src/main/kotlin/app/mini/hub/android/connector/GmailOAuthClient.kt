@@ -56,7 +56,7 @@ class GmailOAuthClient(context: Context) {
     val setupStatus: String get() = if (isConfigured) {
         "Gmail uses official read-only OAuth and stores tokens in Android Keystore. Reply/send is not connected yet."
     } else {
-        "Gmail setup missing: build with -Pmini.googleOAuthClientId=<Android client ID ending in .apps.googleusercontent.com>. Never add a client secret to Android."
+        "Google connection setup incomplete: build with -Pmini.googleOAuthClientId=<real Android client ID ending in .apps.googleusercontent.com>. Never add a client secret to Android."
     }
 
     fun acceptsRedirect(uri: Uri): Boolean = configuration?.let { config ->
@@ -65,7 +65,7 @@ class GmailOAuthClient(context: Context) {
 
     fun launch(activity: Activity): GmailOAuthOutcome {
         val config = configuration ?: return GmailOAuthOutcome.Blocked(
-            "Gmail setup is incomplete. Supply a valid Android client ID with -Pmini.googleOAuthClientId; no client secret is needed.",
+            "Google connection setup incomplete. Supply a real Android client ID with -Pmini.googleOAuthClientId; no client secret is needed.",
         )
         val state = randomUrlSafe(32)
         val verifier = randomUrlSafe(64)
@@ -171,7 +171,8 @@ class GmailOAuthClient(context: Context) {
 
     private fun String.isGoogleClientId(): Boolean =
         endsWith(".apps.googleusercontent.com") &&
-            substringBeforeLast(".apps.googleusercontent.com").isNotBlank()
+            substringBeforeLast(".apps.googleusercontent.com").isNotBlank() &&
+            this !in PLACEHOLDER_CLIENT_IDS
 
     private fun redirectUriFor(clientId: String): String {
         val prefix = clientId.substringBeforeLast(".apps.googleusercontent.com")
@@ -180,6 +181,9 @@ class GmailOAuthClient(context: Context) {
 
     companion object {
         const val REDIRECT_PATH = "/oauth2redirect/google"
+        private val PLACEHOLDER_CLIENT_IDS = setOf(
+            "1234567890-abcdef.apps.googleusercontent.com",
+        )
         private const val FILE = "mini_gmail_oauth_session"
         private const val KEY_STATE = "state"
         private const val KEY_VERIFIER = "code_verifier"

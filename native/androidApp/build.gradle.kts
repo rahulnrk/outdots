@@ -8,8 +8,9 @@ android {
     compileSdk = 34
 
     val googleOAuthClientId = providers.gradleProperty("mini.googleOAuthClientId").orNull.orEmpty()
+    val isGoogleOAuthPlaceholder = googleOAuthClientId == "1234567890-abcdef.apps.googleusercontent.com"
     val googleOAuthClientPrefix = googleOAuthClientId
-        .takeIf { it.endsWith(".apps.googleusercontent.com") }
+        .takeIf { !isGoogleOAuthPlaceholder && it.endsWith(".apps.googleusercontent.com") }
         ?.substringBeforeLast(".apps.googleusercontent.com")
         ?.takeIf { it.isNotBlank() }
     val googleOAuthRedirectScheme = googleOAuthClientPrefix

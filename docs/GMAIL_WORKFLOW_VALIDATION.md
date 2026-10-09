@@ -53,39 +53,41 @@ The following are verified repository limitations:
 
 1. Create or select a Google Cloud project and enable the Gmail API.
 2. Configure Google Auth Platform branding and audience. Add the two approved test accounts as test users while the app is in testing mode.
-3. Create an OAuth client of type **Android**, not Web application. Use these exact values for the current debug build:
+3. Create an OAuth client of type **Android**, not Web application. Use these exact values for the current debug APK:
    - Package name: `app.mini.hub`
    - SHA-1 signing certificate: `67:1E:79:1E:44:3B:1E:5A:0D:20:05:BB:5B:6D:D1:15:EF:60:6E:E0`
    - Client secret: not used and must not be sent to MINI
-4. Copy only the generated Android client ID. If it is `1234567890-abcdef.apps.googleusercontent.com`, MINI derives this exact redirect URI and Android scheme:
+4. In that Android client's **Advanced Settings**, enable **Custom URI scheme** because this implementation uses Google's documented installed-app custom-scheme redirect. Google disables this method by default for new Android clients and recommends AuthorizationClient when a migration is practical.
+5. Copy only the generated Android client ID. If it is `1234567890-abcdef.apps.googleusercontent.com`, MINI derives this exact redirect URI and Android scheme:
    - Redirect URI: `com.googleusercontent.apps.1234567890-abcdef:/oauth2redirect/google`
    - Manifest scheme: `com.googleusercontent.apps.1234567890-abcdef`
    Do not replace this with a Web client ID or an arbitrary redirect URI. The scheme is derived from the client ID so the manifest and token exchange match the same Android client.
-5. Provide only the public client ID to the build, for example:
+6. Provide only the public client ID to the build, for example:
 
    ```text
    gradlew.bat :androidApp:assembleDebug -Pmini.googleOAuthClientId=1234567890-abcdef.apps.googleusercontent.com
    ```
 
    Never place a Google client secret in Android resources, source, Gradle properties committed to the repository, logs, or the APK.
-6. Confirm the least-privilege Gmail read scope `https://www.googleapis.com/auth/gmail.readonly` and complete any Google sensitive or restricted-scope review required for the selected account type.
-7. Use two approved Gmail identities, ideally one consumer account and one Workspace account if both are in scope. Authorize both separately and record their provider IDs without storing credentials in test artifacts.
-8. On the connected Pixel, run the matrix for first authorization, two-account isolation, repeated delivery, bounded history, account revoke, reconnect, disconnect, app restart, battery restriction, screen-off notification delivery, and process death.
-9. Treat successful read sync as read proof only. A separate send design and approval test is required before claiming replies work.
+7. Confirm the least-privilege Gmail read scope `https://www.googleapis.com/auth/gmail.readonly` and complete any Google sensitive or restricted-scope review required for the selected account type.
+8. Use two approved Gmail identities, ideally one consumer account and one Workspace account if both are in scope. Authorize both separately and record their provider IDs without storing credentials in test artifacts.
+9. On the connected Pixel, run the matrix for first authorization, two-account isolation, repeated delivery, bounded history, account revoke, reconnect, disconnect, app restart, battery restriction, screen-off notification delivery, and process death.
+10. Treat successful read sync as read proof only. A separate send design and approval test is required before claiming replies work.
 
-These values follow Google's current [native-app OAuth guidance](https://developers.google.com/identity/protocols/oauth2/native-app), [Android client authentication guidance](https://developers.google.com/android/guides/client-auth), and [OAuth client management guidance](https://support.google.com/cloud/answer/15549257).
+These values follow Google's current [native-app OAuth guidance](https://developers.google.com/identity/protocols/oauth2/native-app), [Android authorization guidance](https://developer.android.com/identity/authorization), [Android client authentication guidance](https://developers.google.com/android/guides/client-auth), [OAuth client management guidance](https://support.google.com/cloud/answer/15549257), and Google's [custom URI scheme restriction notice](https://developers.googleblog.com/improving-user-safety-in-oauth-flows-through-new-oauth-custom-uri-scheme-restrictions/).
 
 Until this setup is available, the honest status is independently testable connector code with live authorization and two-account sync blocked by environment configuration.
 
 ## Device verification run: 2026-10-09
 
-The Android SDK `adb` tool was available and one connected Pixel 10 Pro was detected. The debug APK was built and installed on that device. The generated `BuildConfig.GOOGLE_OAUTH_CLIENT_ID` was empty, so no Google authorization flow was started and no Gmail account data was accessed.
+The Android SDK `adb` tool was available and one connected Pixel 10 Pro was detected. The debug APK was built and installed on that device. In the earlier run, `BuildConfig.GOOGLE_OAUTH_CLIENT_ID` was empty, so no Google authorization flow was started and no Gmail account data was accessed. In the current retry, the installed debug APK was deliberately built with the documentation placeholder `1234567890-abcdef.apps.googleusercontent.com` to verify the guard. `apksigner` confirmed the debug SHA-1 `67:1E:79:1E:44:3B:1E:5A:0D:20:05:BB:5B:6D:D1:15:EF:60:6E:E0`, and the APK was reinstalled with `adb install -r`, preserving app data.
 
 Live device checks that did run:
 
 - `AttentionWorkflowDeviceTest`: 2 of 2 passed on the Pixel 10 Pro. This is live device evidence for attention persistence and failure isolation, not Gmail account evidence.
 - `CommunicationSourcePreferencesDeviceTest`: 1 of 1 passed on the Pixel 10 Pro. This is live device evidence for source preference persistence, not provider authorization.
-- The complete four-test instrumentation suite previously produced 3 passes and 1 failure. `MemoryPressureDeviceTest` exposed a stale assertion: production intentionally returns `Failed(reason=Local AI paused because the device is low on memory)` for the user-facing low-memory refusal, while the test looked for the internal `Pressured` state name. The assertion now checks the low-memory reason and confirms the result is neither a cancellation nor a repeated-failure recovery state. A later isolated rerun could not be classified because the Pixel transport disappeared during instrumentation cleanup, so the corrected device test still needs one stable rerun.
+- The complete four-test instrumentation suite previously produced 3 passes and 1 failure. `MemoryPressureDeviceTest` exposed a stale assertion: production intentionally returns `Failed(reason=Local AI paused because the device is low on memory)` for the user-facing low-memory refusal, while the test looked for the internal `Pressured` state name. The assertion now checks the low-memory reason and confirms the result is neither a cancellation nor a repeated-failure recovery state. The corrected isolated test passed on the connected Pixel on the current retry.
+- `GmailOAuthConfigurationDeviceTest` passed on the connected Pixel with the documentation placeholder. It proved the placeholder is not configured, the setup status begins with `Google connection setup incomplete`, and the browser launch path is blocked. The rebuilt APK's merged manifest fell back to `app.mini.hub` and did not register the placeholder Google scheme. This is configuration-guard evidence, not Gmail authorization evidence.
 
 Gmail-specific live requirements remain unrun: two account authorizations, independent mailbox sync, account-scoped duplicate checks, restart and reconnect history checks, single-account revoke or disconnect, and visible recovery from provider failures. These require the missing public client configuration and approved test accounts below.
 
