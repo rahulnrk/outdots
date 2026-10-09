@@ -85,12 +85,16 @@ class GmailOAuthClient(context: Context) {
             "Gmail OAuth callback must be handled off the main thread"
         }
         val config = configuration ?: return GmailOAuthOutcome.Blocked("Gmail public OAuth client ID is not configured.")
-        uri.getQueryParameter("error")?.let { return GmailOAuthOutcome.Blocked("Google authorization was not completed: $it") }
+        uri.getQueryParameter("error")?.let {
+            android.util.Log.w(LOG_TAG, "Gmail OAuth callback returned provider error: $it")
+            return GmailOAuthOutcome.Blocked("Google authorization was not completed: $it")
+        }
         val code = uri.getQueryParameter("code").orEmpty()
         val state = uri.getQueryParameter("state").orEmpty()
         val expectedState = prefs.getString(KEY_STATE, null).orEmpty()
         val verifier = prefs.getString(KEY_VERIFIER, null).orEmpty()
         if (!validateOAuthCallback(expectedState, OAuthCallback(code, state))) {
+            android.util.Log.w(LOG_TAG, "Gmail OAuth callback rejected: state mismatch (pending=${expectedState.isNotEmpty()}, code=${code.isNotEmpty()})")
             return GmailOAuthOutcome.Blocked("Gmail authorization response did not match the pending request.")
         }
         return try {
@@ -114,8 +118,10 @@ class GmailOAuthClient(context: Context) {
             tokens.put(account.id, token)
             accounts.upsert(account)
             prefs.edit().remove(KEY_STATE).remove(KEY_VERIFIER).apply()
+            android.util.Log.i(LOG_TAG, "Gmail OAuth callback stored account (new=${existing == null})")
             GmailOAuthOutcome.Connected(account)
         } catch (e: Exception) {
+            android.util.Log.w(LOG_TAG, "Gmail OAuth callback failed: ${e.javaClass.simpleName}: ${e.message}")
             GmailOAuthOutcome.Blocked("Gmail authorization could not finish: ${e.message ?: e.javaClass.simpleName}")
         }
     }
@@ -146,7 +152,11 @@ class GmailOAuthClient(context: Context) {
             val status = connection.responseCode
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (status !in 200..299) error("Google token endpoint returned HTTP $status")
+            if (status !in 200..299) {
+                // Google's error code (for example invalid_grant) is non-sensitive and is required for diagnosis.
+                val code = jsonString(response, "error") ?: "unknown_error"
+                error("Google token endpoint returned HTTP $status ($code)")
+            }
             val access = jsonString(response, "access_token") ?: error("Google response omitted access_token")
             val expires = jsonString(response, "expires_in")?.toLongOrNull()
             StoredAccessToken(
@@ -185,6 +195,7 @@ class GmailOAuthClient(context: Context) {
 
     companion object {
         const val REDIRECT_PATH = "/oauth2redirect/google"
+        private const val LOG_TAG = "MiniGmailOAuth"
         private val PLACEHOLDER_CLIENT_IDS = setOf(
             "1234567890-abcdef.apps.googleusercontent.com",
         )

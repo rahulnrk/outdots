@@ -103,6 +103,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleOAuthIntent(intent: android.content.Intent?) {
         val uri = intent?.data ?: return
+        android.util.Log.i("MiniGmailOAuth", "Intent data received: scheme=${uri.scheme} path=${uri.path} accepted=${gmailOAuth.acceptsRedirect(uri)}")
         if (!gmailOAuth.acceptsRedirect(uri)) return
         // Prevent re-processing the same one-time code on recreation.
         intent.data = null
