@@ -62,7 +62,17 @@ class GmailApiConnector(
     private fun get(transport: ProviderHttpTransport, url: String, token: StoredAccessToken): String {
         val result = transport.get(url, mapOf("Authorization" to "Bearer ${token.value}"))
         if (result.statusCode == 401) throw ConnectorHttpException(401, "Gmail authorization expired or revoked")
-        if (result.statusCode == 403) throw ConnectorHttpException(403, "Gmail permission denied for this account")
+        if (result.statusCode == 403) {
+            // Google's reason code (e.g. accessNotConfigured, insufficientPermissions) is non-sensitive and
+            // distinguishes a disabled Gmail API from a consent screen where the Gmail scope was unticked.
+            val reason = Regex("\"reason\"\\s*:\\s*\"([A-Za-z_]+)\"").find(result.body)?.groupValues?.get(1) ?: "unknown"
+            val hint = when (reason) {
+                "accessNotConfigured", "SERVICE_DISABLED" -> "Gmail API is not enabled for this Google Cloud project"
+                "insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT" -> "Gmail read permission was not granted on the consent screen"
+                else -> "Gmail permission denied for this account"
+            }
+            throw ConnectorHttpException(403, "$hint ($reason)")
+        }
         if (result.statusCode == 429 || result.statusCode >= 500) {
             throw ConnectorHttpException(result.statusCode, "Gmail temporarily unavailable; retry with backoff")
         }

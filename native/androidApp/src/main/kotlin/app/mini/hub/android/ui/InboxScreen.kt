@@ -74,6 +74,10 @@ fun InboxScreen(
     val state by viewModel.state
     var showSourceSettings by remember { mutableStateOf(false) }
     var showAccountSettings by remember { mutableStateOf(false) }
+    // Returning from Google recreates the screen. Reopen Accounts so the connection result is visible.
+    androidx.compose.runtime.LaunchedEffect(connectionStatus) {
+        if (connectionStatus != null) showAccountSettings = true
+    }
 
     Scaffold(
         topBar = {
