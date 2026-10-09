@@ -12,6 +12,7 @@ enum class IngestOfferResult {
     Accepted,
     QueueFull,
     Coalesced,
+    Filtered,
 }
 
 sealed class IngestProcessResult {

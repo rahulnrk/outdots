@@ -28,6 +28,8 @@ import app.mini.hub.attention.AttentionEntry
 import app.mini.hub.domain.Clock
 import app.mini.hub.intelligence.CompartmentId
 import app.mini.hub.observation.ConversationObservationSummary
+import app.mini.hub.observation.CommunicationSource
+import app.mini.hub.observation.CommunicationSourcePolicy
 import app.mini.hub.persistence.ActionStore
 import app.mini.hub.persistence.ObservationStore
 import app.mini.hub.retrieval.ScopedRetrievalEngine
@@ -48,6 +50,7 @@ class InboxViewModel(
     private val clock: Clock,
     private val attentionStore: AttentionStore,
     private val localDraftExperiment: LocalDraftExperiment? = null,
+    private val selectedSources: () -> Set<CommunicationSource> = { CommunicationSource.defaultSelection },
 ) {
     // Monotonic token so a late callback from a cancelled or superseded request cannot overwrite
     // the cancellation state or a newer draft.
@@ -94,7 +97,9 @@ class InboxViewModel(
     }
 
     fun refresh(isPermissionGranted: Boolean, isListenerConnected: Boolean) {
+        val policy = CommunicationSourcePolicy(selectedSources)
         val summaries = observationStore.getConversationSummaries()
+            .filter { policy.isEligiblePackage(it.packageId) }
         val loadResult = attentionStore.loadAll()
         
         var failure: String? = null
@@ -117,6 +122,9 @@ class InboxViewModel(
         }
         val view = AttentionView.build(entries)
 
+        val selected = _state.value.selectedConversation?.takeIf { current ->
+            summaries.any { it.conversationId == current.conversationId }
+        }
         _state.value = _state.value.copy(
             isPermissionGranted = isPermissionGranted,
             isListenerConnected = isListenerConnected,
@@ -124,6 +132,7 @@ class InboxViewModel(
             attentionRecords = records,
             attentionView = view,
             storageFailure = failure,
+            selectedConversation = selected,
         )
     }
 

@@ -30,6 +30,7 @@ class ObservationIngestCoordinator(
     private val clock: Clock,
     private var uiListener: ObservationUiListener? = null,
     val ledger: DeliveryAccountingLedger? = null,
+    private val isPayloadEligible: (NotificationRawPayload) -> Boolean = { true },
     /**
      * Maximum number of automatic retry attempts for transient write failures in processNext().
      * Set to 0 to disable automatic retry. Default is 2 (3 total attempts).
@@ -41,6 +42,7 @@ class ObservationIngestCoordinator(
     }
 
     fun enqueue(payload: NotificationRawPayload): IngestOfferResult {
+        if (!isPayloadEligible(payload)) return IngestOfferResult.Filtered
         val now = clock.now().epochMillis
         val lk = payload.correlationId ?: payload.key
         val result = queue.offer(payload)

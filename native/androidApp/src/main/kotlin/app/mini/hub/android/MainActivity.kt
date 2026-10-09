@@ -34,6 +34,7 @@ class MainActivity : ComponentActivity() {
             clock = MiniHubRuntime.clock,
             attentionStore = MiniHubRuntime.attentionStore,
             localDraftExperiment = MiniHubRuntime.localDraftExperiment,
+            selectedSources = { MiniHubRuntime.communicationSourcePreferences.selectedSources() },
         )
 
         handoffLauncher = AndroidNativeHandoffLauncher(this)
@@ -45,6 +46,13 @@ class MainActivity : ComponentActivity() {
                     handoffLauncher = handoffLauncher,
                     onRequestPermission = {
                         startActivity(MiniNotificationListenerService.createSettingsIntent())
+                    },
+                    sourcePreferences = MiniHubRuntime.communicationSourcePreferences,
+                    onSourceSelectionChanged = {
+                        viewModel.refresh(
+                            isPermissionGranted = MiniNotificationListenerService.isPermissionGranted(this),
+                            isListenerConnected = MiniNotificationListenerService.isConnected,
+                        )
                     },
                 )
             }

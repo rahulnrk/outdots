@@ -17,6 +17,8 @@ import app.mini.hub.domain.Clock
 import app.mini.hub.domain.IdGenerator
 import app.mini.hub.domain.UtcInstant
 import app.mini.hub.observation.BoundedIngestQueue
+import app.mini.hub.observation.CommunicationSourcePolicy
+import app.mini.hub.observation.CommunicationSource
 import app.mini.hub.observation.DeliveryAccountingLedger
 import app.mini.hub.observation.NotificationDeduplicator
 import app.mini.hub.observation.NotificationNormalizer
@@ -60,8 +62,14 @@ object MiniHubRuntime {
         private set
     lateinit var localDraftExperiment: LocalDraftExperiment
         private set
+    lateinit var communicationSourcePreferences: CommunicationSourcePreferences
+        private set
 
     private val backgroundExecutor = Executors.newSingleThreadExecutor()
+
+    fun isCommunicationSourcePackageSelected(packageId: String): Boolean =
+        ::communicationSourcePreferences.isInitialized &&
+            CommunicationSource.forExactPackage(packageId) in communicationSourcePreferences.selectedSources()
 
     fun init(context: Context) {
         if (isInitialized) return
@@ -71,6 +79,10 @@ object MiniHubRuntime {
             var counter = 1L
             val idGen = IdGenerator { prefix -> "$prefix-${System.currentTimeMillis()}-${counter++}" }
             clock = Clock { UtcInstant(System.currentTimeMillis()) }
+            communicationSourcePreferences = CommunicationSourcePreferences(context.applicationContext)
+            val communicationSourcePolicy = CommunicationSourcePolicy {
+                communicationSourcePreferences.selectedSources()
+            }
             val digest = DigestProvider { payload ->
                 val md = MessageDigest.getInstance("SHA-256")
                 md.digest(payload.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
@@ -105,6 +117,7 @@ object MiniHubRuntime {
                 store = observationStore,
                 clock = clock,
                 ledger = ledger,
+                isPayloadEligible = communicationSourcePolicy::isEligible,
             )
 
             retrievalEngine = ScopedRetrievalEngine(observationStore)

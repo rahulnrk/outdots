@@ -18,6 +18,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.mini.hub.action.HandoffLauncher
+import app.mini.hub.android.CommunicationSourcePreferences
 import app.mini.hub.attention.AttentionAction
 import app.mini.hub.attention.AttentionView
 import app.mini.hub.attention.ConversationAttention
@@ -49,6 +51,7 @@ import app.mini.hub.attention.FollowUpStatus
 import app.mini.hub.attention.ResurfaceReason
 import app.mini.hub.domain.UtcInstant
 import app.mini.hub.observation.ConversationObservationSummary
+import app.mini.hub.observation.CommunicationSource
 import app.mini.hub.observation.ObservedNotification
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,8 +60,11 @@ fun InboxScreen(
     viewModel: InboxViewModel,
     handoffLauncher: HandoffLauncher,
     onRequestPermission: () -> Unit,
+    sourcePreferences: CommunicationSourcePreferences,
+    onSourceSelectionChanged: () -> Unit,
 ) {
     val state by viewModel.state
+    var showSourceSettings by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -68,6 +74,9 @@ fun InboxScreen(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 ),
                 actions = {
+                    TextButton(onClick = { showSourceSettings = true }) {
+                        Text("Sources")
+                    }
                     val statusText = if (state.isListenerConnected) "Listener Active" else "Listener Idle"
                     val statusColor = if (state.isListenerConnected) Color(0xFF2E7D32) else Color(0xFFC62828)
                     Text(
@@ -180,6 +189,14 @@ fun InboxScreen(
         }
     }
 
+    if (showSourceSettings) {
+        CommunicationSourceSettingsDialog(
+            preferences = sourcePreferences,
+            onDismiss = { showSourceSettings = false },
+            onChanged = onSourceSelectionChanged,
+        )
+    }
+
     // Exact Action Review Dialog
     state.activeReviewPayload?.let { payload ->
         ExactActionReviewDialog(
@@ -188,6 +205,47 @@ fun InboxScreen(
             onDismiss = { viewModel.clearDraftReview() },
         )
     }
+}
+
+@Composable
+private fun CommunicationSourceSettingsDialog(
+    preferences: CommunicationSourcePreferences,
+    onDismiss: () -> Unit,
+    onChanged: () -> Unit,
+) {
+    var selected by remember { mutableStateOf(preferences.selectedSources()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Communication sources") },
+        text = {
+            Column {
+                Text(
+                    "Choose notification apps for the inbox. This observes notifications only; it does not connect an account or create a login.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                CommunicationSource.entries.forEach { source ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = source in selected,
+                            onCheckedChange = { enabled ->
+                                preferences.setSelected(source, enabled)
+                                selected = preferences.selectedSources()
+                                onChanged()
+                            },
+                        )
+                        Text(source.displayName)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        },
+    )
 }
 
 @Composable

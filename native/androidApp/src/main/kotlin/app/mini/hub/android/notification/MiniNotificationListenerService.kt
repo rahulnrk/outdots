@@ -88,6 +88,7 @@ class MiniNotificationListenerService : NotificationListenerService() {
 
         // Filter out self-notifications, allowing only synthetic test harness notifications
         if (pkg == packageName && sbn.tag != "synthetic_test") return
+        if (pkg != packageName && !MiniHubRuntime.isCommunicationSourcePackageSelected(pkg)) return
 
         val notification = sbn.notification ?: return
         val extras = notification.extras
@@ -139,6 +140,7 @@ class MiniNotificationListenerService : NotificationListenerService() {
         if (sbn == null) return
         val pkg = sbn.packageName ?: return
         if (pkg == packageName && sbn.tag != "synthetic_test") return
+        if (pkg != packageName && !MiniHubRuntime.isCommunicationSourcePackageSelected(pkg)) return
 
         // Android does not preserve notification extras in removal callbacks. Debug synthetic
         // cancellations bridge that limitation through a bounded in-process side-channel keyed
