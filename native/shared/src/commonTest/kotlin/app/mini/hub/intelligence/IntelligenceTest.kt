@@ -63,7 +63,8 @@ class IntelligenceTest {
         supervisor.onMemoryPressure()
         assertFalse(supervisor.ensureReady())
         assertEquals(0, supervisor.queuedCount)
-        assertTrue(supervisor.resumeAfterPressure())
+        supervisor.resumeAfterPressure()
+        assertTrue(supervisor.ensureReady())
     }
 
     @Test fun deviceResourceBudgetsAreEnforced() {

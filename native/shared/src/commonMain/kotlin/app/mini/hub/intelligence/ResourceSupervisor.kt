@@ -106,10 +106,10 @@ class ResourceSupervisor(
         engine.unload()
     }
 
-    fun resumeAfterPressure(): Boolean {
-        if (state != SupervisorState.Pressured) return true
-        state = SupervisorState.Unloaded
-        return ensureReady()
+    fun resumeAfterPressure() {
+        if (state == SupervisorState.Pressured) {
+            state = SupervisorState.Unloaded
+        }
     }
 
     fun recoverFromFailure(): Boolean {

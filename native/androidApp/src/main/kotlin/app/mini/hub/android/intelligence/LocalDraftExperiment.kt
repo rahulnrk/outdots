@@ -139,9 +139,12 @@ class LocalDraftExperiment internal constructor(
             prompt = prompt,
         )
 
-        // Attempt automatic recovery from degraded state (e.g. repeated inference errors).
-        // Does not override 'Pressured' state which must be resumed explicitly via setForeground.
-        supervisor.recoverFromFailure()
+        // Attempt automatic recovery only when the supervisor entered Degraded state
+        // (repeated inference errors). Does not override Pressured, which requires
+        // an explicit setForeground(true) call.
+        if (supervisor.state is app.mini.hub.intelligence.SupervisorState.Degraded) {
+            supervisor.recoverFromFailure()
+        }
 
         val cold = supervisor.state is app.mini.hub.intelligence.SupervisorState.Unloaded
         val started = nowMillis()
@@ -193,6 +196,11 @@ class LocalDraftExperiment internal constructor(
         cancelled.set(true)
         engine.cancel(taskId)
         return true
+    }
+
+    /** Explicitly reset the supervisor from Degraded state (e.g. after connectivity restored). */
+    fun recoverFromDegraded() {
+        serializedAsync { supervisor.recoverFromFailure() }
     }
 
     fun onMemoryPressure() {
