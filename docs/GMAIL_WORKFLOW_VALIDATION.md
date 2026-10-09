@@ -89,7 +89,27 @@ Live device checks that did run:
 - The complete four-test instrumentation suite previously produced 3 passes and 1 failure. `MemoryPressureDeviceTest` exposed a stale assertion: production intentionally returns `Failed(reason=Local AI paused because the device is low on memory)` for the user-facing low-memory refusal, while the test looked for the internal `Pressured` state name. The assertion now checks the low-memory reason and confirms the result is neither a cancellation nor a repeated-failure recovery state. The corrected isolated test passed on the connected Pixel on the current retry.
 - `GmailOAuthConfigurationDeviceTest` passed on the connected Pixel with the documentation placeholder. It proved the placeholder is not configured, the setup status begins with `Google connection setup incomplete`, and the browser launch path is blocked. The rebuilt APK's merged manifest fell back to `app.mini.hub` and did not register the placeholder Google scheme. This is configuration-guard evidence, not Gmail authorization evidence.
 
-Gmail-specific live requirements remain unrun: two account authorizations, independent mailbox sync, account-scoped duplicate checks, restart and reconnect history checks, single-account revoke or disconnect, and visible recovery from provider failures. These require the missing public client configuration and approved test accounts below.
+Gmail-specific live requirements that remain unrun: single-account revoke or disconnect, visible recovery from provider failures, token refresh after expiry, screen-off and battery-restricted delivery, and reconnect after revocation.
+
+## Live two-account Gmail run: 2026-10-09
+
+Pixel 10 Pro, debug APK built with a real Android OAuth client ID (no client secret). The app was installed with `adb install -r` and the tests were run with `adb shell am instrument`, because the Gradle connected-test task uninstalls the app and would wipe the stored authorizations.
+
+Defects found and fixed during this run:
+
+- `003136f`: the OAuth callback ran the token exchange and profile request on the Android main thread. The resulting exception had no message, so the connection failed silently and no account was stored.
+- `555271b`, `51c4de6`: callback outcomes are now logged with non-sensitive details only (scheme, path, Google error and reason codes, never tokens or addresses). A Gmail 403 now names its reason. The Accounts dialog reopens after the return from Google so the result is visible.
+- Environment: the Google Cloud project initially had the Gmail API disabled (`accessNotConfigured`). After it was enabled, both authorizations completed and were stored.
+
+Live results (counts only, no mailbox content recorded):
+
+| Check | Result |
+|---|---|
+| Two Gmail accounts authorized and stored with distinct local IDs and distinct provider identities | Passed (`GmailLiveSyncDeviceTest`) |
+| Each account returns at least one message through the official Gmail API | Passed |
+| Replaying the same first page adds no duplicate observations for either account | Passed |
+| Every stored summary stays under its owning account | Passed |
+| Per-account history counts unchanged after `am force-stop` and process restart | Passed (`GmailHistoryAfterRestartDeviceTest`) |
 
 ## Send qualification gate
 
