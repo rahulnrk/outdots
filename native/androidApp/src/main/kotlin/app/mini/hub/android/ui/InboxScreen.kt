@@ -41,7 +41,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.mini.hub.action.HandoffLauncher
-import app.mini.hub.observation.ConversationCoverage
+import app.mini.hub.attention.AttentionAction
+import app.mini.hub.attention.AttentionView
+import app.mini.hub.attention.ConversationAttention
+import app.mini.hub.attention.ConversationPriority
+import app.mini.hub.attention.FollowUpStatus
+import app.mini.hub.attention.ResurfaceReason
+import app.mini.hub.domain.UtcInstant
 import app.mini.hub.observation.ConversationObservationSummary
 import app.mini.hub.observation.ObservedNotification
 
@@ -109,6 +115,21 @@ fun InboxScreen(
                 }
             }
 
+            state.storageFailure?.let { failure ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                ) {
+                    Text(
+                        text = "Storage Error: $failure",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
+            }
+
             // Status message (e.g. outbox confirmation)
             state.outboxStatusMessage?.let { msg ->
                 Card(
@@ -127,8 +148,11 @@ fun InboxScreen(
 
             if (state.selectedConversation != null) {
                 // Conversation Detail View
+                val record = state.attentionRecords[state.selectedConversation!!.conversationId.key] 
+                    ?: app.mini.hub.attention.AttentionRules.default(state.selectedConversation!!.conversationId, app.mini.hub.domain.UtcInstant(System.currentTimeMillis()))
                 ConversationDetailView(
                     summary = state.selectedConversation!!,
+                    attention = record,
                     timeline = state.selectedTimeline,
                     localDraftText = state.localDraftText,
                     localDraftWarning = state.localDraftWarning,
@@ -139,11 +163,13 @@ fun InboxScreen(
                     onLocalDraftChanged = { text -> viewModel.updateLocalDraftText(text) },
                     onLocalDraftCancelled = { viewModel.cancelLocalDraft() },
                     onDraftPrepared = { body, recip -> viewModel.prepareDraft(body, recip) },
+                    onAttentionAction = { action -> viewModel.applyAttentionAction(state.selectedConversation!!.conversationId, action) },
                 )
             } else {
                 // Inbox List View
                 ConversationListView(
                     conversations = state.conversations,
+                    view = state.attentionView,
                     onSelect = { viewModel.selectConversation(it) },
                 )
             }
@@ -163,31 +189,61 @@ fun InboxScreen(
 @Composable
 fun ConversationListView(
     conversations: List<ConversationObservationSummary>,
+    view: AttentionView?,
     onSelect: (ConversationObservationSummary) -> Unit,
 ) {
     if (conversations.isEmpty()) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
-        ) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
                 text = "No notification observations yet.\nMessages received from WhatsApp/Gmail will appear here.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    } else {
+    } else if (view == null || view.isEmpty) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(conversations, key = { it.conversationId.key }) { conv ->
-                ConversationItemCard(conversation = conv, onClick = { onSelect(conv) })
+                ConversationItemCard(conversation = conv, attention = null, onClick = { onSelect(conv) })
+            }
+        }
+    } else {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (view.needsAttention.isNotEmpty()) {
+                item { SectionHeader("Needs Attention") }
+                items(view.needsAttention, key = { it.summary.conversationId.key }) { e ->
+                    ConversationItemCard(conversation = e.summary, attention = e.attention, onClick = { onSelect(e.summary) })
+                }
+            }
+            if (view.snoozed.isNotEmpty()) {
+                item { SectionHeader("Snoozed") }
+                items(view.snoozed, key = { it.summary.conversationId.key }) { e ->
+                    ConversationItemCard(conversation = e.summary, attention = e.attention, onClick = { onSelect(e.summary) })
+                }
+            }
+            if (view.waiting.isNotEmpty()) {
+                item { SectionHeader("Waiting on them") }
+                items(view.waiting, key = { it.summary.conversationId.key }) { e ->
+                    ConversationItemCard(conversation = e.summary, attention = e.attention, onClick = { onSelect(e.summary) })
+                }
             }
         }
     }
 }
 
 @Composable
+fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
+    )
+}
+
+@Composable
 fun ConversationItemCard(
     conversation: ConversationObservationSummary,
+    attention: ConversationAttention?,
     onClick: () -> Unit,
 ) {
     Card(
@@ -220,6 +276,22 @@ fun ConversationItemCard(
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 2,
             )
+
+            if (attention != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (attention.priority == ConversationPriority.Important) {
+                        BadgeLabel("Important", MaterialTheme.colorScheme.tertiaryContainer)
+                    }
+                    if (attention.activityWhileSnoozed) {
+                        BadgeLabel("New Activity", MaterialTheme.colorScheme.errorContainer)
+                    } else if (attention.resurfaceReason == ResurfaceReason.SnoozeDue) {
+                        BadgeLabel("Snooze Due", MaterialTheme.colorScheme.secondaryContainer)
+                    } else if (attention.resurfaceReason != null) {
+                        BadgeLabel("New Activity", MaterialTheme.colorScheme.primaryContainer)
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(6.dp))
             Row(
@@ -256,8 +328,20 @@ fun ConversationItemCard(
 }
 
 @Composable
+fun BadgeLabel(text: String, color: Color) {
+    Card(colors = CardDefaults.cardColors(containerColor = color)) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
+@Composable
 fun ConversationDetailView(
     summary: ConversationObservationSummary,
+    attention: ConversationAttention,
     timeline: List<ObservedNotification>,
     localDraftText: String,
     localDraftWarning: String?,
@@ -268,6 +352,7 @@ fun ConversationDetailView(
     onLocalDraftChanged: (String) -> Unit,
     onLocalDraftCancelled: () -> Unit,
     onDraftPrepared: (String, String) -> Unit,
+    onAttentionAction: (AttentionAction) -> Unit,
 ) {
     var replyIntent by remember { mutableStateOf("") }
 
@@ -299,6 +384,65 @@ fun ConversationDetailView(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(8.dp),
             )
+        }
+
+        // Attention Controls
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("Attention", style = MaterialTheme.typography.labelMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val isImportant = attention.priority == ConversationPriority.Important
+                    Button(
+                        onClick = { onAttentionAction(AttentionAction.SetPriority(if (isImportant) ConversationPriority.Normal else ConversationPriority.Important)) },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(if (isImportant) "Mark Normal" else "Mark Important")
+                    }
+                    if (attention.status != FollowUpStatus.Waiting) {
+                        Button(
+                            onClick = { onAttentionAction(AttentionAction.MarkWaiting) },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("Waiting")
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (attention.status != FollowUpStatus.NeedsAttention) {
+                        OutlinedButton(
+                            onClick = { onAttentionAction(AttentionAction.MarkNeedsAttention) },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("Needs Attention")
+                        }
+                    }
+                    if (attention.status != FollowUpStatus.Done) {
+                        OutlinedButton(
+                            onClick = { onAttentionAction(AttentionAction.MarkDone) },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text("Done")
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { 
+                            // Hardcoded 4-hour snooze for MVP simplicity
+                            onAttentionAction(AttentionAction.Snooze(UtcInstant(System.currentTimeMillis() + 4 * 60 * 60 * 1000L))) 
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Snooze 4h")
+                    }
+                }
+            }
         }
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))

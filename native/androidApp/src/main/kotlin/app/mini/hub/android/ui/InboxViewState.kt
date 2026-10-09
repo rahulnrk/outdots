@@ -1,6 +1,9 @@
 package app.mini.hub.android.ui
 
 import app.mini.hub.action.ExactActionPayload
+import app.mini.hub.attention.AttentionReconciliation
+import app.mini.hub.attention.AttentionView
+import app.mini.hub.attention.ConversationAttention
 import app.mini.hub.domain.ScopedId
 import app.mini.hub.observation.ConversationObservationSummary
 import app.mini.hub.observation.ObservedNotification
@@ -11,6 +14,9 @@ data class InboxViewState(
     val isPermissionGranted: Boolean = false,
     val isListenerConnected: Boolean = false,
     val conversations: List<ConversationObservationSummary> = emptyList(),
+    val attentionView: AttentionView? = null,
+    val attentionRecords: Map<String, ConversationAttention> = emptyMap(),
+    val storageFailure: String? = null,
     val selectedConversation: ConversationObservationSummary? = null,
     val selectedTimeline: List<ObservedNotification> = emptyList(),
     val retrievedContext: ScopedRetrievalResult? = null,

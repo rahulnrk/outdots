@@ -126,23 +126,38 @@ class SyntheticNotificationReceiver : BroadcastReceiver() {
                     )
                     notificationManager.createNotificationChannel(channel)
                 }
-
-                val notification = NotificationCompat.Builder(context, channelId)
-                    .setContentTitle(sender)
-                    .setContentText(text)
-                    .setSmallIcon(android.R.drawable.ic_dialog_info)
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    // Embed correlation ID so the listener can carry it through the pipeline.
-                    .addExtras(android.os.Bundle().apply {
-                        putString("mini_correlation_id", correlationId)
-                    })
-                    .build()
-
-                notificationManager.notify(SYNTHETIC_TAG, notifId, notification)
-                Log.d(
-                    "MiniHubSynthetic",
-                    "POST notifId=$notifId repost=$isRepost correlationId=$correlationId requestedAt=${System.currentTimeMillis()}",
-                )
+                
+                if (intent.getBooleanExtra("direct", false)) {
+                    val payload = app.mini.hub.observation.NotificationRawPayload(
+                        key = "${context.packageName}_$notifId",
+                        packageId = context.packageName,
+                        notificationId = notifId,
+                        tag = SYNTHETIC_TAG,
+                        postTimeMillis = System.currentTimeMillis(),
+                        senderHint = sender,
+                        text = text,
+                        correlationId = correlationId,
+                    )
+                    MiniHubRuntime.onNotificationReceived(payload)
+                    Log.d("MiniHubSynthetic", "DIRECT POST notifId=$notifId correlationId=$correlationId")
+                } else {
+                    val notification = NotificationCompat.Builder(context, channelId)
+                        .setContentTitle(sender)
+                        .setContentText(text)
+                        .setSmallIcon(android.R.drawable.ic_dialog_info)
+                        .setPriority(NotificationCompat.PRIORITY_HIGH)
+                        // Embed correlation ID so the listener can carry it through the pipeline.
+                        .addExtras(android.os.Bundle().apply {
+                            putString("mini_correlation_id", correlationId)
+                        })
+                        .build()
+    
+                    notificationManager.notify(SYNTHETIC_TAG, notifId, notification)
+                    Log.d(
+                        "MiniHubSynthetic",
+                        "POST notifId=$notifId repost=$isRepost correlationId=$correlationId requestedAt=${System.currentTimeMillis()}",
+                    )
+                }
             }
         }
     }

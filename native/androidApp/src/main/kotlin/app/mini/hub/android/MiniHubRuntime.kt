@@ -39,6 +39,8 @@ object MiniHubRuntime {
         private set
     lateinit var actionStore: ActionStore
         private set
+    lateinit var attentionStore: app.mini.hub.attention.AttentionStore
+        private set
     lateinit var ingestCoordinator: ObservationIngestCoordinator
         private set
     val ledger = DeliveryAccountingLedger(2000)
@@ -76,6 +78,12 @@ object MiniHubRuntime {
                 SqlCipherActionStore(context.applicationContext)
             } catch (_: Throwable) {
                 InMemoryActionStore()
+            }
+
+            attentionStore = try {
+                app.mini.hub.persistence.SqlCipherAttentionStore(context.applicationContext)
+            } catch (e: Throwable) {
+                app.mini.hub.attention.UnavailableAttentionStore(e.message ?: "Encrypted storage unavailable")
             }
 
             val normalizer = NotificationNormalizer(idGen, digest)

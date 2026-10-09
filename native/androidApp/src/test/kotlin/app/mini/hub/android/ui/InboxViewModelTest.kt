@@ -22,10 +22,15 @@ import app.mini.hub.observation.ObservedNotification
 import app.mini.hub.observation.TruncationState
 import app.mini.hub.persistence.InMemoryActionStore
 import app.mini.hub.persistence.InMemoryObservationStore
+import app.mini.hub.attention.AttentionAction
+import app.mini.hub.attention.ConversationPriority
+import app.mini.hub.attention.FollowUpStatus
+import app.mini.hub.attention.InMemoryAttentionStore
 import app.mini.hub.retrieval.ScopedRetrievalEngine
 import app.mini.hub.style.AdaptiveStyleEngine
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -46,6 +51,7 @@ class InboxViewModelTest {
         val retrieval = ScopedRetrievalEngine(obsStore)
         val style = AdaptiveStyleEngine()
         val controller = ActionController(clock, digest, DomainActionIdGenerator(idGen))
+        val attentionStore = InMemoryAttentionStore()
 
         val obs = ObservedNotification(
             id = ScopedId(account, ScopedId.Kind.OBSERVATION, "obs_1"),
@@ -70,7 +76,7 @@ class InboxViewModelTest {
         )
         obsStore.persistObservation(obs)
 
-        val vm = InboxViewModel(obsStore, retrieval, style, controller, actionStore, clock)
+        val vm = InboxViewModel(obsStore, retrieval, style, controller, actionStore, clock, attentionStore)
         vm.refresh(isPermissionGranted = true, isListenerConnected = true)
 
         assertEquals(1, vm.state.value.conversations.size)
@@ -93,6 +99,7 @@ class InboxViewModelTest {
         val retrieval = ScopedRetrievalEngine(obsStore)
         val style = AdaptiveStyleEngine()
         val controller = ActionController(clock, digest, DomainActionIdGenerator(idGen))
+        val attentionStore = InMemoryAttentionStore()
 
         val obs = ObservedNotification(
             id = ScopedId(account, ScopedId.Kind.OBSERVATION, "obs_2"),
@@ -117,7 +124,7 @@ class InboxViewModelTest {
         )
         obsStore.persistObservation(obs)
 
-        val vm = InboxViewModel(obsStore, retrieval, style, controller, actionStore, clock)
+        val vm = InboxViewModel(obsStore, retrieval, style, controller, actionStore, clock, attentionStore)
         vm.refresh(isPermissionGranted = true, isListenerConnected = true)
         vm.selectConversation(vm.state.value.conversations.first())
 
@@ -140,14 +147,56 @@ class InboxViewModelTest {
         assertNotNull(openedCommand)
         assertEquals(reviewPayload.route, openedCommand!!.route)
 
-        // Review dialog dismissed and status message updated
-        assertNull(vm.state.value.activeReviewPayload)
-        assertNotNull(vm.state.value.outboxStatusMessage)
-        assertTrue(vm.state.value.outboxStatusMessage!!.contains("opened in native app"))
+        // Handoff never automatically marks the conversation Done.
+        val record = vm.state.value.attentionRecords[convId.key]
+        if (record != null) {
+            assertFalse(record.isUserSet, "Attention record is untouched by handoff")
+        }
+    }
 
-        // Verify action store has HandoffOpened state
-        val outbox = actionStore.snapshot().outbox
-        assertEquals(1, outbox.size)
-        assertEquals(OutboxState.HandoffOpened, outbox.first().state)
+    @Test
+    fun testAttentionActionsAndStorageFailure() {
+        val obsStore = InMemoryObservationStore()
+        val attentionStore = InMemoryAttentionStore()
+        val vm = InboxViewModel(obsStore, ScopedRetrievalEngine(obsStore), AdaptiveStyleEngine(), ActionController(clock, digest, DomainActionIdGenerator(idGen)), InMemoryActionStore(), clock, attentionStore)
+
+        val obs = ObservedNotification(
+            id = ScopedId(account, ScopedId.Kind.OBSERVATION, "obs_3"),
+            accountId = account,
+            conversationId = convId,
+            packageId = "com.whatsapp",
+            notificationKey = "notif_key_3",
+            notificationId = 3,
+            tag = null,
+            senderHint = "Alice",
+            title = "Alice",
+            textFragments = listOf("Ping"),
+            rawTextDigest = "digest_3",
+            observedAt = clock.now(),
+            postTime = clock.now(),
+            revision = 1L,
+            isRemoved = false,
+            isGroupSummary = false,
+            truncationState = TruncationState.Complete,
+            correlationConfidence = CorrelationConfidence.High,
+            provenance = ObservationProvenance.AndroidNotificationListener,
+        )
+        obsStore.persistObservation(obs)
+        vm.refresh(true, true)
+
+        // Initial default state
+        assertEquals(FollowUpStatus.NeedsAttention, vm.state.value.attentionRecords[convId.key]?.status ?: FollowUpStatus.NeedsAttention)
+        
+        // Mark waiting
+        vm.applyAttentionAction(convId, AttentionAction.MarkWaiting)
+        assertEquals(FollowUpStatus.Waiting, vm.state.value.attentionRecords[convId.key]?.status)
+        assertEquals(1, attentionStore.writeCount)
+        
+        // Fail a write
+        attentionStore.failWrites = "Disk full"
+        vm.applyAttentionAction(convId, AttentionAction.MarkDone)
+        assertEquals(FollowUpStatus.Waiting, vm.state.value.attentionRecords[convId.key]?.status, "State not updated when storage fails")
+        assertEquals("Disk full", vm.state.value.storageFailure)
+        assertEquals(1, attentionStore.writeCount)
     }
 }

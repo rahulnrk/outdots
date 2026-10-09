@@ -13,6 +13,7 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.1.0-dev"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildFeatures {
@@ -46,4 +47,7 @@ dependencies {
     implementation(libs.activity.compose)
     implementation(libs.mediapipe.tasks.genai)
     testImplementation(kotlin("test"))
+    androidTestImplementation(kotlin("test"))
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test:runner:1.5.2")
 }

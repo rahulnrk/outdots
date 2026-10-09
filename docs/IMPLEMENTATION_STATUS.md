@@ -3,16 +3,22 @@
 Factual status per feature. Legend: **Implemented+tested**, **Partial**, **Simulated** (fixture/demo only),
 **Blocked** (external dependency), **Not started**. Updated 2026-10-08 after independent verification.
 
+Language scope update (2026-10-09): English is the MVP drafting and quality gate.
+Romanized Hindi/Telugu, mixed English conversations, and native-script Hindi/Telugu
+are post-MVP qualification work. Romanized cases are tested now as exploratory
+results, separately from English. See [MVP language scope](MVP_LANGUAGE_SCOPE.md).
+
 | Feature | Requirement (arch v1.1) | Status | Evidence | Next work |
 |---|---|---|---|---|
 | Shared domain rules (TS reference) | s6, s7, s9 | Implemented+tested | `npm test`: 59 tests including 33 adversarial security tests | Keep parity with KMP |
-| Shared domain core (Kotlin Multiplatform) | s3 | Implemented+tested core | KMP scaffold, scoped IDs, injectable UTC clock, action core, observation models, scoped retrieval, adaptive style engine, and SQLCipher migration; 42 JVM/native tests pass | Port full conversation/workflow model |
+| Shared domain core (Kotlin Multiplatform) | s3 | Implemented+tested core | KMP scaffold, scoped IDs, injectable UTC clock, action core, observation models, scoped retrieval, adaptive style engine, attention rules, and SQLCipher migration; 56 JVM/native tests pass | Port full conversation/workflow model |
 | Approval exact binding | s9 | Implemented+tested in TS and native contract | TS SHA-256 and native exact payload contract bind account, route, recipients, body, attachments, evidence, grants/policy and expiry | Platform SHA-256 adapter and durable integration |
 | Injectable clock | Stage D | Implemented+tested | Web `clock()` and KMP `Clock`; invalid/rollback tests | Use in all native business rules |
 | Durable outbox with restart recovery | s9 | Partial | Native state machine plus Android SQLCipher transaction implementation and interrupted recovery contract. Device restart qualification is pending | Wire native lifecycle and qualify restart behavior on device |
-| Encrypted local store (SQLCipher + Keystore) | s11 | Implemented+16KB qualified on device | Android `SqlCipherActionStore` and `SqlCipherObservationStore` use SQLCipher, random DB keys, and AES-GCM Keystore envelopes. 16 KB ELF and ZIP alignment verified (`zipalign -c -P 16 4`, `llvm-readelf`). Transactional schema migration (v1->v2) and atomic batch writes qualified on physical Pixel 10 Pro (Android 16, API 36) | Multi-device pilot testing |
+| Encrypted local store (SQLCipher + Keystore) | s11 | Implemented+16KB qualified on device | Android stores for actions, observations, and attention use SQLCipher, random DB keys, and AES-GCM Keystore envelopes. 16 KB ELF and ZIP alignment verified (`zipalign -c -P 16 4`, `llvm-readelf`). Transactional schema migration (v1->v2) and atomic batch writes qualified on physical Pixel 10 Pro (Android 16, API 36) | Multi-device pilot testing |
 | FTS5 scoped retrieval | s3, s6 | Implemented+tested contract | KMP `ScopedRetrievalEngine` with compartment isolation and token budget bounds; SQLCipher dynamic FTS5 probe | Encrypted SQLite FTS5 table integration |
 | Adaptive style intelligence | s6 | Implemented+tested | `AdaptiveStyleEngine` with opt-in consent, authorship verification, prompt-injection defense, secret redaction, and instant revocation | On-device nuance classifier integration |
+| Inbox attention management | s6 | Implemented+tested on device | Chronological + attention views, priority, waiting/done/snooze follow-ups, strict transition rules, KMP rules, encrypted Android SQLite persistence, storage-failure barriers | Live Android instrumentation tests (`AttentionWorkflowDeviceTest`) passed on physical Pixel 10 Pro (API 36) | Background Snooze reminders |
 | Gmail connector | s4 | Simulated | Local fixture provider only | OAuth, cursor sync and provider fixture adapter. Live use **Blocked** |
 | WhatsApp notification observation | s4, s5 | Implemented+qualified on device | Android `MiniNotificationListenerService`, headless `MiniHubRuntime`, non-blocking bounded queue, delivery accounting ledger, app name resolver, category classifier, 43 unit tests; verified on physical Pixel 10 Pro (API 36) | Long-duration battery pilot |
 | Native handoff | s9 | Implemented+tested on device | Domain launcher contract, `AndroidNativeHandoffLauncher` system chooser, `OutboxState.HandoffOpened` truthfulness verified on physical Pixel 10 Pro | Live user messaging flow |

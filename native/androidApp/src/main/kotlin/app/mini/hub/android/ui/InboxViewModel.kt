@@ -12,6 +12,14 @@ import app.mini.hub.action.OutboxState
 import app.mini.hub.android.intelligence.LocalDraftExperiment
 import app.mini.hub.android.intelligence.LocalDraftRequest
 import app.mini.hub.android.intelligence.LocalDraftResult
+import app.mini.hub.attention.AttentionAction
+import app.mini.hub.attention.AttentionReconciler
+import app.mini.hub.attention.AttentionStore
+import app.mini.hub.attention.AttentionStoreResult
+import app.mini.hub.attention.AttentionView
+import app.mini.hub.attention.ConversationPriority
+import app.mini.hub.attention.AttentionRules
+import app.mini.hub.attention.AttentionEntry
 import app.mini.hub.domain.Clock
 import app.mini.hub.intelligence.CompartmentId
 import app.mini.hub.observation.ConversationObservationSummary
@@ -33,6 +41,7 @@ class InboxViewModel(
     private val actionController: ActionController,
     private val actionStore: ActionStore,
     private val clock: Clock,
+    private val attentionStore: AttentionStore,
     private val localDraftExperiment: LocalDraftExperiment? = null,
 ) {
     // Monotonic token so a late callback from a cancelled or superseded request cannot overwrite
@@ -48,11 +57,51 @@ class InboxViewModel(
 
     fun refresh(isPermissionGranted: Boolean, isListenerConnected: Boolean) {
         val summaries = observationStore.getConversationSummaries()
+        val loadResult = attentionStore.loadAll()
+        
+        var failure: String? = null
+        var records = _state.value.attentionRecords
+        if (loadResult is AttentionStoreResult.Ok) {
+            val rec = AttentionReconciler.reconcile(loadResult.value, summaries, clock.now())
+            records = rec.records
+            if (rec.changed.isNotEmpty()) {
+                val saveResult = attentionStore.saveAll(rec.changed)
+                if (saveResult is AttentionStoreResult.Failed) {
+                    failure = saveResult.message
+                }
+            }
+        } else if (loadResult is AttentionStoreResult.Failed) {
+            failure = loadResult.message
+        }
+
+        val entries = summaries.map { 
+            AttentionEntry(it, records[it.conversationId.key] ?: AttentionRules.default(it.conversationId, clock.now()))
+        }
+        val view = AttentionView.build(entries)
+
         _state.value = _state.value.copy(
             isPermissionGranted = isPermissionGranted,
             isListenerConnected = isListenerConnected,
             conversations = summaries,
+            attentionRecords = records,
+            attentionView = view,
+            storageFailure = failure,
         )
+    }
+
+    fun applyAttentionAction(conversationId: app.mini.hub.domain.ScopedId, action: AttentionAction) {
+        val existing = _state.value.attentionRecords[conversationId.key] ?: AttentionRules.default(conversationId, clock.now())
+        val decision = AttentionRules.apply(existing, action, _state.value.conversations.find { it.conversationId == conversationId }?.latestEventAt, clock.now())
+        if (decision is app.mini.hub.attention.AttentionDecision.Applied) {
+            val saveResult = attentionStore.saveAll(listOf(decision.record))
+            if (saveResult is AttentionStoreResult.Failed) {
+                _state.value = _state.value.copy(storageFailure = saveResult.message)
+            } else {
+                refresh(_state.value.isPermissionGranted, _state.value.isListenerConnected)
+            }
+        } else if (decision is app.mini.hub.attention.AttentionDecision.Rejected) {
+            _state.value = _state.value.copy(outboxStatusMessage = decision.reason)
+        }
     }
 
     fun selectConversation(summary: ConversationObservationSummary) {
