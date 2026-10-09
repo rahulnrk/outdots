@@ -91,6 +91,29 @@ Summary: the safety boundaries hold (refusal, draft-only, no injected promise, l
 
 ### Still not verified
 
-- Interactive UI flow (select conversation, enter intent, generate, edit preview, review) on screen.
-- Cancellation during a live generation.
 - Human review of naturalness. The Hindi and Telugu outputs already fail objective checks.
+
+## Real UI flow on the OPPO (end-user path)
+
+Exercised through the installed app with `uiautomator` (the activity uses `FLAG_SECURE`, so screenshots are black by design). Only a synthetic notification posted by the debug receiver was opened. Real notifications in the inbox were not read into any artifact.
+
+Setup finding: on this ColorOS build the shell cannot grant `POST_NOTIFICATIONS` (`pm grant` and `appops set` are refused), and the app had it denied, so synthetic notifications were silently dropped until the toggle was enabled in system settings. Fresh installs on OEM builds need the in-app permission prompt to work.
+
+Observed flow:
+
+1. Inbox listed the synthetic conversation ("Synthetic Sender"). Tapping opened the detail screen with the coverage notice and the message.
+2. Typed reply intent "Repeat the quoted total and ask if they want to proceed". "Draft on device" became enabled.
+3. During generation the UI showed "Generating locally on this device." with a Cancel button.
+4. Result: "Local draft ready (4502 ms). Review it before use." Draft: "The quoted total is Rs 500. Do you want to proceed?" This is correct and useful, unlike the evaluator's case 04 prompt.
+5. The draft was editable. Appending " Thanks" was reflected.
+6. "Review local draft before opening" opened "Exact Action Review (No Unintended Send)" showing the edited text verbatim, recipient Synthetic Sender, and the route/policy. Dismissed with Cancel; "Approve & Open App" was deliberately not pressed.
+
+### Cancellation defect found and fixed
+
+Tapping Cancel about 0.8 s into a live generation showed "Local draft unavailable: Task was cancelled." while the previous draft stayed in the editable field and "Review local draft before opening" remained enabled. Causes in `InboxViewModel`:
+
+- `cancelLocalDraft()` only updated state when the engine reported a successful cancel, and the worker's `Failed` callback then overwrote the status.
+- Late callbacks were applied unconditionally, so a cancelled or superseded request, or one from a previously selected conversation, could overwrite current state.
+- A new request did not clear the old draft, so a stale draft looked like a current result.
+
+Fix: a generation token invalidates in-flight callbacks on cancel, on conversation change, and on back; cancel always shows "Local draft cancelled."; starting a draft clears the old text. Build and unit tests pass. On-device re-verification of the fix was blocked because the phone dropped off ADB (`offline`, then absent after `adb reconnect` and server restart).

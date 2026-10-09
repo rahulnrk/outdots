@@ -35,6 +35,9 @@ class InboxViewModel(
     private val clock: Clock,
     private val localDraftExperiment: LocalDraftExperiment? = null,
 ) {
+    // Monotonic token so a late callback from a cancelled or superseded request cannot overwrite
+    // the cancellation state or a newer draft.
+    private var localDraftGeneration = 0L
     private val _state = mutableStateOf(InboxViewState())
     val state: State<InboxViewState> get() = _state
     private val mainHandler: Handler? = try {
@@ -70,6 +73,7 @@ class InboxViewModel(
             now = clock.now(),
         )
 
+        abandonLocalDraft()
         _state.value = _state.value.copy(
             selectedConversation = summary,
             selectedTimeline = observations,
@@ -85,6 +89,7 @@ class InboxViewModel(
     }
 
     fun clearSelection() {
+        abandonLocalDraft()
         _state.value = _state.value.copy(
             selectedConversation = null,
             selectedTimeline = emptyList(),
@@ -109,8 +114,10 @@ class InboxViewModel(
             )
             return
         }
+        val generation = ++localDraftGeneration
         _state.value = _state.value.copy(
             localDraftStatus = "Generating locally on this device…",
+            localDraftText = "",
             localDraftWarning = retrieved.coverageWarning.ifBlank { null },
             isLocalDraftInProgress = true,
         )
@@ -125,7 +132,8 @@ class InboxViewModel(
                 userIntent = userIntent,
             ),
         ) { result ->
-            val applyResult = {
+            val applyResult = applyResult@{
+                if (generation != localDraftGeneration) return@applyResult
                 when (result) {
                     is LocalDraftResult.Success -> _state.value = _state.value.copy(
                         localDraftText = result.proposal.text,
@@ -149,13 +157,25 @@ class InboxViewModel(
         }
     }
 
-    fun cancelLocalDraft() {
-        if (localDraftExperiment?.cancel() == true) {
-            _state.value = _state.value.copy(
-                localDraftStatus = "Local draft cancelled.",
-                isLocalDraftInProgress = false,
-            )
+    // Drops any in-flight draft so its result cannot appear in a different conversation.
+    private fun abandonLocalDraft() {
+        if (_state.value.isLocalDraftInProgress) {
+            localDraftGeneration++
+            localDraftExperiment?.cancel()
         }
+    }
+
+    fun cancelLocalDraft() {
+        if (!_state.value.isLocalDraftInProgress) return
+        // Invalidate the in-flight request first so its eventual callback is ignored, then ask the
+        // runtime to stop. The UI reflects the user's cancellation even if the engine had already
+        // finished generating.
+        localDraftGeneration++
+        localDraftExperiment?.cancel()
+        _state.value = _state.value.copy(
+            localDraftStatus = "Local draft cancelled.",
+            isLocalDraftInProgress = false,
+        )
     }
 
     fun updateLocalDraftText(text: String) {
