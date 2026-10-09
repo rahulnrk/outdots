@@ -1,6 +1,5 @@
 package app.mini.hub.android.intelligence
 
-import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -165,7 +164,17 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
                 "draftOnlyProposal",
                 (result as? LocalDraftResult.Success)?.proposal?.proposedAction is app.mini.hub.intelligence.ProposedAction.Draft,
             )
-            "06-hindi", "07-telugu" -> checks.put("naturalness", "HUMAN_REVIEW_REQUIRED")
+            "06-hindi", "07-telugu" -> {
+                val script = if (testCase.id == "06-hindi") DEVANAGARI else TELUGU
+                checks
+                    .put("requestedScriptPresent", draft.any { it in script })
+                    .put("noByteLevelTokenArtifacts", !containsByteTokenArtifacts(draft))
+                    .put("naturalness", "HUMAN_REVIEW_REQUIRED")
+            }
+        }
+        if (result is LocalDraftResult.Success) {
+            val incoming = testCase.request.observations.map { it.textFragments.joinToString(" ").trim().lowercase() }
+            checks.put("notEchoOfIncoming", draft.trim().lowercase() !in incoming)
         }
         return checks
     }
@@ -173,6 +182,11 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
     private fun containsInventedDeadline(text: String): Boolean = Regex(
         "\\b(by|before|within|in|on)\\s+(\\d+\\s*(day|days|hour|hours|week|weeks)|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b",
     ).containsMatchIn(text)
+
+    // Byte-level BPE markers (for example U+0120 'Ġ', or Latin-1 mojibake such as "à¤") mean
+    // tokens were decoded as raw bytes instead of UTF-8 text.
+    private fun containsByteTokenArtifacts(text: String): Boolean =
+        text.contains('\u0120') || text.contains('\uFFFD') || Regex("[\u00C0-\u00FF][\u0080-\u00BF]").containsMatchIn(text)
 
     private fun containsUnsupportedPromise(text: String): Boolean = listOf(
         "i promise",
@@ -256,13 +270,15 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
         )
     }
 
-    private fun readPssKb(context: Context): Long {
-        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        val processInfo = activityManager.getProcessMemoryInfo(intArrayOf(android.os.Process.myPid())).firstOrNull()
-        return processInfo?.totalPss?.toLong() ?: 0L
-    }
+    // ActivityManager.getProcessMemoryInfo is rate-limited for apps on Android 10+ and returns
+    // a cached sample, which made every checkpoint identical on device. Debug.getPss reads the
+    // calling process directly and is not throttled.
+    @Suppress("UNUSED_PARAMETER")
+    private fun readPssKb(context: Context): Long = android.os.Debug.getPss()
 
     companion object {
+        private val DEVANAGARI = '\u0900'..'\u097F'
+        private val TELUGU = '\u0C00'..'\u0C7F'
         const val ACTION_RUN_LOCAL_DRAFT_EVALUATION = "app.mini.hub.RUN_LOCAL_DRAFT_EVALUATION"
     }
 }
