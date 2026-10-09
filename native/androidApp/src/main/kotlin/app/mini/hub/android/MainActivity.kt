@@ -104,11 +104,18 @@ class MainActivity : ComponentActivity() {
     private fun handleOAuthIntent(intent: android.content.Intent?) {
         val uri = intent?.data ?: return
         if (!gmailOAuth.acceptsRedirect(uri)) return
-        connectionStatus.value = when (val outcome = gmailOAuth.handleRedirect(uri)) {
-            is GmailOAuthOutcome.Connected -> "Gmail account connected: ${outcome.account.displayName ?: outcome.account.providerAccountId}"
-            is GmailOAuthOutcome.Blocked -> outcome.reason
-            is GmailOAuthOutcome.Started -> "Google authorization is already in progress."
-        }
+        // Prevent re-processing the same one-time code on recreation.
+        intent.data = null
+        connectionStatus.value = "Finishing Gmail connection..."
+        // Token exchange and profile discovery are network calls. Android rejects them on the UI thread.
+        Thread({
+            val message = when (val outcome = gmailOAuth.handleRedirect(uri)) {
+                is GmailOAuthOutcome.Connected -> "Gmail account connected: ${outcome.account.displayName ?: outcome.account.providerAccountId}"
+                is GmailOAuthOutcome.Blocked -> outcome.reason
+                is GmailOAuthOutcome.Started -> "Google authorization is already in progress."
+            }
+            runOnUiThread { connectionStatus.value = message }
+        }, "mini-gmail-oauth-callback").start()
     }
 
     override fun onPause() {

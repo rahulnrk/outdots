@@ -79,7 +79,11 @@ class GmailOAuthClient(context: Context) {
         return GmailOAuthOutcome.Started(request.url)
     }
 
+    /** Performs network I/O. Must not be called on the Android main thread. */
     fun handleRedirect(uri: Uri, nowMillis: Long = System.currentTimeMillis()): GmailOAuthOutcome {
+        check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            "Gmail OAuth callback must be handled off the main thread"
+        }
         val config = configuration ?: return GmailOAuthOutcome.Blocked("Gmail public OAuth client ID is not configured.")
         uri.getQueryParameter("error")?.let { return GmailOAuthOutcome.Blocked("Google authorization was not completed: $it") }
         val code = uri.getQueryParameter("code").orEmpty()
@@ -112,7 +116,7 @@ class GmailOAuthClient(context: Context) {
             prefs.edit().remove(KEY_STATE).remove(KEY_VERIFIER).apply()
             GmailOAuthOutcome.Connected(account)
         } catch (e: Exception) {
-            GmailOAuthOutcome.Blocked("Gmail authorization could not finish: ${e.message ?: "provider request failed"}")
+            GmailOAuthOutcome.Blocked("Gmail authorization could not finish: ${e.message ?: e.javaClass.simpleName}")
         }
     }
 
