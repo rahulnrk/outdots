@@ -2,6 +2,8 @@ package app.mini.hub.android.ui
 
 import android.content.Intent
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -258,7 +260,7 @@ private fun CommunicationSourceSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Communication sources") },
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(
                     "Choose notification apps for the inbox. This observes notifications only; it does not connect an account or create a login.",
                     style = MaterialTheme.typography.bodySmall,
@@ -323,7 +325,7 @@ private fun ConnectedAccountSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Connected accounts") },
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(
                     "Connected accounts use provider authorization and are separate from notification-source choices.",
                     style = MaterialTheme.typography.bodySmall,
