@@ -14,8 +14,10 @@ import java.security.MessageDigest
 import java.util.concurrent.Executors
 
 /**
- * Background Gmail read sync. Runs without the UI and with the screen off, subject to Android's
- * scheduling (Doze, App Standby buckets, battery restrictions). Logs carry only counts and states.
+ * Background read sync for every connected account (Gmail incremental history plus Outlook,
+ * Teams, Slack, Google Chat, Telegram bot and X). Runs without the UI and with the screen off,
+ * subject to Android's scheduling (Doze, App Standby buckets, battery restrictions). Logs carry
+ * only counts and states.
  *
  * This only stores new messages in MINI. It does not post OS notifications.
  */
@@ -29,7 +31,7 @@ class GmailSyncJobService : JobService() {
                 MiniHubRuntime.init(applicationContext)
                 val power = getSystemService(Context.POWER_SERVICE) as PowerManager
                 Log.i(LOG_TAG, "job start trigger=$trigger screenInteractive=${power.isInteractive} idle=${power.isDeviceIdleMode}")
-                runSync(applicationContext, trigger)
+                runAll(applicationContext, trigger)
             } catch (e: Exception) {
                 Log.w(LOG_TAG, "job failed trigger=$trigger error=${e.javaClass.simpleName}")
             } finally {
@@ -51,6 +53,12 @@ class GmailSyncJobService : JobService() {
             MiniHubRuntime.init(context)
             val connector = AndroidGmailConnector(context, MiniHubRuntime.observationStore, sha256())
             return connector.syncAllConnected(System.currentTimeMillis(), trigger)
+        }
+
+        /** Every connected provider account. One account's failure never affects another. */
+        fun runAll(context: Context, trigger: String): AndroidConnectorRegistry.SyncSummary {
+            MiniHubRuntime.init(context)
+            return MiniHubRuntime.connectors.syncAll(trigger)
         }
 
         /** Periodic background sync. Android enforces a 15 minute minimum interval. */

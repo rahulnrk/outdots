@@ -29,5 +29,13 @@
                 <action android:name="app.mini.hub.debug.LOCAL_AI_STATUS" />
             </intent-filter>
         </receiver>
+        <receiver
+            android:name=".connector.GateEvidenceDebugReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="app.mini.hub.debug.RECORD_GATE" />
+                <action android:name="app.mini.hub.debug.CLEAR_GATE" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

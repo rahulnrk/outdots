@@ -67,14 +67,12 @@ fun InboxScreen(
     onRequestPermission: () -> Unit,
     sourcePreferences: CommunicationSourcePreferences,
     accountStore: ConnectedAccountStore,
-    gmailCanConnect: Boolean,
-    gmailSetupStatus: String,
+    routes: List<app.mini.hub.android.connector.ConnectRouteInfo>,
     connectionStatus: String?,
-    onConnectGmail: () -> Unit,
+    onConnect: (app.mini.hub.domain.Provider) -> Unit,
     onSourceSelectionChanged: () -> Unit,
-    outlookCanConnect: Boolean = false,
-    outlookSetupStatus: String = "",
-    onConnectOutlook: () -> Unit = {},
+    capabilities: (ConnectedAccount) -> app.mini.hub.connector.CapabilitySnapshot? = { null },
+    onConnectTelegram: (String) -> Unit = {},
     onDisconnectAccount: (ConnectedAccount) -> Unit = {},
     onSyncNow: () -> Unit = {},
     accountsVersion: Int = 0,
@@ -180,6 +178,9 @@ fun InboxScreen(
             }
 
             if (state.selectedConversation != null) {
+                state.conversationLoadStatus?.let {
+                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 6.dp))
+                }
                 // Conversation Detail View
                 val record = state.attentionRecords[state.selectedConversation!!.conversationId.key] 
                     ?: app.mini.hub.attention.AttentionRules.default(state.selectedConversation!!.conversationId, app.mini.hub.domain.UtcInstant(System.currentTimeMillis()))
@@ -226,13 +227,11 @@ fun InboxScreen(
     if (showAccountSettings) {
         ConnectedAccountSettingsDialog(
             accounts = remember(accountsVersion, connectionStatus) { accountStore.list() },
-            gmailCanConnect = gmailCanConnect,
-            gmailSetupStatus = gmailSetupStatus,
-            outlookCanConnect = outlookCanConnect,
-            outlookSetupStatus = outlookSetupStatus,
+            routes = routes,
+            capabilities = capabilities,
             connectionStatus = connectionStatus,
-            onConnectGmail = onConnectGmail,
-            onConnectOutlook = onConnectOutlook,
+            onConnect = onConnect,
+            onConnectTelegram = onConnectTelegram,
             onDisconnect = onDisconnectAccount,
             onSyncNow = onSyncNow,
             onDismiss = { showAccountSettings = false },
@@ -243,6 +242,7 @@ fun InboxScreen(
     state.activeReviewPayload?.let { payload ->
         ExactActionReviewDialog(
             payload = payload,
+            context = state.reviewContext,
             onConfirm = { viewModel.approveAndDispatch(handoffLauncher) },
             onDismiss = { viewModel.clearDraftReview() },
         )
@@ -293,18 +293,23 @@ private fun CommunicationSourceSettingsDialog(
 @Composable
 private fun ConnectedAccountSettingsDialog(
     accounts: List<ConnectedAccount>,
-    gmailCanConnect: Boolean,
-    gmailSetupStatus: String,
-    outlookCanConnect: Boolean,
-    outlookSetupStatus: String,
+    routes: List<app.mini.hub.android.connector.ConnectRouteInfo>,
+    capabilities: (ConnectedAccount) -> app.mini.hub.connector.CapabilitySnapshot?,
     connectionStatus: String?,
-    onConnectGmail: () -> Unit,
-    onConnectOutlook: () -> Unit,
+    onConnect: (app.mini.hub.domain.Provider) -> Unit,
+    onConnectTelegram: (String) -> Unit,
     onDisconnect: (ConnectedAccount) -> Unit,
     onSyncNow: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var pendingDisconnect by remember { mutableStateOf<ConnectedAccount?>(null) }
+    var showTelegramEntry by remember { mutableStateOf(false) }
+    if (showTelegramEntry) {
+        TelegramTokenDialog(
+            onSubmit = { onConnectTelegram(it); showTelegramEntry = false },
+            onDismiss = { showTelegramEntry = false },
+        )
+    }
     pendingDisconnect?.let { target ->
         AlertDialog(
             onDismissRequest = { pendingDisconnect = null },
@@ -347,6 +352,13 @@ private fun ConnectedAccountSettingsDialog(
                         account.userActionRequired?.let {
                             Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                         }
+                        capabilities(account)?.let { snapshot ->
+                            Text(
+                                capabilitySummary(snapshot),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         if (account.state != app.mini.hub.connector.ConnectionState.Disconnected) {
                             TextButton(onClick = { pendingDisconnect = account }) { Text("Disconnect") }
                         }
@@ -355,31 +367,74 @@ private fun ConnectedAccountSettingsDialog(
                     TextButton(onClick = onSyncNow) { Text("Sync connected accounts now") }
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
-                Text("Gmail", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                Text(gmailSetupStatus, style = MaterialTheme.typography.bodySmall)
-                Spacer(modifier = Modifier.height(6.dp))
-                Button(onClick = onConnectGmail, enabled = gmailCanConnect) {
-                    Text(if (gmailCanConnect) "Connect Gmail" else "Gmail setup required")
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("Outlook", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                Text(outlookSetupStatus, style = MaterialTheme.typography.bodySmall)
-                Spacer(modifier = Modifier.height(6.dp))
-                Button(onClick = onConnectOutlook, enabled = outlookCanConnect) {
-                    Text(if (outlookCanConnect) "Connect Outlook Mail (personal or work)" else "Outlook setup required")
-                }
                 connectionStatus?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                    Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp))
+                }
+                Text("Add an account", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                routes.forEach { route ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(route.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                    Text(route.accountKinds, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        if (route.configured) route.status else "Setup required: ${route.status}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedButton(
+                        onClick = { if (route.usesTokenEntry) showTelegramEntry = true else onConnect(route.provider) },
+                        enabled = route.configured,
+                    ) {
+                        Text(if (route.configured) "Connect ${route.title}" else "${route.title}: not set up in this build")
+                    }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "Notification observations remain available without an authenticated account and may not identify the mailbox account.",
+                    "WhatsApp, Messenger, Instagram, LinkedIn, Google Messages, Discord, LINE, Signal and personal Telegram have no supported personal API. " +
+                        "MINI reads their notifications (choose them under Sources) and opens the app with your reviewed text. It never sends for you there.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+}
+
+private fun capabilitySummary(snapshot: app.mini.hub.connector.CapabilitySnapshot): String {
+    val on = snapshot.enabled.map { it.name }.sorted()
+    val reply = snapshot.disabled[app.mini.hub.connector.Capability.Reply]
+    return buildString {
+        append(if (on.isEmpty()) "Nothing enabled yet" else "Enabled: " + on.joinToString(", "))
+        reply?.let { append("\nReply via MINI: off (").append(it).append(")") }
+    }
+}
+
+@Composable
+private fun TelegramTokenDialog(onSubmit: (String) -> Unit, onDismiss: () -> Unit) {
+    var token by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Connect a Telegram bot") },
+        text = {
+            Column {
+                Text(
+                    "Paste the token BotFather gave you for a bot you own. MINI checks it with Telegram, stores it in Android Keystore and only sees chats the bot is in. " +
+                        "This is not your personal Telegram account.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = token,
+                    onValueChange = { token = it.trim() },
+                    label = { Text("Bot token") },
+                    singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSubmit(token) }, enabled = token.contains(':')) { Text("Connect") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
@@ -816,30 +871,40 @@ fun ConversationDetailView(
 @Composable
 fun ExactActionReviewDialog(
     payload: app.mini.hub.action.ExactActionPayload,
+    context: ReviewContext? = null,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val isApi = payload.route == app.mini.hub.action.ActionRoute.Api
+    val provider = context?.providerName ?: "the provider"
+    val handoffApp = context?.handoffPackage?.let { app.mini.hub.observation.SourceAppNames.forPackage(it) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Exact Action Review (No Unintended Send)") },
+        title = { Text("Review exactly what happens") },
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(
                     text = if (isApi) {
-                        "Review the exact message, subject and destination before dispatching. This action will send directly via official provider API."
+                        "MINI will send this through $provider's official API from the account below, as " +
+                            (if (context?.isReply == true) "a threaded reply to the latest message." else "a new message in this conversation (no reply anchor).") +
+                            " Nothing else is sent. Success only means $provider accepted it, not that it was delivered or read."
                     } else {
-                        "Review the exact message and destination before proceeding. This action will open WhatsApp / email with this pre-filled draft."
+                        "MINI will open ${handoffApp ?: "an app you choose"} with this text. Nothing is sent until you send it there yourself."
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
+                context?.note?.let {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                }
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Text("Route: ${if (isApi) "Official Provider API (${payload.accountId})" else "Native Handoff"}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                Text("Route: ${if (isApi) "$provider API" else "Open ${handoffApp ?: "app"} (you send)"}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                Text("Account: ${payload.accountId}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                 payload.subject?.let {
                     Text("Subject: $it", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                 }
-                Text("Recipient: ${payload.recipients.joinToString().ifBlank { "Original Thread" }}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                Text("To: ${payload.recipients.joinToString().ifBlank { "this conversation" }}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text("Draft Content:", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
@@ -863,7 +928,7 @@ fun ExactActionReviewDialog(
         },
         confirmButton = {
             Button(onClick = onConfirm) {
-                Text(if (isApi) "Approve & Send via API" else "Approve & Open App")
+                Text(if (isApi) "Approve & send via $provider" else "Approve & open ${handoffApp ?: "app"}")
             }
         },
         dismissButton = {

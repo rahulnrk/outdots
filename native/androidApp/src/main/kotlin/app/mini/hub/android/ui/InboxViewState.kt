@@ -36,4 +36,18 @@ data class InboxViewState(
     val isLocalAiRetryInProgress: Boolean = false,
     /** Latest asynchronous resource release state, e.g. "Queued", "Released". */
     val localAiReleaseStatus: String? = null,
+    /** What the review dialog must say about the pending action besides the payload itself. */
+    val reviewContext: ReviewContext? = null,
+    /** Progress or failure of loading the full provider conversation. */
+    val conversationLoadStatus: String? = null,
+)
+
+data class ReviewContext(
+    val providerName: String,
+    /** True: threaded reply to a specific message. False: a new message in the conversation. */
+    val isReply: Boolean,
+    /** Native handoff target app, when the route is a handoff. */
+    val handoffPackage: String?,
+    /** Why the route is handoff even though an API account exists. */
+    val note: String?,
 )

@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -7,7 +9,16 @@ android {
     namespace = "app.mini.hub.android"
     compileSdk = 34
 
-    val googleOAuthClientId = providers.gradleProperty("mini.googleOAuthClientId").orNull.orEmpty()
+    // Public OAuth client IDs (never secrets). Read from -P flags first, then the gitignored
+    // native/local.properties, so a routine build cannot silently drop a configured connector.
+    val localProps = Properties().apply {
+        val file = rootProject.file("local.properties")
+        if (file.exists()) file.inputStream().use { load(it) }
+    }
+    fun clientId(key: String): String =
+        (providers.gradleProperty(key).orNull ?: localProps.getProperty(key)).orEmpty().trim()
+
+    val googleOAuthClientId = clientId("mini.googleOAuthClientId")
     val isGoogleOAuthPlaceholder = googleOAuthClientId == "1234567890-abcdef.apps.googleusercontent.com"
     val googleOAuthClientPrefix = googleOAuthClientId
         .takeIf { !isGoogleOAuthPlaceholder && it.endsWith(".apps.googleusercontent.com") }
@@ -17,7 +28,10 @@ android {
         ?.let { "com.googleusercontent.apps.$it" }
         ?: "app.mini.hub"
 
-    val microsoftOAuthClientId = providers.gradleProperty("mini.outlookOAuthClientId").orNull.orEmpty()
+    val microsoftOAuthClientId = clientId("mini.outlookOAuthClientId")
+    val slackClientId = clientId("mini.slackClientId")
+    val xClientId = clientId("mini.xClientId")
+    fun quoted(value: String) = "\"${value.replace("\"", "\\\"")}\""
 
     defaultConfig {
         applicationId = "app.mini.hub"
@@ -34,13 +48,11 @@ android {
         buildConfig = true
     }
     buildTypes {
-        getByName("debug") {
-            buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", "\"${googleOAuthClientId.replace("\"", "\\\"")}\"")
-            buildConfigField("String", "MICROSOFT_OAUTH_CLIENT_ID", "\"${microsoftOAuthClientId.replace("\"", "\\\"")}\"")
-        }
-        getByName("release") {
-            buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", "\"${googleOAuthClientId.replace("\"", "\\\"")}\"")
-            buildConfigField("String", "MICROSOFT_OAUTH_CLIENT_ID", "\"${microsoftOAuthClientId.replace("\"", "\\\"")}\"")
+        configureEach {
+            buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", quoted(googleOAuthClientId))
+            buildConfigField("String", "MICROSOFT_OAUTH_CLIENT_ID", quoted(microsoftOAuthClientId))
+            buildConfigField("String", "SLACK_CLIENT_ID", quoted(slackClientId))
+            buildConfigField("String", "X_CLIENT_ID", quoted(xClientId))
         }
     }
     composeOptions {

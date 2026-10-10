@@ -1,0 +1,165 @@
+﻿ID,App,Reviewer,PDF pages,Observation paraphrase,Finding IDs,Qualification
+BR001,Beeper,Timothy Dougherty,"2, 3",Notifications require foreground despite battery-setting attempts.,B05,
+BR002,Beeper,Ryan Hobbs,"3, 4, 26, 27","Likes unified concept; clunky layout, sporadic links, missed alerts and battery use caused abandonment.","B01, B05, B06, B11, B16",
+BR003,Beeper,Greg Haines,"4, 5","Previously liked app; reports late alerts, hard reconnection and perceived decline after monetization.","B05, B06, B18",
+BR004,Beeper,Black Knight,"5, 6",Missing mobile notifications and sending spinner despite desktop delivery.,"B05, B07",
+BR005,Beeper,Arin Taylor,"6, 7","Fast UI and rare reconnects; Messenger notifications, cloud discomfort and merged-source clarity remain problems.","B03, B04, B05, B17, B18",
+BR006,Beeper,Directive Taurus,"7, 8",Wants discoverable network filters and a different notification sound.,"B10, B20",Developer explains an existing network filter.
+BR007,Beeper,Michael Goodin,"8, 9",Broken Google Messages connection was unnoticed; critical messages missed.,"B05, B06",Developer mentions disconnection banners; effectiveness still disputed.
+BR008,Beeper,Chris Payne,"9, 10",Beautiful useful aggregation; background notifications fail.,"B01, B03, B05",Developer references device-specific notification issues.
+BR009,Beeper,Moshiur Rahman (Adib),11,Works but lags on weaker phone; requests hiding chats and folders.,"B10, B16",
+BR010,Beeper,Aaron Knobloch,"11, 12","Cannot replace native apps due to delays, timeouts and missing native actions.","B07, B14, B22","2024 report, not a current capability audit."
+BR011,Beeper,Will Widlof,"12, 41, 42, 103, 104","Stability before features: polls, battery, reply targets, Android behavior and foreground-only notifications.","B05, B12, B14, B16",
+BR012,Beeper,Edgar Perez,13,Likes idea; background crashes and SMS delays.,"B05, B16",
+BR013,Beeper,Mark Kim Caladcad,"13, 14","Requests more networks/deletion; reports delayed alerts, logouts and wrong Messenger content.","B05, B06, B12, B15, B21",
+BR014,Beeper,Syros Only,14,Likes app but no Discord/Instagram alerts.,B05,
+BR015,Beeper,RACHA NIKHIL,15,Praises app but intermittent missing notifications.,B05,
+BR016,Beeper,Chris,"15, 16",Notifications absent for months; support did not resolve.,"B05, B19",
+BR017,Beeper,LUXE MTL,"15, 16",Consolidation is good; new-message alerts sometimes absent.,"B01, B05",
+BR018,Beeper,Shehu Awwal,16,No notifications while away from app.,B05,
+BR019,Beeper,Kady Cooley,"17, 18",Categories are essential; layout/font requests and objection to premium labels.,"B10, B11, B18",Historical reviewer price is not current pricing.
+BR020,Beeper,Sagasu Jin,18,Multi-account function good; icon-only bar and buried low-priority view are confusing; reminders unwanted.,"B01, B10, B11",
+BR021,Beeper,mauricio curiel,19,Avoids social apps and enjoys optional person-based contact merging.,"B01, B02, B04",
+BR022,Beeper,Ved,"19, 20",Likes clean design; requests reel alert suppression and typing indicators.,"B03, B14, B20",Reviewer explanation of Meta API limits is speculation.
+BR023,Beeper,Dan Goelz,"20, 21",Feed-free Instagram messaging good; audio tail missing and phone-number link clutter.,"B02, B13",
+BR024,Beeper,Miguel Silveira,"21, 22",Staying on top of cross-platform messages became much easier.,B01,
+BR025,Beeper,Michael,22,Wants stronger native Matrix support on all devices.,B04,
+BR026,Beeper,Emma Lantos,"22, 23",Setup problems then good experience; reduced social addiction; requests nicknames.,"B02, B03, B21",
+BR027,Beeper,Andrew Selzer-Wong,23,Single inbox helps with ADHD-related reply follow-through.,"B01, B02",Review cropped at end; no invented continuation.
+BR028,Beeper,Otto Werse,24,Broken GIF picker; requests easier on-device cross-device sync.,"B13, B22",
+BR029,Beeper,Zac Bird,24,"Can remove Instagram yet keep messages, receipts, audio and shared reels; minor bugs.","B02, B13",Review ends mid-sentence.
+BR030,Beeper,Troy Greer,25,Google Messages history lost after reconnect; unresolved support and recurrence.,"B06, B08, B19",Developer mentions limited recent-chat backfill.
+BR031,Beeper,James Petty,25,Requests select-all deletion for archived junk messages.,B15,
+BR032,Beeper,Name cropped (developer addresses Tomas),26,Logout prevents reentry and partial feature coverage requires original apps.,"B06, B14, B22",Reviewer identity cropped; not merged with Tomas Landovsky.
+BR033,Beeper,Thevindu D,"26, 27",Instagram communication without unwanted feed content.,B02,
+BR034,Beeper,Nicholas Tom (partially visible),28,Uses Instagram inbox without scrolling.,B02,
+BR035,Beeper,Chris Raaz,28,Requests scheduling and smoother account linking.,"B06, B14",
+BR036,Beeper,Nicolas Pereira M.,"28, 29",Free version and reduced screen time praised; quoted reply persists after sending.,"B02, B12, B18",
+BR037,Beeper,Dan Horner,29,Instagram sync/history works and avoids doomscrolling.,"B02, B08",
+BR038,Beeper,Yurii Bychenok,"29, 30",Useful on Fold; Telegram channel comments and reply/citation UI limited.,"B03, B12, B14",
+BR039,Beeper,Name unclear (looks like elp),30,No ads praised; missing Instagram features and concern about data security.,"B14, B17",
+BR040,Beeper,"Name cropped, 7/25/26",31,One inbox and less reel scrolling work well.,"B01, B02",
+BR041,Beeper,Just Jesse,31,Gets feed-free Instagram messaging but photos unavailable.,"B02, B13",
+BR042,Beeper,Michelle Tasker,"31, 32",Frequent disconnects require setup-like recovery; deletion and per-person sounds lacking; value questioned.,"B06, B15, B18, B20",
+BR043,Beeper,Don Quixote,32,Messaging without reels helps reduce doomscrolling.,B02,Review cropped at end.
+BR044,Beeper,Matt Molloy,33,Reliable unified accounts and feature coverage praised.,"B01, B03",
+BR045,Beeper,Damien Thompkins,"33, 34","Disconnects, failed sends, deletion and pricing concerns.","B06, B07, B15, B18",Developer acknowledges reliability work; quoted price unverified.
+BR046,Beeper,Ezra Snow,34,"Google Messages/WhatsApp mostly work; polls/group data, Discord/Google Chat and old-history gaps.","B08, B14",
+BR047,Beeper,Noreen B,"34, 35","Instagram/WhatsApp reconnect loops; camera crash, video and voice playback errors.","B06, B13",
+BR048,Beeper,J. Dominic Jackson,35,Instagram/Facebook messages without feeds.,B02,
+BR049,Beeper,"Name cropped, 10/16/25",36,"Matrix appreciated; connection issues, pinch zoom and desktop polish requested.","B04, B06, B11",
+BR050,Beeper,Kris Bennett,36,Paywall change left scheduled message unsent; subscription value disputed.,B18,
+BR051,Beeper,Isaiah Hawkins,"36, 38","Previously good, now messages no longer work.","B08, B16",Symptom broad; no diagnosed cause.
+BR052,Beeper,Jl Rony,37,One inbox replaces many heavy apps.,"B01, B16",
+BR053,Beeper,Joshua Cordova,37,"Good organization; requests email, contacts and calls, prefers affordable lifetime pricing.","B01, B18, B21",
+BR054,Beeper,Alexander Gomez,38,Deletion does not remove all chats.,B15,
+BR055,Beeper,Vlad Levitsky,"38, 39","Messenger reauth/zoom problems, archived chats reappear, polls/media gaps.","B06, B09, B11, B13, B14",
+BR056,Beeper,Harry Thompson,39,Works as secondary-device aggregator but expectations for main-phone SMS replacement unmet.,B22,Review cropped at end; causality not verified.
+BR057,Beeper,Dev .B,40,Sync mostly good; new chats require opening on source app; avoids Instagram feed.,"B02, B08",
+BR058,Beeper,Karas Elbardisy,"40, 41, 104",Unified inbox good; WhatsApp group mute resets repeatedly and support unresolved.,"B01, B09, B19",
+BR059,Beeper,Sonal Saha,"42, 43, 102, 103",Texting via Instagram/LinkedIn without status and feeds is valuable.,B02,
+BR060,Beeper,Andy N (Andstein),"43, 102","Instagram photo variants missing, losing photos and context.",B13,
+BR061,Beeper,"Name cropped, 6/10/26","44, 101",Google Chat tag loses first character of person name.,B12,
+BR062,Beeper,Kardam Nedyalkov,"44, 101",Can chat with friends without using Instagram.,B02,
+BR063,Beeper,Sadman Sakib,"44, 45, 100, 101",Pinned grid wastes space and hides last-message preview.,B11,Discriminatory insults excluded from analysis; retain only actionable UI criticism.
+BR064,Beeper,Rizky,"45, 100",Reduced screen time praised; reports Instagram security restriction.,"B02, B17",Ends mid-sentence; cause of security warning unproven.
+BR065,Beeper,R,"46, 99",Expected WhatsApp without primary app; dependency disappointing.,B22,Developer explains periodic primary-app use.
+BR066,Beeper,Rehan Zahid,"46, 47, 98, 99",Likes experience but cannot delete messages.,B15,Developer says deletion exists; route/failure/discoverability unresolved.
+BR067,Beeper,Vaclav Zak,"47, 98",Cannot add two WhatsApp accounts free.,B18,"Historical entitlement claim, not current plan policy."
+BR068,Beeper,Micheal Hylman,"48, 97",Likes app; wants mobile iMessage parity.,B22,
+BR069,Beeper,Amirhosein Haddadiyan,"48, 97",Likes app; asks for iMessage-like sending sound.,B20,
+BR070,Beeper,XBHS,"48, 97",One consistent interface across networks praised.,"B01, B03",
+BR071,Beeper,Yousef Rekaaney,"49, 96",One social inbox saves time and simplifies messaging.,B01,
+BR072,Beeper,Eric Graham,"49, 96",Expected editing with Apple users; cannot find/use it.,"B15, B22",
+BR073,Beeper,Ivan Maurizi,"49, 50, 95, 96",Likes theme and removing social apps; frequent Facebook/Instagram authorization.,"B02, B03, B06",
+BR074,Beeper,Papaya,"50, 95",Likes idea; wants smoother performance and TikTok support.,"B16, B21",
+BR075,Beeper,Maximusuperplus Mass,"50, 94, 95",Centralization good; requests old UI option.,"B01, B11",
+BR076,Beeper,Halbour,"85, 87",Chat tasks easier.,B01,
+BR077,Beeper,"Greek-script reviewer, name unclear","85, 87",Expected paid iMessage access for family communication.,"B18, B22",Developer says mobile iMessage offering disabled in 2023.
+BR078,Beeper,Tom Brand,85,Likes chatting with app.,B01,Generic positive; little specific evidence.
+BR079,Beeper,Tapan 254 254,"87, 88, 89",Requests delete chat history.,B15,Developer says available on some networks.
+BR080,Beeper,Ureki Jeffery,"88, 89",Wants WhatsApp archive preserved on new messages.,B09,
+BR081,Beeper,Anas Shahid,"88, 89",Everything good; requests TikTok chat.,B21,
+BR082,Beeper,Jort,"90, 91",Praises newly available polls.,B14,Conflict with earlier polls complaints; provider/platform not specified.
+BR083,Beeper,Jackson Baker,"90, 91",Likes app; requests Snapchat and starting Google Voice conversations.,B21,
+BR084,Beeper,Tomas Landovsky,90,Unified inbox relief and easy setup.,"B01, B03",
+BR085,Beeper,Eric Lobdell,"91, 92","Working unified messaging, support and frequent updates praised.","B01, B19",
+BR086,Beeper,Brandon Lam,91,Messaging friends without Instagram doomscrolling.,B02,
+BR087,Beeper,B (name unclear),"92, 93",Worries inability to delete history exposes chats if phone stolen.,"B15, B17",Concern is not a demonstrated encryption failure.
+BR088,Beeper,Saad Aamer,92,Good experience but cannot delete chats.,B15,
+BR089,Beeper,Jackson,"93, 94",One inbox good; sometimes messages fail to load.,"B01, B08",
+BR090,Beeper,Noah Roberts,93,Instagram messages without opening the distracting app.,B02,
+BR091,Beeper,Benjamin,94,Inbox removes excuses to extend Instagram screen time.,B02,
+PR001,PocketPal,Name cropped at top,51,Heavy app makes phone hang.,P09,
+PR002,PocketPal,ketan patel,51,App does not work.,P07,No specific failure detail.
+PR003,PocketPal,Angel,51,Repeated crashes.,P07,
+PR004,PocketPal,Ayan Khan,51,Cannot use app; sees load-model requirement.,P15,
+PR005,PocketPal,Ammaar Mohammad,"52, 53, 54",Crashes and wasted data; offline promotion raised expectations.,"P05, P07, P16",
+PR006,PocketPal,cokeandcake,52,Sage Pal returns empty messages.,"P04, P13",
+PR007,PocketPal,Weall Lovecashapp,52,Model installation redirects to Play Store.,"P05, P15",
+PR008,PocketPal,Muhammad Mustafa,52,Only name/date visible.,,No review body visible; cannot infer sentiment or issue.
+PR009,PocketPal,Antony Lee,"53, 54, 55, 73",Long load followed by filled context and frozen chat.,"P09, P11",
+PR010,PocketPal,Joshua,"53, 54, 55",Model-load crashes despite other loaders working.,"P07, P08",Developer suggests version update and Flash Attention settings; response clipped.
+PR011,PocketPal,D4rknecromancer,"55, 56",New model download leaves app unreopenable; reinstalls required.,"P05, P07",
+PR012,PocketPal,Abid osuli,55,Download crash near 90% in Afghanistan.,P05,
+PR013,PocketPal,Bryan Bunch,"56, 57",Unspecified bug.,P07,No reproducible detail; not counted as a diagnosed model-load failure.
+PR014,PocketPal,shervin tavakoli,"56, 57",Force-close failures after update.,"P07, P18",
+PR015,PocketPal,Asher,56,Completion HostFunction exception; previously worked.,"P13, P18",
+PR016,PocketPal,Electi,57,Crash after Bonsai-8B download.,"P07, P08",Developer says engine updated in 1.13.3; not a verified fix here.
+PR017,PocketPal,"Bengali-script reviewer, name unclear","58, 59","Startup crash after reported 64MB model on Galaxy A05, Android 15, 4GB RAM.","P07, P08",
+PR018,PocketPal,Abubakar S.,58,Requests fewer crashes.,P07,
+PR019,PocketPal,Cameron,"57, 58, 74, 75",Slow/hanging/crashing on RedMagic 10 Pro with 16GB RAM.,"P08, P09",
+PR020,PocketPal,Alessandro Zannone,"59, 60",1-2GB models crash on Galaxy S25 Ultra.,"P07, P08",
+PR021,PocketPal,ch umer,59,SmolVLM2 does not load; Qwen 2.5 3B download timeout.,"P05, P08",
+PR022,PocketPal,Prim Aski (Prim),"60, 63",Gemma load crashes despite perceived sufficient RAM.,"P07, P08",
+PR023,PocketPal,liquidReverb,"60, 63",App will not open.,P07,
+PR024,PocketPal,Tim J,60,"Download, complete or incomplete, leads to persistent crashes.","P05, P07",
+PR025,PocketPal,Xenia,"61, 62",Local Pal sign-in confusion and replies stop after a few turns.,"P11, P15",Developer says local Pals require no sign-in; clarify discoverability.
+PR026,PocketPal,Arnab Ghose,61,Broad complaint app does not function.,P07,No diagnosed cause.
+PR027,PocketPal,Rajakishor Sahoo,61,Failed model download wastes 400MB.,P05,Review continuation clipped.
+PR028,PocketPal,LunarLight,"62, 64, 76","Initially works, later same model/settings load forever even for Hello.","P09, P18",
+PR029,PocketPal,RAFAELHWEJJ 1,62,App closes when model selected.,P07,
+PR030,PocketPal,rajeev kr.,62,Fresh install does not open.,P07,
+PR031,PocketPal,LuminumLX,63,Reports Galaxy S10 kernel panics.,P08,Severe allegation; not reproduced or diagnosed.
+PR032,PocketPal,Mark Fleener,63,Repeated crashes regardless of attempts.,P07,
+PR033,PocketPal,nemesisx47,64,Responsive local LLM app with no hidden payment praised.,P01,
+PR034,PocketPal,Raivis Alksnins,64,Previously worked; model now crashes on Z Fold4.,"P07, P18",
+PR035,PocketPal,Usmani Usmani,"65, 66",Repeated near-end download failures waste costly slow internet.,P05,
+PR036,PocketPal,Rajdeep Barma,65,Models smooth and capable; requests proper LaTeX rendering.,"P02, P17",
+PR037,PocketPal,Yordan Tuzsuzov,65,Only name visible.,,No review body visible; cannot infer sentiment or issue.
+PR038,PocketPal,Raymond Tracer,"66, 67",Generation stops/model unloads on switching apps.,P12,
+PR039,PocketPal,Rishi Singh,66,Praises app and argues oversized models can overwhelm phones.,"P02, P08",Reviewer explanation is not proof of other reviewers causes.
+PR040,PocketPal,fredi1356,"67, 68",Reports AI stops when all networking including SIM is disabled.,P16,Beginning partly clipped; no proof of cloud processing.
+PR041,PocketPal,Mohamed Emad,67,Supertonic voice inconsistent and reportedly needs initial internet each time.,"P03, P16",
+PR042,PocketPal,Mike Dean,"68, 69, 80, 81, 83",Downloads interrupted on exit; model loads incorrectly.,"P05, P12",
+PR043,PocketPal,kaestruu kaestru,"68, 80, 81","Small model slow, inaccurate and crashes on Poco X7 Pro.","P08, P09, P14",
+PR044,PocketPal,Toyin Blessed,69,Voice/keyboard combo useful; suggests settings tuning and picture input.,"P03, P17",
+PR045,PocketPal,James MC Lee,"69, 83",Recommended model and benchmark button crash.,"P04, P07, P08",
+PR046,PocketPal,Dawid Chmielewski,"70, 71",Cannot download a model.,P05,
+PR047,PocketPal,Jake,"70, 71",Local model loading praised.,P01,
+PR048,PocketPal,Bronze James,"70, 71",Fast Hugging Face downloads praised.,P02,
+PR049,PocketPal,Justin Becker,70,Crashes loading any model.,P07,
+PR050,PocketPal,"Name cropped, continuation on p72",72,Dissatisfied with factual/current-events answers.,P14,Incomplete body; neither factual claims nor identity verified.
+PR051,PocketPal,Brennon,72,Downloaded model never loads.,P07,
+PR052,PocketPal,Mazhar Ali,72,Slow response and poor answers.,"P09, P14",
+PR053,PocketPal,Vaidik bhoi,72,Downloaded models do not load.,P07,
+PR054,PocketPal,Jason Whitney,"73, 74",Only a few paragraphs then off-topic/inappropriate output.,"P11, P14","Cause may be model, template or runtime; not established."
+PR055,PocketPal,Denis Plenert,73,Good but not all models work.,"P02, P08",
+PR056,PocketPal,Seth Allen,73,Downloaded models fail and are slow.,"P07, P09",
+PR057,PocketPal,W Anderson,"74, 75",Gemma 4 e2b fails on Pixel 9 Pro.,"P08, P18",Developer says support added in 1.13.3; no follow-up confirming fix.
+PR058,PocketPal,Soumyadeep Ghosh,"75, 77",CPU-only on Realme X2 Pro despite expected acceleration.,P10,
+PR059,PocketPal,Blake Houghton,76,Garbled outputs and repeated single Kanji.,P13,
+PR060,PocketPal,Kamil Pawelczyk,76,Repeated download attempts followed by gibberish.,"P05, P13",
+PR061,PocketPal,Kurikutsu Nanami,"76, 77",GPU/NPU unrecognized; slow CPU-only lightweight model.,"P09, P10",
+PR062,PocketPal,Quincy Beezel,77,Requests lighter/faster model; smallest chosen model crashes.,"P07, P08, P09",
+PR063,PocketPal,Hi Hay (name partly visible),77,Downloads repeatedly fail and take too long.,P05,
+PR064,PocketPal,MONISHA KAWART,"78, 82","Slow, generic/off-topic, repetitive replies and unwanted personality.","P13, P14",
+PR065,PocketPal,Mia,78,Hours spent downloading; advertised and observed model size differ.,"P05, P06",
+PR066,PocketPal,A B,79,Many small models fail while a very large quantized model runs slowly.,"P08, P09",
+PR067,PocketPal,Eduardo Farkas,79,MediaTek/Mali backend unsupported; very slow Hello prompt.,"P09, P10",
+PR068,PocketPal,Scott Egerton,"79, 82",Useful complex letter comparable to online AI.,P02,
+PR069,PocketPal,dnel,"80, 81",Design good but models load forever.,P09,
+PR070,PocketPal,Vikash Kumar,82,Qwen model heavily lags Redmi Note 5 Pro and affects display.,"P08, P09",Exact quantization OCR uncertain; not used as a verified specification.
+PR071,PocketPal,Kosis Ray,"83, 84",Large model download fails at end wasting time/data.,P05,
+PR072,PocketPal,KIM,"84, 86",Setup instructions missing and replies stream extremely slowly.,"P09, P15",
+PR073,PocketPal,Sparky Keffer,84,Keyboard crashes and system lag.,P09,

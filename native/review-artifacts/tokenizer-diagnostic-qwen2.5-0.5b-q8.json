@@ -1,0 +1,122 @@
+{
+  "tokenizerBytes": 2648390,
+  "vocabSize": 151665,
+  "modelType": "BPE",
+  "byteFallback": false,
+  "pieceTypes": {
+    "NORMAL": 151643,
+    "UNKNOWN": 1,
+    "USER_DEFINED": 21
+  },
+  "piecesWithNulChar": 1,
+  "piecesWithReplacementCharU+FFFD": 121,
+  "piecesStillInGpt2ByteFormInvalidUtf8": 2439,
+  "piecesWithGpt2SpaceMarkerU+0120": 191,
+  "piecesWithRealDevanagari": 71,
+  "piecesWithRealTelugu": 14,
+  "exampleByteFormPieces": [
+    "À",
+    "Á",
+    "Â",
+    "Ã",
+    "Ä",
+    "Å"
+  ],
+  "exampleReplacementPieces": [
+    "�",
+    " �",
+    "о�",
+    "��",
+    "а�",
+    "е�"
+  ],
+  "samples": {
+    "english": {
+      "tokens": 9,
+      "unkTokens": 0,
+      "roundTripExact": true,
+      "decoded": "Can we meet tomorrow at 10?",
+      "decodedHasByteArtifacts": false,
+      "pieces": [
+        "Can",
+        " we",
+        " meet",
+        " tomorrow",
+        " at",
+        " ",
+        "1",
+        "0",
+        "?"
+      ]
+    },
+    "price": {
+      "tokens": 11,
+      "unkTokens": 0,
+      "roundTripExact": true,
+      "decoded": "The quoted total is ₹500 including delivery.",
+      "decodedHasByteArtifacts": false,
+      "pieces": [
+        "The",
+        " quoted",
+        " total",
+        " is",
+        " ₹",
+        "5",
+        "0",
+        "0",
+        " including",
+        " delivery",
+        "."
+      ]
+    },
+    "hindi": {
+      "tokens": 16,
+      "unkTokens": 1,
+      "roundTripExact": false,
+      "decoded": "कल बात कर सकते ह ⁇ ं?",
+      "decodedHasByteArtifacts": false,
+      "pieces": [
+        "क",
+        "ल",
+        " ",
+        "ब",
+        "ा",
+        "त",
+        " क",
+        "र",
+        " स",
+        "क",
+        "त",
+        "े",
+        " ह",
+        "<|endoftext|>",
+        "ं",
+        "?"
+      ]
+    },
+    "telugu": {
+      "tokens": 11,
+      "unkTokens": 4,
+      "roundTripExact": false,
+      "decoded": "ర ⁇   ⁇ ల ⁇ డగల ⁇ ?",
+      "decodedHasByteArtifacts": false,
+      "pieces": [
+        "ర",
+        "<|endoftext|>",
+        " ",
+        "<|endoftext|>",
+        "ల",
+        "<|endoftext|>",
+        "డ",
+        "గ",
+        "ల",
+        "<|endoftext|>",
+        "?"
+      ]
+    }
+  },
+  "unknownPiece": [
+    "<|file_sep|>",
+    "<|endoftext|>"
+  ]
+}

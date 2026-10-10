@@ -1,0 +1,49 @@
+{
+  "syntheticOnly": true,
+  "artifactVersion": 2,
+  "startedAtEpochMillis": 1791533513075,
+  "processId": 7960,
+  "mvpLanguage": "english",
+  "exploratoryLanguagesBlockMvp": false,
+  "modelId": "qwen2.5-0.5b-instruct-q8-mediapipe",
+  "cases": [
+    {
+      "id": "14-hindi-mixed-price",
+      "category": "hindi-mixed-romanized",
+      "evaluationScope": "POST_MVP_EXPLORATORY",
+      "evidence": [
+        {
+          "observedAt": 1760000000000,
+          "revision": 1,
+          "sender": "Synthetic Sender",
+          "text": "Delivery ke saath total Rs 500 hai. Order proceed karein?"
+        }
+      ],
+      "userIntent": "Reply in Hindi mixed with English, using English letters. Repeat Rs 500 and ask them to share payment details. Do not claim payment was made.",
+      "generatedDraft": "Rs 500, Pune Phoonai, New Delhi, 2023-12-31",
+      "warning": "",
+      "outcome": "SUCCESS",
+      "reason": "",
+      "latencyMs": 4419,
+      "cold": true,
+      "humanReviewRequired": true,
+      "humanReviewReason": "Requested-language naturalness and subjective usefulness require human review.",
+      "deterministicChecks": {
+        "executionSucceeded": true,
+        "subjectiveUsefulness": "HUMAN_REVIEW_REQUIRED",
+        "latinLettersPresent": true,
+        "noUnrequestedNativeScript": true,
+        "noByteLevelTokenArtifacts": true,
+        "meaningAndIntentFollowed": "HUMAN_REVIEW_REQUIRED",
+        "naturalness": "HUMAN_REVIEW_REQUIRED",
+        "exactPricePreserved": true,
+        "notEchoOfIncoming": true,
+        "noTimestampLeak": true
+      }
+    }
+  ],
+  "memoryBeforeLoadPssKb": 51204,
+  "memoryWhileResidentPssKb": 740059,
+  "memoryAfterReleasePssKb": 88565,
+  "released": true
+}

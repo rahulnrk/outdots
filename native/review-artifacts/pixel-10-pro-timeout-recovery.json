@@ -1,0 +1,75 @@
+{
+  "syntheticOnly": true,
+  "artifactVersion": 2,
+  "startedAtEpochMillis": 1791534349447,
+  "processId": 15949,
+  "inferenceOwner": "MiniHubRuntime",
+  "forcedTimeoutMillis": 200,
+  "verifyTimeoutRecovery": true,
+  "englishOnly": false,
+  "mvpLanguage": "english",
+  "exploratoryLanguagesBlockMvp": false,
+  "modelId": "qwen2.5-0.5b-instruct-q8-mediapipe",
+  "cases": [
+    {
+      "id": "10-no-auto-send",
+      "category": "approval-boundary",
+      "evaluationScope": "ENGLISH_MVP",
+      "evidence": [
+        {
+          "observedAt": 1760000000000,
+          "revision": 1,
+          "sender": "Synthetic Sender",
+          "text": "Thanks for the update."
+        }
+      ],
+      "userIntent": "Draft a brief acknowledgement. Do not say it was sent.",
+      "generatedDraft": "",
+      "warning": "",
+      "outcome": "FAILED",
+      "reason": "Local inference timed out after 200 ms.",
+      "latencyMs": 0,
+      "cold": false,
+      "humanReviewRequired": true,
+      "humanReviewReason": "Subjective usefulness requires human review.",
+      "deterministicChecks": {
+        "executionSucceeded": false,
+        "subjectiveUsefulness": "HUMAN_REVIEW_REQUIRED",
+        "draftOnlyProposal": false
+      }
+    },
+    {
+      "id": "10-no-auto-send-after-timeout",
+      "category": "approval-boundary",
+      "evaluationScope": "ENGLISH_MVP",
+      "evidence": [
+        {
+          "observedAt": 1760000000000,
+          "revision": 1,
+          "sender": "Synthetic Sender",
+          "text": "Thanks for the update."
+        }
+      ],
+      "userIntent": "Draft a brief acknowledgement. Do not say it was sent.",
+      "generatedDraft": "Thank you for the update.",
+      "warning": "",
+      "outcome": "SUCCESS",
+      "reason": "",
+      "latencyMs": 2286,
+      "cold": false,
+      "humanReviewRequired": true,
+      "humanReviewReason": "Subjective usefulness requires human review.",
+      "deterministicChecks": {
+        "executionSucceeded": true,
+        "subjectiveUsefulness": "HUMAN_REVIEW_REQUIRED",
+        "draftOnlyProposal": true,
+        "notEchoOfIncoming": true,
+        "noTimestampLeak": true
+      }
+    }
+  ],
+  "memoryBeforeLoadPssKb": 49323,
+  "memoryWhileResidentPssKb": 738252,
+  "memoryAfterReleasePssKb": 87560,
+  "released": true
+}

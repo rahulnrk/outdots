@@ -66,12 +66,12 @@ object MiniHubRuntime {
         private set
     lateinit var httpTransport: app.mini.hub.connector.ProviderHttpTransport
         private set
-    lateinit var connectorGateway: app.mini.hub.connector.ConnectorProviderGateway
+    /** Every API route: connect, refresh, sync, conversation reads, gated sending. */
+    lateinit var connectors: app.mini.hub.android.connector.AndroidConnectorRegistry
         private set
-    lateinit var gmailOAuth: app.mini.hub.android.connector.GmailOAuthClient
-        private set
-    lateinit var outlookOAuth: app.mini.hub.android.connector.OutlookOAuthClient
-        private set
+    val connectorGateway: app.mini.hub.connector.ConnectorProviderGateway get() = connectors.gateway
+    val gmailOAuth: app.mini.hub.android.connector.GmailOAuthClient get() = connectors.gmailOAuth
+    val outlookOAuth: app.mini.hub.android.connector.OutlookOAuthClient get() = connectors.outlookOAuth
 
     private val backgroundExecutor = Executors.newSingleThreadExecutor()
 
@@ -137,23 +137,10 @@ object MiniHubRuntime {
             )
             localDraftExperiment = LocalDraftExperiment(context.applicationContext)
             httpTransport = app.mini.hub.android.connector.AndroidProviderHttpTransport()
-            gmailOAuth = app.mini.hub.android.connector.GmailOAuthClient(context.applicationContext)
-            outlookOAuth = app.mini.hub.android.connector.OutlookOAuthClient(context.applicationContext)
-            val androidAccounts = app.mini.hub.android.connector.AndroidConnectedAccountStore(context.applicationContext)
-            val androidTokens = app.mini.hub.android.connector.AndroidKeystoreAccessTokenStore(context.applicationContext)
-            connectorGateway = app.mini.hub.connector.ConnectorProviderGateway(
-                accounts = androidAccounts,
-                tokens = androidTokens,
-                senders = listOf(
-                    app.mini.hub.connector.GmailSender(),
-                    app.mini.hub.connector.OutlookSender(),
-                ),
-                gates = app.mini.hub.connector.GateEvidenceSource { account ->
-                    // Standard live send gate evidence for verified API connections
-                    listOf(app.mini.hub.connector.GateEvidence(app.mini.hub.connector.ReleaseGate.SendQualification, "User-initiated reviewed send"))
-                },
-                transport = httpTransport,
-                nowMillis = { System.currentTimeMillis() },
+            // Gates are cleared only by real configuration and owner-recorded evidence (GatePolicy),
+            // never by defaults, so an unconfigured or unqualified route stays visibly blocked.
+            connectors = app.mini.hub.android.connector.AndroidConnectorRegistry(
+                context.applicationContext, observationStore, digest, httpTransport,
             )
 
             val app = context.applicationContext as Application

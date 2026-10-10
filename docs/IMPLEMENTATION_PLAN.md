@@ -25,6 +25,11 @@ The better approach is to build the product around a small, tested shared domain
 
 ## MVP acceptance checklist
 
+English is the initial supported drafting language. Test romanized Hindi and
+Telugu now as exploratory coverage for later builds; their quality does not gate
+the English MVP. Native-script support also follows MVP. See
+[MVP language scope](MVP_LANGUAGE_SCOPE.md) for evaluation and scoring rules.
+
 - Gmail and WhatsApp notification records appear together but show different coverage.
 - Inferred and user-set priority are both visible and user override wins.
 - Draft generation refuses to invent the user's commercial decision.

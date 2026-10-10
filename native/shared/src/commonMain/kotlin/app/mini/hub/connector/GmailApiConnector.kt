@@ -109,8 +109,9 @@ class GmailApiConnector(
                 pages++
             } while (pageToken != null && pages < MAX_HISTORY_PAGES && added.size < maxMessages)
         } catch (e: ConnectorHttpException) {
-            // history.list returns 404 when startHistoryId is too old or otherwise invalid.
-            if (e.kind != ProviderErrorKind.NotFound && e.kind != ProviderErrorKind.CursorInvalid) throw e
+            // history.list returns 404 when startHistoryId is too old, or 400 (invalidArgument)
+            // if it is totally invalid (e.g. an old pageToken string instead of a uint64 historyId).
+            if (e.kind != ProviderErrorKind.NotFound && e.kind != ProviderErrorKind.CursorInvalid && e.reason != "invalidArgument") throw e
             return snapshot(account, api, transport, accessToken, maxMessages, isKnown, gap = true)
         }
         // If more history remains than this bounded pass may fetch, do not advance past it.

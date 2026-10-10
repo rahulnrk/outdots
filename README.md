@@ -2,6 +2,11 @@
 
 This repository turns the supplied architecture document into a buildable product foundation.
 
+The MVP targets English drafting. Hindi and Telugu written in English letters,
+including mixed English messages, are tested now as exploratory cases for later
+builds. Native-script Hindi/Telugu support is also post-MVP. See
+[MVP language scope](docs/MVP_LANGUAGE_SCOPE.md).
+
 ## What is built now
 
 The current implementation is an end-to-end local-first MVP slice that proves the core product mechanics before native Android/iOS work:

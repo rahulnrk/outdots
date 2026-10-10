@@ -35,11 +35,11 @@ Date: **10 October 2026**. Repository baseline: commit `625be4e` + Android Gmail
 ## 2. Test Verification Summary
 
 - **Shared JVM Suite (`:shared:jvmTest`):** 108 passed tests covering JSON parsing, catalog capability resolution, Gmail incremental history resync, Outlook delta query tracking, Slack/Telegram chat sync & send, sync engine atomic commits, and gated gateway dispatch.
-- **Android Unit Tests (`:androidApp:testDebugUnitTest`):** All 40 passed.
+- **Android Unit Tests (`:androidApp:testDebugUnitTest`):** All 34 passed (robolectric attempt reverted).
 - **Android App Compilation:** `:androidApp:assembleDebug` built with 0 errors.
 - **Device Installation & Live Background Sync:**
-  - Build installed on connected Pixel 10 Pro (`56270DLCH000KZ`).
-  - Live logcat verification at 14:34:36 IST: Account B (`gmail-de284ee8-1d73-4c3d-be10-cd1d3b931fdb`) automatically refreshed its access token (`refreshed=true`), synced 50 messages, and remained `Healthy`. Account A synced 50 messages and remained `Healthy`. Zero message duplication observed.
+  - Build installed on connected Pixel 10 Pro (`56270DLCH000KZ`), preserving previously stored data.
+  - Live logcat verification at 16:08 IST: The missing Google client ID was supplied via `local.properties`. Account A (`gmail-13a6451f-2cfa-45d8-bbc7-bb4b2404bb0d`) cleanly recovered from 400 invalidArgument by dropping an invalid history cursor and catching up the page token (`fetched=50 inserted=0 refreshed=false`). Account B synced 0 new and remained `Healthy`. Zero message duplication observed.
 
 ---
 
@@ -50,5 +50,12 @@ Date: **10 October 2026**. Repository baseline: commit `625be4e` + Android Gmail
 - **Outlook:** Supports personal Microsoft accounts (`@outlook.com`, `@hotmail.com`, `@live.com`) and Microsoft 365 work/school accounts.
 
 ### 3.2 Prerequisites for Live Credentials & External Verification
-1. **Google Cloud OAuth Client:** Build with `-Pmini.googleOAuthClientId=<your Android client ID>`. Request `gmail.readonly` for reads and `gmail.send` for reviewed API sending.
-2. **Microsoft Entra App Registration:** Build with `-Pmini.outlookOAuthClientId=<your Entra App Client ID>`. Register `app.mini.hub://oauth2redirect/outlook` as a public client redirect URI with `Mail.Read`, `Mail.Send`, `offline_access`, `openid`, `profile`, `User.Read` delegated permissions. Work/school tenants may require administrator consent depending on organizational policy.
+Live send, API reading, and Outlook sign-in are disabled until real credentials are provided. MINI's UI visibly gates these routes.
+1. **Google Cloud OAuth Client:** Supply the Android client ID in `native/local.properties` (`mini.googleOAuthClientId`).
+2. **Microsoft Entra App Registration:** Supply `mini.outlookOAuthClientId` with the Entra App Client ID. Register `app.mini.hub://oauth2redirect/outlook` and `app.mini.hub://oauth2redirect/teams` as public client redirect URIs. Grant `Mail.Read`, `Mail.Send`, `Chat.Read`, `ChatMessage.Send`, `offline_access`, `openid`, `profile`, `User.Read` delegated permissions. Work/school tenants may require administrator consent depending on organizational policy.
+3. **Slack App:** Supply `mini.slackClientId`. App must be a public client, enable PKCE, configure redirect `app.mini.hub://oauth2redirect/slack`, and list the user scopes (not bot scopes).
+4. **X App:** Supply `mini.xClientId`. App must be an OAuth 2.0 Native App with DM read/write and `offline.access`. Paid tier required.
+5. **Google Chat API:** Requires the Workspace cloud project to enable the Google Chat API and configure a Chat app. Uses the same Google OAuth client ID.
+6. **Telegram Bot:** Paste a BotFather token directly into the MINI Accounts dialog.
+
+**Review Check:** The `GmailAndOutlookWorkflowTest` fixture passed, but no live API send or live Outlook/Teams/Slack/X/Telegram API call has ever occurred on this device. Live accounts and evidence must be provided manually to clear the qualification release gates in `ConnectorCatalog`.

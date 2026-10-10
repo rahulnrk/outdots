@@ -6,14 +6,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
-import app.mini.hub.android.connector.GmailOAuthClient
-import app.mini.hub.android.connector.GmailOAuthOutcome
 import app.mini.hub.android.connector.AndroidConnectedAccountStore
 import app.mini.hub.android.connector.AndroidKeystoreAccessTokenStore
+import app.mini.hub.android.connector.ConnectOutcome
+import app.mini.hub.android.connector.GmailSyncJobService
 import app.mini.hub.android.notification.MiniNotificationListenerService
 import app.mini.hub.android.ui.AndroidNativeHandoffLauncher
 import app.mini.hub.android.ui.InboxScreen
 import app.mini.hub.android.ui.InboxViewModel
+import app.mini.hub.domain.Provider
 
 /**
  * Main Android host Activity rendering the private communication hub.
@@ -22,15 +23,8 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var viewModel: InboxViewModel
     private lateinit var handoffLauncher: AndroidNativeHandoffLauncher
-    private lateinit var gmailOAuth: GmailOAuthClient
-    private lateinit var outlookOAuth: app.mini.hub.android.connector.OutlookOAuthClient
     private val connectionStatus = mutableStateOf<String?>(null)
     private val accountsVersion = mutableStateOf(0)
-
-    private fun sha256() = app.mini.hub.action.DigestProvider { payload ->
-        java.security.MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,9 +32,9 @@ class MainActivity : ComponentActivity() {
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
 
         MiniHubRuntime.init(applicationContext)
-        app.mini.hub.android.connector.GmailSyncJobService.schedulePeriodic(applicationContext)
-        gmailOAuth = MiniHubRuntime.gmailOAuth
-        outlookOAuth = MiniHubRuntime.outlookOAuth
+        // One background job syncs every connected account (Gmail and the other API routes).
+        GmailSyncJobService.schedulePeriodic(applicationContext)
+        val registry = MiniHubRuntime.connectors
         handleOAuthIntent(intent)
 
         val accountStore = AndroidConnectedAccountStore(applicationContext)
@@ -55,7 +49,11 @@ class MainActivity : ComponentActivity() {
             localDraftExperiment = MiniHubRuntime.localDraftExperiment,
             selectedSources = { MiniHubRuntime.communicationSourcePreferences.selectedSources() },
             accountStore = accountStore,
-            gateway = MiniHubRuntime.connectorGateway,
+            gateway = registry.gateway,
+            apiReplyAllowed = registry::canReplyViaApi,
+            conversationLoader = { summary ->
+                accountStore.get(summary.accountId)?.let { registry.loadConversation(it, summary.conversationId) }
+            },
         )
 
         handoffLauncher = AndroidNativeHandoffLauncher(this)
@@ -70,25 +68,11 @@ class MainActivity : ComponentActivity() {
                     },
                     sourcePreferences = MiniHubRuntime.communicationSourcePreferences,
                     accountStore = accountStore,
-                    gmailCanConnect = gmailOAuth.isConfigured,
-                    gmailSetupStatus = gmailOAuth.setupStatus,
-                    outlookCanConnect = outlookOAuth.isConfigured,
-                    outlookSetupStatus = outlookOAuth.setupStatus,
+                    routes = registry.routes(),
+                    capabilities = registry::capabilities,
                     connectionStatus = connectionStatus.value,
-                    onConnectGmail = {
-                        connectionStatus.value = when (val outcome = gmailOAuth.launch(this)) {
-                            is GmailOAuthOutcome.Started -> "Google authorization opened in browser. Return to finish connection."
-                            is GmailOAuthOutcome.Blocked -> outcome.reason
-                            is GmailOAuthOutcome.Connected -> "Gmail account connected: ${outcome.account.displayName ?: outcome.account.providerAccountId}"
-                        }
-                    },
-                    onConnectOutlook = {
-                        connectionStatus.value = when (val outcome = outlookOAuth.launch(this)) {
-                            is app.mini.hub.android.connector.OutlookOAuthOutcome.Started -> "Microsoft sign-in opened in browser. Choose your personal or work account to finish."
-                            is app.mini.hub.android.connector.OutlookOAuthOutcome.Blocked -> outcome.reason
-                            is app.mini.hub.android.connector.OutlookOAuthOutcome.Connected -> "Outlook account connected: ${outcome.account.displayName ?: outcome.account.providerAccountId}"
-                        }
-                    },
+                    onConnect = { provider -> connect(provider) },
+                    onConnectTelegram = { token -> connectTelegram(token) },
                     onDisconnectAccount = { account ->
                         val manager = app.mini.hub.connector.AccountConnectionManager(
                             accountStore, AndroidKeystoreAccessTokenStore(applicationContext), app.mini.hub.domain.IdGenerator { "unused-$it" },
@@ -98,56 +82,67 @@ class MainActivity : ComponentActivity() {
                         connectionStatus.value = "Disconnected ${account.displayName ?: account.id.provider.wire}. Messages stay in MINI. Reconnect to resume."
                         accountsVersion.value++
                     },
-                    onSyncNow = {
-                        connectionStatus.value = "Syncing connected accounts..."
-                        Thread({
-                            val gmailReports = app.mini.hub.android.connector.GmailSyncJobService.runSync(applicationContext, "manual")
-                            val outlookConnector = app.mini.hub.android.connector.AndroidOutlookConnector(
-                                applicationContext, MiniHubRuntime.observationStore, sha256(),
-                            )
-                            val outlookReports = outlookConnector.syncAllConnected(System.currentTimeMillis(), "manual")
-                            val added = gmailReports.sumOf { it.inserted } + outlookReports.sumOf { it.inserted }
-                            val attention = gmailReports.count { it.state != app.mini.hub.connector.ConnectionState.Healthy && it.skippedReason != "disconnected" } +
-                                outlookReports.count { it.state != app.mini.hub.connector.ConnectionState.Healthy && it.skippedReason != "disconnected" }
-                            runOnUiThread {
-                                connectionStatus.value = buildString {
-                                    append("Sync finished: $added new message(s).")
-                                    if (attention > 0) append(" $attention account(s) need attention.")
-                                }
-                                accountsVersion.value++
-                                viewModel.refresh(
-                                    isPermissionGranted = MiniNotificationListenerService.isPermissionGranted(this),
-                                    isListenerConnected = MiniNotificationListenerService.isConnected,
-                                )
-                            }
-                        }, "mini-manual-sync").start()
-                    },
+                    onSyncNow = { syncNow() },
                     accountsVersion = accountsVersion.value,
-                    onSourceSelectionChanged = {
-                        viewModel.refresh(
-                            isPermissionGranted = MiniNotificationListenerService.isPermissionGranted(this),
-                            isListenerConnected = MiniNotificationListenerService.isConnected,
-                        )
-                    },
+                    onSourceSelectionChanged = { refreshInbox() },
                 )
             }
         }
+    }
+
+    private fun connect(provider: Provider) {
+        connectionStatus.value = when (val outcome = MiniHubRuntime.connectors.launch(provider, this)) {
+            is ConnectOutcome.Started -> "Sign-in opened in your browser. Return to MINI to finish."
+            is ConnectOutcome.Blocked -> outcome.reason
+            is ConnectOutcome.Connected -> "Connected ${outcome.account.displayName ?: outcome.account.providerAccountId}."
+        }
+    }
+
+    private fun connectTelegram(token: String) {
+        connectionStatus.value = "Checking the bot token with Telegram..."
+        Thread({
+            val message = when (val outcome = MiniHubRuntime.connectors.connectTelegram(token)) {
+                is ConnectOutcome.Connected -> "Telegram bot connected: ${outcome.account.displayName ?: outcome.account.providerAccountId}. Only chats the bot is in are visible."
+                is ConnectOutcome.Blocked -> outcome.reason
+                is ConnectOutcome.Started -> "Telegram connection in progress."
+            }
+            runOnUiThread {
+                connectionStatus.value = message
+                accountsVersion.value++
+            }
+        }, "mini-telegram-connect").start()
+    }
+
+    private fun syncNow() {
+        connectionStatus.value = "Syncing connected accounts..."
+        Thread({
+            val summary = GmailSyncJobService.runAll(applicationContext, "manual")
+            runOnUiThread {
+                connectionStatus.value = buildString {
+                    append("Sync finished: ${summary.inserted} new, ${summary.updated} updated across ${summary.accounts} account(s).")
+                    if (summary.needsAttention > 0) append(" ${summary.needsAttention} account(s) need attention.")
+                }
+                accountsVersion.value++
+                refreshInbox()
+            }
+        }, "mini-manual-sync").start()
+    }
+
+    private fun refreshInbox() {
+        viewModel.refresh(
+            isPermissionGranted = MiniNotificationListenerService.isPermissionGranted(this),
+            isListenerConnected = MiniNotificationListenerService.isConnected,
+        )
     }
 
     override fun onResume() {
         super.onResume()
         if (::viewModel.isInitialized) {
             MiniNotificationListenerService.rebindIfNeeded(this)
-            val isGranted = MiniNotificationListenerService.isPermissionGranted(this)
-            val isConnected = MiniNotificationListenerService.isConnected
-            viewModel.refresh(isPermissionGranted = isGranted, isListenerConnected = isConnected)
+            refreshInbox()
 
             // Register reactive UI listener so background ingest updates UI immediately
-            MiniHubRuntime.ingestCoordinator.setUiListener {
-                val updatedGranted = MiniNotificationListenerService.isPermissionGranted(this)
-                val updatedConnected = MiniNotificationListenerService.isConnected
-                viewModel.refresh(isPermissionGranted = updatedGranted, isListenerConnected = updatedConnected)
-            }
+            MiniHubRuntime.ingestCoordinator.setUiListener { refreshInbox() }
         }
     }
 
@@ -159,26 +154,17 @@ class MainActivity : ComponentActivity() {
 
     private fun handleOAuthIntent(intent: android.content.Intent?) {
         val uri = intent?.data ?: return
-        val isGmail = gmailOAuth.acceptsRedirect(uri)
-        val isOutlook = outlookOAuth.acceptsRedirect(uri)
-        android.util.Log.i("MiniOAuth", "Intent received: scheme=${uri.scheme} path=${uri.path} isGmail=$isGmail isOutlook=$isOutlook")
-        if (!isGmail && !isOutlook) return
+        val registry = MiniHubRuntime.connectors
+        val handled = registry.handlesRedirect(uri)
+        android.util.Log.i("MiniOAuth", "Intent received: scheme=${uri.scheme} path=${uri.path} handled=$handled")
+        if (!handled) return
         intent.data = null
-        val providerName = if (isGmail) "Gmail" else "Outlook"
-        connectionStatus.value = "Finishing $providerName connection..."
+        connectionStatus.value = "Finishing connection..."
         Thread({
-            val message = if (isGmail) {
-                when (val outcome = gmailOAuth.handleRedirect(uri)) {
-                    is GmailOAuthOutcome.Connected -> "Gmail account connected: ${outcome.account.displayName ?: outcome.account.providerAccountId}"
-                    is GmailOAuthOutcome.Blocked -> outcome.reason
-                    is GmailOAuthOutcome.Started -> "Google authorization is in progress."
-                }
-            } else {
-                when (val outcome = outlookOAuth.handleRedirect(uri)) {
-                    is app.mini.hub.android.connector.OutlookOAuthOutcome.Connected -> "Outlook account connected: ${outcome.account.displayName ?: outcome.account.providerAccountId}"
-                    is app.mini.hub.android.connector.OutlookOAuthOutcome.Blocked -> outcome.reason
-                    is app.mini.hub.android.connector.OutlookOAuthOutcome.Started -> "Microsoft sign-in is in progress."
-                }
+            val message = when (val outcome = registry.completeRedirect(uri)) {
+                is ConnectOutcome.Connected -> "Connected ${outcome.account.displayName ?: outcome.account.providerAccountId} (${outcome.account.id.provider.wire})."
+                is ConnectOutcome.Blocked -> outcome.reason
+                is ConnectOutcome.Started -> "Sign-in is in progress."
             }
             runOnUiThread {
                 connectionStatus.value = message

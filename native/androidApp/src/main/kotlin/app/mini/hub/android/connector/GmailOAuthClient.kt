@@ -48,13 +48,15 @@ class GmailOAuthClient(context: Context) {
                 authorizationEndpoint = "https://accounts.google.com/o/oauth2/v2/auth",
                 tokenEndpoint = "https://oauth2.googleapis.com/token",
                 redirectUri = redirectUriFor(it),
-                scopes = setOf("https://www.googleapis.com/auth/gmail.readonly"),
+                // Google shows granular consent: the user may untick send. Only granted scopes are stored,
+                // so an untick keeps MINI read-only for that account.
+                scopes = setOf(GmailApiConnector.SCOPE_READONLY, GmailApiConnector.SCOPE_SEND),
             )
         }
 
     val isConfigured: Boolean get() = configuration != null
     val setupStatus: String get() = if (isConfigured) {
-        "Gmail uses official read-only OAuth and stores tokens in Android Keystore. Reply/send is not connected yet."
+        "Gmail uses official OAuth; tokens stay in Android Keystore. Sending is offered only if you grant it and stays locked until reviewed-send qualification is recorded."
     } else {
         "Google connection setup incomplete: build with -Pmini.googleOAuthClientId=<real Android client ID ending in .apps.googleusercontent.com>. Never add a client secret to Android."
     }
@@ -98,7 +100,7 @@ class GmailOAuthClient(context: Context) {
             return GmailOAuthOutcome.Blocked("Gmail authorization response did not match the pending request.")
         }
         return try {
-            val token = exchangeCode(config, code, verifier, nowMillis)
+            val (token, granted) = exchangeCode(config, code, verifier, nowMillis)
             val identity = connector.discoverAccount(token, transport)
             val existing = accounts.list().firstOrNull {
                 it.id.provider == Provider.GMAIL && it.providerAccountId == identity.providerAccountId
@@ -113,6 +115,7 @@ class GmailOAuthClient(context: Context) {
             )).copy(
                 displayName = identity.displayName,
                 state = ConnectionState.Authorized,
+                grantedScopes = granted,
                 userActionRequired = null,
             )
             tokens.put(account.id, token)
@@ -131,7 +134,7 @@ class GmailOAuthClient(context: Context) {
         code: String,
         verifier: String,
         nowMillis: Long,
-    ): StoredAccessToken {
+    ): Pair<StoredAccessToken, Set<String>> {
         val body = formEncode(
             mapOf(
                 "code" to code,
@@ -159,11 +162,13 @@ class GmailOAuthClient(context: Context) {
             }
             val access = jsonString(response, "access_token") ?: error("Google response omitted access_token")
             val expires = jsonString(response, "expires_in")?.toLongOrNull()
+            val granted = jsonString(response, "scope").orEmpty().split(' ').filter { it.isNotBlank() }.toSet()
+                .ifEmpty { setOf(GmailApiConnector.SCOPE_READONLY) }
             StoredAccessToken(
                 value = access,
                 expiresAtMillis = expires?.let { nowMillis + it * 1000L },
                 refreshToken = jsonString(response, "refresh_token"),
-            )
+            ) to granted
         } finally {
             connection.disconnect()
         }

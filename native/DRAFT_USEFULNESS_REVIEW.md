@@ -166,7 +166,7 @@ After the window fix, a draft began with `1791529918963 total is ?100.`. The pro
 
 `EVAL_END released=true`. Deterministic checks: latest corrected fact, exact price (04 and 11), no invented deadline, no unsupported promise, missing-context warning, draft-only proposal, and no timestamp leak all pass. Remaining deterministic failures: 05 echoes the incoming message, and 07 Telugu contains byte-level token artifacts. Hindi no longer shows byte artifacts, but its output (`छें।`) is meaningless.
 
-The prompt format change shifted outputs. 03, 08 and 11 got better. 01 ("available at any time in the USA"), 04 ("How many more cents…") and 09 (invents a reason for the omission) got worse. Overall usefulness is still roughly 4 to 5 of 10 generated drafts. This is a model-capacity limit of Qwen2.5-0.5B at Q8, not a pipeline defect. The artifact in `review-artifacts/` is this final run.
+The prompt format change shifted outputs. 03, 08 and 11 got better. 01 ("available at any time in the USA"), 04 ("How many more cents…") and 09 (invents a reason for the omission) got worse. Overall usefulness is still roughly 4 to 5 of 10 generated drafts. This demonstrates inadequate quality for this model/runtime/prompt combination; it does not isolate model capacity as the sole cause. A controlled comparison is required before making that attribution. The artifact in `review-artifacts/` is this final run.
 
 ### Final UI pass (HEAD build)
 
@@ -175,3 +175,185 @@ The prompt format change shifted outputs. 03, 08 and 11 got better. 01 ("availab
 - Cancel at 0.8 s: "Local draft cancelled.", stable for 6 s. Draft field empty. Review button `enabled=false`.
 
 Test-procedure note: during one UI run a fixed-coordinate tap opened a real (non-synthetic) inbox conversation, because a new real notification had moved the synthetic row down. A local draft was generated on device for it (output "17"). Nothing was approved, sent, or stored in an artifact, and its content was not recorded. That run is excluded from the results above. Later runs located the synthetic row by text before tapping.
+
+## English MVP and romanized-language exploration (2026-10-09)
+
+The product owner confirmed English as the initial MVP drafting language.
+Romanized Hindi/Telugu and English mixed into those languages must be tested now
+for later builds. Native-script support also follows MVP. Their exploratory
+results must not be pooled into the English MVP usability score. See
+`../docs/MVP_LANGUAGE_SCOPE.md` for the durable scope decision.
+
+Six synthetic cases were added: conversational Hindi/Telugu, mixed-language
+Rs 500/payment-detail requests, and informal spelling with corrected meeting
+days. Artifact version 2 explicitly separates `ENGLISH_MVP` from
+`POST_MVP_EXPLORATORY`; script checks never establish semantic correctness.
+
+### Completed Pixel run
+
+Physical Pixel 10 Pro (`56270DLCH000KZ`), existing app data and notification
+permissions preserved. Model SHA-256:
+`e608953f169aeb1bd7b9155fec2559825e08453fc209b84eda3a781ed0452fd2`.
+The complete 17-case artifact is
+`review-artifacts/pixel-10-pro-language-scope-review.json`.
+The completed run in device logs used process 7146 and ended with
+`EVAL_END released=true`. An earlier process (6343) produced a partial, slower
+run; it was superseded before the completed artifact was retrieved. The reason
+for that process change was not established. Do not merge those two runs or
+treat the earlier timings as this completed run's performance.
+
+Exploratory findings:
+
+- 12, conversational romanized Hindi: generated garbled Devanagari/byte tokens
+  instead of English letters. Script and decoding checks fail.
+- 13, conversational romanized Telugu: runtime timed out after 60 seconds;
+  no draft was returned. Artifact latency 0 is a failure sentinel, not an
+  instantaneous completion measurement.
+- 14, mixed Hindi price: initially failed with "Previous invocation still
+  processing" after case 13. This is a runtime-contaminated result, not an
+  independent assessment of Hindi understanding; see the isolated rerun below.
+- 15, mixed Telugu price: generated "Rs 500, pehlexaad, peehiyaadha,
+  peehiyanjha." Price and Latin-script checks pass, but the output does not
+  demonstrate understanding or the requested payment-detail question.
+- 16, informal romanized Hindi with corrected day: garbled native-script text,
+  no Thursday correction; script/decoding and corrected-fact checks fail.
+- 17, informal romanized Telugu with corrected day: garbled native-script text,
+  no Thursday correction; script/decoding and corrected-fact checks fail.
+
+None of these findings qualifies romanized-language support. A language-fluent
+human review is still required for naturalness and semantic acceptance. The
+timeout also exposed a runtime recovery risk: a subsequent request can encounter
+unfinished native inference. That risk is not specific to a language and remains
+relevant to English reliability.
+
+English results are nine cases: eight generated drafts and one missing-history
+refusal. Corrected-fact case 03 returned outdated Tuesday, case 05 echoed the
+incoming message, and multi-message case 11 omitted the required price.
+Case 04 kept Rs 500 but failed to ask whether to proceed. These failures mean
+this run does not establish the English MVP quality gate either. No new usability
+percentage is claimed from this small fixture set.
+
+In the completed run, English cold generation was 4,932 ms; the seven successful
+warm English drafts ranged from 1,400 to 5,235 ms. These are individual timings,
+not a qualified p95 or controlled cross-device benchmark. PSS checkpoints were
+49,858 kB before loading, 785,950 kB while resident, and 93,058 kB after release.
+
+Build verification: shared JVM test task succeeded using existing up-to-date
+results; Android unit tests reran after the evaluator changes and passed; debug
+APK assembly passed. The combined native result files contain 66 tests with zero
+failures/errors. The existing Kotlin/AGP compatibility warning remains.
+
+### Isolated mixed-Hindi rerun
+
+The evaluator now accepts an exact predefined `case_id` and writes a separate
+artifact for an isolated case. It also records start time and process ID.
+After rebuilding and reinstalling with data preserved, case 14 ran alone in
+process 7960 and completed in 4,419 ms with `released=true`. Artifact:
+`review-artifacts/pixel-10-pro-hindi-mixed-price-isolated.json`.
+
+Output: "Rs 500, Pune Phoonai, New Delhi, 2023-12-31".
+The price and script checks pass, but the draft invents locations and a date and
+does not request payment details. This is an independent quality failure,
+separate from the earlier unfinished-inference failure. It illustrates why
+Latin letters and an exact amount are insufficient acceptance criteria.
+
+The final evaluator build passed Android unit tests and debug assembly again.
+Only synthetic cases were used in these language runs; no action was approved or
+sent. English remains the MVP focus, with these exploratory fixtures retained
+for subsequent model/runtime builds.
+
+## Continuation after Jcode review: one owner and native timeout recovery
+
+The pasted Jcode session was interrupted after investigation and planning. Its
+proposals for device-aware limits, lifecycle signals and controlled comparisons
+are useful, but they are not evidence that those features were implemented.
+The English-first scope in `../docs/MVP_LANGUAGE_SCOPE.md` takes precedence over
+its earlier multilingual qualification plan.
+
+Installed tooling was checked: Jcode v0.93.0, build `9948f0e8c`. Its CLI exposes
+provider/model routing, tool allow-lists, MCP exposure modes, session support and
+shared-server operation. Direct debug/tool control returned "Debug control is
+disabled"; no server settings were changed, no swarm was launched and no provider
+model was invoked from this continuation. Jcode's official documentation describes
+Agent Grep and task graphs, useful for focused search and independent work. This
+runtime fix is coupled work in the same files and was kept with one editor.
+Sources: https://github.com/1jehuang/jcode and
+https://github.com/1jehuang/jcode/blob/master/docs/SWARM_TASK_GRAPH.md .
+
+### Verified causes and changes
+
+1. The evaluator constructed its own `LocalDraftExperiment`, separate from the
+   process runtime. It now uses `MiniHubRuntime.localDraftExperiment`, the same
+   owner as the UI. Both synchronous evaluations and asynchronous UI requests run
+   on that owner's serial executor. Release is serialized; cancellation reaches
+   the engine directly without reading the supervisor's mutable queue.
+2. The adapter waited on a Java future, then cleared its active references on
+   timeout without requesting native cancellation. The earlier language run
+   reproduced "Previous invocation still processing" immediately afterward.
+   Inspection of the installed MediaPipe 0.10.27 classes confirmed a separate
+   `LlmInferenceSession.cancelGenerateResponseAsync()` API.
+3. Generation now uses an explicit session. Timeout requests native stop and
+   allows up to five seconds for its terminal callback. Sessions are closed only
+   after completion. A non-terminating runtime is quarantined from further drafting
+   instead of deleting an active native session. This is fault containment within
+   the process, not isolation from native crashes.
+4. Actual token counting happens on that same explicit session, avoiding a second
+   implicit session. Model, prompt, total context limit and default sampling were
+   retained. Inspection of the installed classes confirmed the implicit baseline
+   also used the default session options.
+5. Cancellation invalidates queued requests before loading and prevents generation
+   after a cancelled cold load. The UI's existing late-result guard is retained.
+
+### Final-build device proof
+
+Physical Pixel 10 Pro; model hash unchanged from the language run above. Debug APK
+SHA-256: `b88531fb86416af1f1fa8c2fee8bb10b3e1405b19c407ea8e46335292e69d682`.
+The working tree includes the language-scope changes and this fix on top of HEAD
+`e2f847d`; this is not described as a clean HEAD-only build.
+
+`review-artifacts/pixel-10-pro-timeout-recovery.json` records process 15949:
+
+- A synthetic English draft forced to a 200 ms generation deadline failed with
+  "Local inference timed out after 200 ms."
+- The same model owner immediately processed the same request with its normal
+  deadline, without releasing/reloading between cases. It returned "Thank you for
+  the update." in 2,286 ms, `cold=false`, with a draft-only proposal.
+- The evaluation ended with `released=true`. Failure latency 0 remains a sentinel
+  and is not a measurement of elapsed timeout/load time.
+
+The final build also ran the English-only nine-case suite, using the debug
+`english_only=true` selection. Artifact:
+`review-artifacts/pixel-10-pro-english-mvp-owner-review.json`.
+Eight generated, one safely refused missing history, `released=true`. Drafts were
+the same as the earlier completed Pixel English cases. Quality remains inadequate:
+outdated Tuesday in case 03, incoming-message echo in 05, omitted price in 11,
+and missed intent in 04. Runtime recovery is verified; the English quality gate
+is not passed. This is not a representative usability score.
+
+English cold draft: 4,360 ms. Warm drafts: 1,273–4,546 ms. PSS before loading,
+while resident, and after release: 87,403 / 776,567 / 89,571 kB. These are a short
+fixture run, not p95 qualification, a leak soak test, or a controlled memory
+improvement benchmark. OPPO was not connected and was not rerun.
+
+### Checks and remaining work
+
+- Six new regression tests cover native-stop requests, non-terminating cleanup,
+  successful generation without cancellation, serial UI/evaluator access,
+  queued cancellation, and cancellation during model loading followed by reuse.
+- Removing native cancellation as a negative control caused both timeout tests
+  to fail. Restoring the fix and running the full suite passed.
+- Native result files: 13 suites, 72 tests, zero failures/errors; existing shared
+  JVM results were up to date and Android tests reran.
+- Web: 59 tests passed and all workspace typechecks passed.
+- Final debug and release APK assembly passed. Release manifest inspection found
+  neither debug receiver. The pre-existing Kotlin/AGP warning remains.
+
+Next bounded milestone: injectable device/resource policy, foreground lifecycle
+and memory-pressure handling, then a controlled English quality comparison with
+fixed cases, model hash and build identity. Tier3 budgeting is still hardcoded in
+the drafting owner; this milestone does not claim device-aware admission or full
+resource supervision. The bundled-tokenizer diagnostic suggests native-script
+artifact defects, but a host diagnostic using a modified NUL piece is not a full
+reproduction of Android tokenization. Romanized-language failures remain recorded
+for later builds. No new connector, runtime dependency, model download or sending
+was introduced.

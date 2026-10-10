@@ -126,20 +126,7 @@ class InMemoryObservationStore : ObservationStore {
             else -> NotificationCategory.GeneralNotification
         }
 
-        val appName = when {
-            observation.packageId.contains("twitter", ignoreCase = true) -> "X"
-            observation.packageId.contains("whoop", ignoreCase = true) -> "WHOOP"
-            observation.packageId.contains("whatsapp", ignoreCase = true) -> "WhatsApp"
-            observation.packageId.contains("android.gm", ignoreCase = true) -> "Gmail"
-            observation.packageId.contains("facebook.orca", ignoreCase = true) -> "Messenger"
-            observation.packageId.contains("facebook", ignoreCase = true) -> "Facebook"
-            observation.packageId.contains("instagram", ignoreCase = true) -> "Instagram"
-            observation.packageId.contains("linkedin", ignoreCase = true) -> "LinkedIn"
-            observation.packageId.contains("slack", ignoreCase = true) -> "Slack"
-            observation.packageId == "android" -> "Android System"
-            observation.packageId.startsWith("com.android.systemui") -> "System UI"
-            else -> observation.packageId.substringAfterLast('.').replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-        }
+        val appName = app.mini.hub.observation.SourceAppNames.forPackage(observation.packageId)
 
         val summary = ConversationObservationSummary(
             conversationId = observation.conversationId,

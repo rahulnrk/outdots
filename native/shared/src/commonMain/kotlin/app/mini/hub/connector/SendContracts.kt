@@ -66,8 +66,11 @@ class ConnectorProviderGateway(
         }
         val token = tokens.get(accountId) ?: return GatewayResult.Rejected("credential_missing")
         if (token.isExpired(nowMillis())) return GatewayResult.Rejected("credential_expired_refresh_first")
+        val native = nativeConversationId(payload.conversationId, accountId)
+            ?: return GatewayResult.Rejected("conversation_belongs_to_other_account")
+        val providerPayload = payload.copy(conversationId = native)
         return when (val outcome = try {
-            sender.send(account, token, payload, command.id, transport)
+            sender.send(account, token, providerPayload, command.id, transport)
         } catch (e: ConnectorHttpException) {
             classify(e)
         } catch (_: UnsupportedOperationException) {
@@ -80,6 +83,18 @@ class ConnectorProviderGateway(
     }
 
     companion object {
+        /**
+         * The approved payload may carry MINI's scoped conversation key ("gmail|id|conversation|t1").
+         * Senders need the provider-native ID. A scoped key from a different account is refused, so
+         * an approval can never be redirected across accounts. Plain IDs pass through unchanged.
+         */
+        fun nativeConversationId(value: String, account: AccountId): String? {
+            if (value.count { it == '|' } < 3) return value
+            val scoped = runCatching { app.mini.hub.domain.ScopedId.parse(value) }.getOrNull() ?: return value
+            if (scoped.kind != app.mini.hub.domain.ScopedId.Kind.CONVERSATION) return value
+            return scoped.value.takeIf { scoped.account == account }
+        }
+
         /** A failure response is a definite "not sent" except where the provider may have acted. */
         fun classify(e: ConnectorHttpException): SendOutcome = when (e.kind) {
             ProviderErrorKind.Transient -> SendOutcome.Unknown("provider_outcome_unknown:${e.statusCode}")

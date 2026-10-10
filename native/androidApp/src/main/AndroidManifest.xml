@@ -26,14 +26,19 @@
                 <data
                     android:path="/oauth2redirect/google"
                     android:scheme="${gmailRedirectScheme}" />
+                <data
+                    android:path="/oauth2redirect/chat"
+                    android:scheme="${gmailRedirectScheme}" />
             </intent-filter>
+            <!-- app.mini.hub://oauth2redirect/<route>: host is "oauth2redirect", path is the route. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:path="/oauth2redirect/outlook"
-                    android:scheme="app.mini.hub" />
+                <data android:scheme="app.mini.hub" android:host="oauth2redirect" android:path="/outlook" />
+                <data android:scheme="app.mini.hub" android:host="oauth2redirect" android:path="/teams" />
+                <data android:scheme="app.mini.hub" android:host="oauth2redirect" android:path="/slack" />
+                <data android:scheme="app.mini.hub" android:host="oauth2redirect" android:path="/x" />
             </intent-filter>
         </activity>
 

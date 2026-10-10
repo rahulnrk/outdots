@@ -53,7 +53,15 @@ class InboxViewModel(
     private val selectedSources: () -> Set<CommunicationSource> = { CommunicationSource.defaultSelection },
     private val accountStore: app.mini.hub.connector.ConnectedAccountStore? = null,
     private val gateway: app.mini.hub.action.ProviderGateway? = null,
+    /** True only when the account may reply via API right now (scopes granted, gates cleared). */
+    private val apiReplyAllowed: (app.mini.hub.connector.ConnectedAccount) -> Boolean = { false },
+    /**
+     * Fetches the full provider conversation, persists it, and returns the refreshed timeline.
+     * Network I/O: always invoked off the main thread. Null when the provider has no reader.
+     */
+    private val conversationLoader: ((ConversationObservationSummary) -> List<app.mini.hub.observation.ObservedNotification>?)? = null,
 ) {
+    private var conversationLoadGeneration = 0L
     // Monotonic token so a late callback from a cancelled or superseded request cannot overwrite
     // the cancellation state or a newer draft.
     private var localDraftGeneration = 0L
@@ -101,7 +109,7 @@ class InboxViewModel(
     fun refresh(isPermissionGranted: Boolean, isListenerConnected: Boolean) {
         val policy = CommunicationSourcePolicy(selectedSources)
         val summaries = observationStore.getConversationSummaries()
-            .filter { policy.isEligiblePackage(it.packageId) }
+            .filter { policy.isVisibleInInbox(it.packageId) }
         val loadResult = attentionStore.loadAll()
         
         var failure: String? = null
@@ -186,11 +194,48 @@ class InboxViewModel(
             isLocalDraftInProgress = false,
             // The failure pause belongs to the runtime, not the conversation; keep offering retry.
             isLocalAiRetryAvailable = localDraftExperiment?.needsRecovery == true,
+            conversationLoadStatus = null,
         )
+        loadFullConversation(summary)
+    }
+
+    private fun loadFullConversation(summary: ConversationObservationSummary) {
+        val loader = conversationLoader ?: return
+        val account = accountStore?.get(summary.accountId) ?: return
+        if (account.state !in USABLE_STATES) return
+        val generation = ++conversationLoadGeneration
+        _state.value = _state.value.copy(conversationLoadStatus = "Loading the full conversation from ${account.id.provider.wire}…")
+        Thread({
+            val loaded = runCatching { loader(summary) }
+            postToMain("conversation-load") {
+                if (generation != conversationLoadGeneration ||
+                    _state.value.selectedConversation?.conversationId != summary.conversationId
+                ) return@postToMain
+                val timeline = loaded.getOrNull()
+                _state.value = when {
+                    loaded.isFailure -> _state.value.copy(
+                        conversationLoadStatus = "Full conversation unavailable right now; showing messages already in MINI.",
+                    )
+                    timeline == null -> _state.value.copy(conversationLoadStatus = null)
+                    else -> _state.value.copy(
+                        selectedTimeline = timeline,
+                        retrievedContext = retrievalEngine.retrieve(
+                            ScopedRetrievalQuery(
+                                conversationId = summary.conversationId,
+                                compartment = CompartmentId(summary.accountId.key),
+                                tokenBudget = 650,
+                            ),
+                        ),
+                        conversationLoadStatus = "Full conversation loaded (${timeline.size} message(s)).",
+                    )
+                }
+            }
+        }, "mini-conversation-load").start()
     }
 
     fun clearSelection() {
         abandonLocalDraft()
+        conversationLoadGeneration++
         _state.value = _state.value.copy(
             selectedConversation = null,
             selectedTimeline = emptyList(),
@@ -349,41 +394,87 @@ class InboxViewModel(
 
     fun prepareDraft(body: String, recipient: String) {
         val selected = _state.value.selectedConversation ?: return
+        val provider = selected.accountId.provider
         val connectedAccount = accountStore?.get(selected.accountId)
-        val isOfficialApiAccount = connectedAccount != null &&
+        val isApiAccount = connectedAccount != null &&
             connectedAccount.route == app.mini.hub.connector.ConnectorRoute.OfficialProviderApi &&
-            connectedAccount.state in setOf(app.mini.hub.connector.ConnectionState.Authorized, app.mini.hub.connector.ConnectionState.Healthy)
+            connectedAccount.state in USABLE_STATES
+        val isEmail = app.mini.hub.connector.ReplyTargets.usesSubject(provider)
 
-        val targetRecipient = recipient.ifBlank { selected.senderHint }
-        val replyTargetMsg = _state.value.selectedTimeline.lastOrNull { !it.isRemoved }
-        val replyTargetId = replyTargetMsg?.notificationKey?.substringAfter("provider:${selected.accountId.key}:")
-            ?.takeIf { it != replyTargetMsg.notificationKey }
+        // Reply to the newest message from the other side; fall back to the newest message.
+        val live = _state.value.selectedTimeline.filter { !it.isRemoved }
+        val anchor = live.lastOrNull { !isOwnMessage(it, connectedAccount) } ?: live.lastOrNull()
+        val providerMessageId = anchor?.notificationKey
+            ?.takeIf { it.startsWith("provider:${selected.accountId.key}:") }
+            ?.removePrefix("provider:${selected.accountId.key}:")
+        val replyTarget = app.mini.hub.connector.ReplyTargets.forProvider(provider, providerMessageId)
 
-        val route = if (isOfficialApiAccount && targetRecipient.isNotBlank()) ActionRoute.Api else ActionRoute.NativeHandoff
+        // Email needs an address; chat routes address the conversation itself.
+        val typed = recipient.trim()
+        val recipients: List<String> = if (isEmail) {
+            listOfNotNull(app.mini.hub.connector.EmailAddress.extract(typed.ifBlank { anchor?.senderHint ?: selected.senderHint }))
+        } else {
+            listOfNotNull(typed.ifBlank { selected.title.ifBlank { selected.senderHint } }.takeIf { it.isNotBlank() })
+        }
+
+        val apiAllowed = isApiAccount && apiReplyAllowed(connectedAccount!!) && (!isEmail || recipients.isNotEmpty())
+        val route = if (apiAllowed) ActionRoute.Api else ActionRoute.NativeHandoff
+        val subject = if (isEmail) selected.title.takeIf { it.isNotBlank() }?.let { s ->
+            if (replyTarget != null && !s.startsWith("Re:", ignoreCase = true)) "Re: $s" else s
+        } else null
 
         val payload = ExactActionPayload(
             accountId = selected.accountId.key,
             conversationId = selected.conversationId.key,
             route = route,
-            recipients = if (targetRecipient.isNotBlank()) listOf(targetRecipient) else emptyList(),
-            subject = selected.title.takeIf { it.isNotBlank() },
+            recipients = if (route == ActionRoute.Api || recipients.isNotEmpty()) recipients else listOfNotNull(selected.senderHint.takeIf { it.isNotBlank() }),
+            subject = subject,
             body = body,
             attachments = emptyList(),
             sourceVersions = emptyList(),
             grantVersion = if (route == ActionRoute.Api) "grant-v1-api-send" else "grant-v1-user-initiated",
             policyVersion = if (route == ActionRoute.Api) "policy-v1-api-review" else "policy-v1-notification-handoff",
-            replyTarget = if (route == ActionRoute.Api) replyTargetId else null,
+            replyTarget = if (route == ActionRoute.Api) replyTarget else null,
         )
 
-        _state.value = _state.value.copy(activeReviewPayload = payload)
+        val note = when {
+            route == ActionRoute.Api -> null
+            isApiAccount -> "API sending is not enabled for this account yet (permission not granted or send qualification not recorded). " +
+                "MINI will open ${app.mini.hub.observation.SourceAppNames.forPackage(selected.packageId)} with your text so you send it yourself."
+            else -> null
+        }
+        _state.value = _state.value.copy(
+            activeReviewPayload = payload,
+            reviewContext = ReviewContext(
+                providerName = providerLabel(provider),
+                isReply = route == ActionRoute.Api && replyTarget != null,
+                handoffPackage = if (route == ActionRoute.NativeHandoff) handoffPackageFor(selected) else null,
+                note = note,
+            ),
+        )
     }
 
+    private fun isOwnMessage(obs: app.mini.hub.observation.ObservedNotification, account: app.mini.hub.connector.ConnectedAccount?): Boolean {
+        val me = account?.providerAccountId?.lowercase() ?: return false
+        return obs.senderHint.lowercase().let { it == me || it.contains("<$me>") }
+    }
+
+    /** Notification rows open their own app; API rows open the provider's primary app. */
+    private fun handoffPackageFor(summary: ConversationObservationSummary): String? =
+        summary.packageId.takeUnless { it.startsWith(CommunicationSource.API_PACKAGE_PREFIX) }
+            ?: CommunicationSource.primaryPackageFor(summary.accountId.provider)
+
+    private fun providerLabel(provider: app.mini.hub.domain.Provider): String =
+        app.mini.hub.observation.SourceAppNames.forPackage(CommunicationSource.API_PACKAGE_PREFIX + provider.wire)
+
     fun clearDraftReview() {
-        _state.value = _state.value.copy(activeReviewPayload = null)
+        _state.value = _state.value.copy(activeReviewPayload = null, reviewContext = null)
     }
 
     fun approveAndDispatch(handoffLauncher: HandoffLauncher) {
         val payload = _state.value.activeReviewPayload ?: return
+        val context = _state.value.reviewContext
+        val launcher = (handoffLauncher as? AndroidNativeHandoffLauncher)?.forPackage(context?.handoffPackage) ?: handoffLauncher
 
         var outboxCmdId: String? = null
         actionStore.transaction { currentActionState ->
@@ -400,23 +491,32 @@ class InboxViewModel(
                     commandId = cmdId,
                     payload = payload,
                     gateway = gateway,
-                    handoff = handoffLauncher,
+                    handoff = launcher,
                 )
             }
 
             val finalCommand = finalActionState.outbox.find { it.id == cmdId }
             val statusMessage = when (finalCommand?.state) {
-                OutboxState.HandoffOpened -> "Draft opened in native app. Pending your manual send."
-                OutboxState.AcceptedByProvider -> "Message accepted by provider (receipt: ${finalCommand.receipt ?: "accepted"})."
-                OutboxState.Rejected -> "Action rejected: ${finalCommand.failureReason}"
-                OutboxState.OutcomeUnknown -> "Provider dispatch status unknown: ${finalCommand.failureReason ?: "timeout/network failure"}"
+                OutboxState.HandoffOpened -> "Draft opened in ${context?.handoffPackage?.let { app.mini.hub.observation.SourceAppNames.forPackage(it) } ?: "another app"}. Nothing is sent until you send it there."
+                OutboxState.AcceptedByProvider -> "${context?.providerName ?: "Provider"} accepted the ${if (context?.isReply == true) "reply" else "message"} (receipt ${finalCommand.receipt ?: "accepted"}). Accepted means the provider took it; it does not confirm the recipient received it."
+                OutboxState.Rejected -> "Not sent: ${finalCommand.failureReason}"
+                OutboxState.OutcomeUnknown -> "Send outcome unknown (${finalCommand.failureReason ?: "timeout/network failure"}). Check the conversation before trying again so it is not sent twice."
                 else -> "Action state: ${finalCommand?.state?.name}"
             }
 
             _state.value = _state.value.copy(
                 activeReviewPayload = null,
+                reviewContext = null,
                 outboxStatusMessage = statusMessage,
             )
         }
+    }
+
+    companion object {
+        private val USABLE_STATES = setOf(
+            app.mini.hub.connector.ConnectionState.Authorized,
+            app.mini.hub.connector.ConnectionState.Healthy,
+            app.mini.hub.connector.ConnectionState.Syncing,
+        )
     }
 }

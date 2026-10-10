@@ -47,38 +47,47 @@ MINI is a private, phone-local communication hub.
 
 ## 3. Provider Setup & Configuration Guide
 
+Unconfigured routes are visibly gated in the UI, stating exactly what is missing. Real keys must be supplied locally.
+
 ### 3.1 Gmail
 - **Endpoint:** `https://gmail.googleapis.com/gmail/v1/users/me`
 - **Scopes:** `https://www.googleapis.com/auth/gmail.readonly`, `https://www.googleapis.com/auth/gmail.send`
 - **Auth:** Native Android AuthorizationClient / system browser PKCE. Custom scheme derived from Android Client ID.
-- **Sync strategy:** `history.list` with `startHistoryId`. On 404 (expired history cursor), performs a bounded resync snapshot and flags `gap = true` on `SyncCheckpoint`.
+- **Sync strategy:** `history.list` with `startHistoryId`. On 404 (expired history cursor) or 400 (invalidArgument format), performs a bounded resync snapshot and flags `gap = true` on `SyncCheckpoint`.
 - **Sending:** RFC 5322 MIME builder (`MimeMessageBuilder`) with `inReplyTo` and `references` headers. Sent via `POST /messages/send`.
+- **Configuration:** `mini.googleOAuthClientId` in `native/local.properties`.
 
 ### 3.2 Outlook (Microsoft Graph)
 - **Endpoint:** `https://graph.microsoft.com/v1.0`
 - **Scopes:** `Mail.Read`, `Mail.Send` (delegated)
-- **Auth:** MSAL Android (Public client, PKCE, no client secret).
+- **Auth:** MSAL Android / PKCE (Public client, no client secret).
 - **Sync strategy:** Inbox folder delta query (`GET /me/mailFolders/inbox/messages/delta`). Opaque `@odata.deltaLink` stored as cursor. 410 / `SyncStateNotFound` triggers a round restart with `gapCount++`.
 - **Sending:** `POST /me/messages/{id}/reply` or `POST /me/sendMail`. Returns HTTP 202 Accepted.
+- **Configuration:** `mini.outlookOAuthClientId` in `native/local.properties`. Needs the `app.mini.hub://oauth2redirect/outlook` redirect.
 
 ### 3.3 Microsoft Teams
 - **Endpoint:** `https://graph.microsoft.com/v1.0`
 - **Scopes:** `Chat.Read`, `ChatMessage.Send` (delegated)
+- **Auth:** MSAL Android / PKCE using the `/organizations/` authority (rejects personal accounts).
 - **Sync strategy:** `GET /me/chats` ordered by last message, fetching messages per chat with `ChatCursor` per-conversation high-water marks.
 - **Sending:** `POST /chats/{id}/messages`.
+- **Configuration:** Uses `mini.outlookOAuthClientId`. Needs the `app.mini.hub://oauth2redirect/teams` redirect.
 
 ### 3.4 Slack
 - **Endpoint:** `https://slack.com/api`
 - **Scopes:** `im:history`, `channels:history`, `groups:history`, `mpim:history`, `chat:write`
-- **Auth:** PKCE public client flow. Refresh tokens expire after 30 days of inactivity.
+- **Auth:** PKCE public client flow. Refresh tokens expire after 30 days of inactivity. Requires `user_scope`, not bot scopes.
 - **Sync strategy:** `conversations.list` -> `conversations.history` per channel with `oldest` cursor.
 - **Sending:** `chat.postMessage` with `thread_ts` for replies.
+- **Configuration:** `mini.slackClientId` in `native/local.properties`. Needs the `app.mini.hub://oauth2redirect/slack` redirect.
 
 ### 3.5 Google Chat
 - **Endpoint:** `https://chat.googleapis.com/v1`
 - **Scopes:** `https://www.googleapis.com/auth/chat.spaces.readonly`, `chat.messages.readonly`, `chat.messages.create`
+- **Auth:** Google OAuth 2.0 PKCE.
 - **Sync strategy:** `GET /spaces` -> `GET /spaces/{space}/messages` ordered by `createTime desc`.
 - **Sending:** `POST /spaces/{space}/messages?requestId={id}` with `thread` object for replies.
+- **Configuration:** Uses `mini.googleOAuthClientId` and its derived custom scheme with path `/oauth2redirect/chat`.
 
 ### 3.6 Telegram Bot
 - **Endpoint:** `https://api.telegram.org`
@@ -86,12 +95,15 @@ MINI is a private, phone-local communication hub.
 - **Sync strategy:** `POST /bot<token>/getUpdates` long-polling with `offset = max(update_id) + 1`.
 - **Sending:** `POST /bot<token>/sendMessage` with `reply_parameters`.
 - **Critical AI Gate:** `TelegramContentUseTerms` blocks `LocalAiDrafting` by default.
+- **Configuration:** Runtime copy/paste into the Accounts UI.
 
 ### 3.7 X (Twitter) Direct Messages
 - **Endpoint:** `https://api.x.com/2`
-- **Scopes:** `dm.read`, `dm.write`, `tweet.read`, `users.read`
+- **Scopes:** `dm.read`, `dm.write`, `tweet.read`, `users.read`, `offline.access`
+- **Auth:** OAuth 2.0 PKCE.
 - **Sync strategy:** `GET /dm_events?event_types=MessageCreate` up to 30 days of history.
 - **Sending:** `POST /dm_conversations/{id}/messages`.
+- **Configuration:** `mini.xClientId` in `native/local.properties`. Needs the `app.mini.hub://oauth2redirect/x` redirect and Paid tier.
 
 ---
 

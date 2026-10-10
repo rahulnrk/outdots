@@ -381,20 +381,7 @@ class SqlCipherObservationStore(
         val cursorGap = queryCursorGap(db, obs.packageId)
         val coverageExplanation = coverageExplanationFor(obs.provenance, cursorGap)
 
-        val appName = when {
-            obs.packageId.contains("twitter", ignoreCase = true) -> "X"
-            obs.packageId.contains("whoop", ignoreCase = true) -> "WHOOP"
-            obs.packageId.contains("whatsapp", ignoreCase = true) -> "WhatsApp"
-            obs.packageId.contains("android.gm", ignoreCase = true) -> "Gmail"
-            obs.packageId.contains("facebook.orca", ignoreCase = true) -> "Messenger"
-            obs.packageId.contains("facebook", ignoreCase = true) -> "Facebook"
-            obs.packageId.contains("instagram", ignoreCase = true) -> "Instagram"
-            obs.packageId.contains("linkedin", ignoreCase = true) -> "LinkedIn"
-            obs.packageId.contains("slack", ignoreCase = true) -> "Slack"
-            obs.packageId == "android" -> "Android System"
-            obs.packageId.startsWith("com.android.systemui") -> "System UI"
-            else -> obs.packageId.substringAfterLast('.').replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-        }
+        val appName = app.mini.hub.observation.SourceAppNames.forPackage(obs.packageId)
 
         val notifCategory = when {
             obs.isOngoing -> NotificationCategory.OngoingService

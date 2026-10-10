@@ -1,0 +1,4323 @@
+{
+  "source": "C:\\Users\\nande\\Downloads\\32316_merged.pdf",
+  "date": "2026-10-09",
+  "findings": [
+    {
+      "id": "B01",
+      "app": "Beeper",
+      "kind": "Positive",
+      "group": "Convenience",
+      "title": "One inbox reduces app switching",
+      "pages": [
+        19,
+        21,
+        23,
+        37,
+        48,
+        49,
+        90,
+        91,
+        94,
+        96
+      ],
+      "impact": "Users can keep up with people across services and report less effort replying.",
+      "action": "Keep one inbox with clear source and account labels; include Gmail, Outlook and Teams in the connection plan.",
+      "test": "Receive synthetic conversations from two qualified providers and reply without selecting the wrong account.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "B02",
+      "app": "Beeper",
+      "kind": "Positive",
+      "group": "Convenience",
+      "title": "Messaging without addictive feeds",
+      "pages": [
+        19,
+        23,
+        24,
+        26,
+        28,
+        29,
+        31,
+        32,
+        35,
+        43,
+        44,
+        45,
+        91,
+        93,
+        94,
+        100,
+        102
+      ],
+      "impact": "People keep social contact while avoiding reels, status feeds and doomscrolling; one reviewer describes easier follow-through with ADHD.",
+      "action": "Keep MINI focused on conversations and user-chosen attention; no algorithmic social feed.",
+      "test": "A message can be found and answered without entering a provider feed; compare workflow effort with native apps.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "B03",
+      "app": "Beeper",
+      "kind": "Positive",
+      "group": "Convenience",
+      "title": "Consistent interface and easy setup for some",
+      "pages": [
+        7,
+        10,
+        20,
+        33,
+        48,
+        50,
+        90
+      ],
+      "impact": "Familiar presentation and good performance can make many networks feel manageable, although other users disagree.",
+      "action": "Use a consistent Android-native interface, legible text labels and a guided first account setup.",
+      "test": "Observe a first-time user connecting an account and finding a chat without coaching.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "B04",
+      "app": "Beeper",
+      "kind": "Unique",
+      "group": "Convenience",
+      "title": "Person merging and Matrix interoperability",
+      "pages": [
+        7,
+        19,
+        22,
+        36
+      ],
+      "impact": "Merging reduces duplicate contacts but can obscure where messages came from; Matrix openness interests some users.",
+      "action": "Explore optional user-confirmed person linking; preserve provider/account identity and reversible separation. Do not merge by display name.",
+      "test": "Two same-named people remain separate; linked threads retain source badges and the correct reply route.",
+      "stage": "Later",
+      "qualification": "Distinctive capabilities in this sample, not a claim of market exclusivity"
+    },
+    {
+      "id": "B05",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Reliability",
+      "title": "Notifications arrive only when opened",
+      "pages": [
+        3,
+        4,
+        5,
+        7,
+        9,
+        10,
+        14,
+        15,
+        16,
+        42,
+        103
+      ],
+      "impact": "Users miss time-sensitive messages even after trying battery settings. This undermines the entire hub.",
+      "action": "Prove background intake and OS notifications independently of the heavy AI model; expose stale/disconnected sources.",
+      "test": "Compare synthetic messages with provider truth while screen off, backgrounded, restarted and under OS battery restrictions; record delivery gaps.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "B06",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Reliability",
+      "title": "Repeated disconnections and painful reconnection",
+      "pages": [
+        5,
+        13,
+        14,
+        26,
+        28,
+        32,
+        33,
+        35,
+        39,
+        50,
+        95
+      ],
+      "impact": "Reauthorization friction makes the hub harder than using native apps; some users cannot sign back in.",
+      "action": "Provide per-account health, safe reconnect, preserved local history, and explicit reauthorization steps.",
+      "test": "Expire/revoke one account, reconnect it, and verify other accounts and prior local context stay intact.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "B07",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Reliability",
+      "title": "Unclear sending state and failed delivery",
+      "pages": [
+        6,
+        12,
+        33
+      ],
+      "impact": "A spinner may persist after actual delivery; blind retries could duplicate a message.",
+      "action": "Represent pending, confirmed, failed and unknown delivery honestly; reconcile provider IDs before retrying.",
+      "test": "Interrupt connectivity after submission, reconcile the result, and prove no duplicate send.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "B08",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Reliability",
+      "title": "History disappears or new chats are absent",
+      "pages": [
+        25,
+        34,
+        40,
+        93,
+        94
+      ],
+      "impact": "Users lose access to old context or cannot see a new conversation until opened elsewhere.",
+      "action": "Publish provider-specific history coverage, preserve reconnect history and detect incomplete sync.",
+      "test": "Reconnect and paginate synthetic old/new chats; verify deduplication, persistence, correct coverage labels and no invented complete-history claim.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "B09",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Control",
+      "title": "Muted and archived chats do not stay that way",
+      "pages": [
+        39,
+        41,
+        88,
+        89,
+        104
+      ],
+      "impact": "Unwanted groups reappear or become noisy after updates; users lose trust in their own settings.",
+      "action": "Persist MINI attention choices; explicitly choose whether new messages reopen archives. Keep provider mute and MINI mute distinct.",
+      "test": "Sync, restart, update and receive a new group message; verify the user-selected mute/archive policy remains unchanged.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "B10",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Control",
+      "title": "Long inboxes and hidden network filters",
+      "pages": [
+        8,
+        11,
+        18
+      ],
+      "impact": "All chats together can become overwhelming; an existing filter is ineffective if people cannot find it.",
+      "action": "Make source/account filters, low priority and search visible; add optional labels without burying basic navigation.",
+      "test": "Ask a first-time user to find a work account and low-priority chat; measure completion and wrong turns.",
+      "stage": "MVP",
+      "qualification": "Developer reply on p8 says network filtering existed; this is also a discoverability problem"
+    },
+    {
+      "id": "B11",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Control",
+      "title": "Icon-only redesign and oversized pinned chats",
+      "pages": [
+        17,
+        18,
+        30,
+        44,
+        45,
+        94,
+        100,
+        101
+      ],
+      "impact": "Users lose familiar navigation or must open pinned chats to see the latest message.",
+      "action": "Use text with icons, compact pinned rows with previews, accessible font scaling and stable navigation.",
+      "test": "At large text size, show sender, account, latest preview and unread state without clipping or excessive taps.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "B12",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Control",
+      "title": "Reply targets, quotes and mentions are wrong or unclear",
+      "pages": [
+        29,
+        30,
+        42,
+        44,
+        101,
+        103
+      ],
+      "impact": "Messages can address the wrong context, leave stale quoted replies or corrupt a tagged name.",
+      "action": "Show the exact replied-to message and reset the composer after confirmed send; qualify mentions per connector.",
+      "test": "Reply twice to different messages and tag a synthetic contact; verify target IDs, clear quote state and unmodified mention text.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "B13",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Reliability",
+      "title": "Photos, voice notes, GIFs and videos fail",
+      "pages": [
+        20,
+        21,
+        24,
+        31,
+        35,
+        43,
+        102
+      ],
+      "impact": "Users miss photos/context or the last part of audio and must return to native apps.",
+      "action": "Support media only where qualified; show unsupported content explicitly with a route to the source app. Preserve full audio length.",
+      "test": "Exercise full voice-note playback, images, video failures and unsupported/view-once types; never silently omit content.",
+      "stage": "After core text workflow",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "B14",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Reliability",
+      "title": "Native features vary by network and version",
+      "pages": [
+        12,
+        30,
+        34,
+        39,
+        42,
+        90,
+        91,
+        103
+      ],
+      "impact": "Calls, polls, channel comments and group details do not have consistent parity; a later review praises polls.",
+      "action": "Publish a per-network capability list, explain unavailable actions and offer a source-app handoff.",
+      "test": "Run connector-specific capability checks; never display an enabled action that the route cannot perform.",
+      "stage": "MVP",
+      "qualification": "Historical complaints are not proof of current absence; p90/91 praise polls, while current WhatsApp help lists polls unsupported"
+    },
+    {
+      "id": "B15",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Control",
+      "title": "Deletion and editing are unavailable or undiscoverable",
+      "pages": [
+        25,
+        32,
+        33,
+        38,
+        46,
+        47,
+        49,
+        87,
+        92,
+        96,
+        98,
+        99
+      ],
+      "impact": "Users cannot clean clutter or distinguish local deletion from deleting a provider message.",
+      "action": "Separate hide/archive, local deletion and provider deletion; expose qualified edit/delete actions and safe bulk cleanup.",
+      "test": "Verify each action affects only its stated scope and account; confirm destructive bulk actions clearly.",
+      "stage": "MVP",
+      "qualification": "Developer replies on p47/87 say deletion exists for some networks; absence, failure and discoverability must be separated"
+    },
+    {
+      "id": "B16",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Trust",
+      "title": "Lag, battery drain and update regressions",
+      "pages": [
+        4,
+        11,
+        13,
+        42,
+        50,
+        103
+      ],
+      "impact": "The hub itself becomes another heavy app and users prefer stable essentials over more features.",
+      "action": "Keep inbox work light, measure actual battery use, and gate connector/runtime upgrades on regression checks.",
+      "test": "Measure idle/background and active use on low-RAM and modern phones; verify the inbox survives AI failure.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "B17",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Trust",
+      "title": "Cloud discomfort and account security warnings",
+      "pages": [
+        7,
+        30,
+        45,
+        92,
+        100
+      ],
+      "impact": "Some users distrust cloud accounts or report provider security restrictions; a centralized inbox also concentrates sensitive history.",
+      "action": "Prefer qualified phone-local routes, show where data flows, protect credentials and local history, and surface provider security challenges.",
+      "test": "Inspect data flow and account isolation; show security/reconnect failures without hiding them.",
+      "stage": "MVP",
+      "qualification": "These reviews do not prove a data breach or establish the cause of a provider restriction"
+    },
+    {
+      "id": "B18",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Trust",
+      "title": "Pricing changes break expected workflows",
+      "pages": [
+        17,
+        32,
+        33,
+        36,
+        37,
+        47,
+        98
+      ],
+      "impact": "Users object to losing categories, multiple accounts or scheduled messages, especially an already queued send.",
+      "action": "Make limits and pricing clear before setup; preserve pending work across entitlement changes. Decide pricing after cost validation.",
+      "test": "Change an entitlement with queued work and show an explicit outcome; disclose account limits before connection.",
+      "stage": "Product decision",
+      "qualification": "Reviewer prices differ and are historical; none are treated as the current price"
+    },
+    {
+      "id": "B19",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Trust",
+      "title": "Support replies do not reliably close problems",
+      "pages": [
+        15,
+        25,
+        41,
+        91,
+        104
+      ],
+      "impact": "Some praise support; others report repeated generic replies and unresolved problems.",
+      "action": "Create privacy-safe diagnostics, traceable issue status and an explanation of what recovery can do.",
+      "test": "Export diagnostics without message bodies/tokens; reproduce a failure and show the user a concrete recovery outcome.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "B20",
+      "app": "Beeper",
+      "kind": "Request",
+      "group": "Control",
+      "title": "Notification sounds and noise preferences",
+      "pages": [
+        8,
+        19,
+        20,
+        32,
+        48,
+        97
+      ],
+      "impact": "People want per-person/network sounds and less noise from shared reels.",
+      "action": "Use Android notification channels and user-controlled noise rules; do not silently classify all shared content as junk.",
+      "test": "Change one source notification preference and verify important other-source messages still alert.",
+      "stage": "After reliable notifications",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "B21",
+      "app": "Beeper",
+      "kind": "Request",
+      "group": "Convenience",
+      "title": "Email, contacts and more network coverage",
+      "pages": [
+        13,
+        14,
+        23,
+        28,
+        37,
+        50,
+        88,
+        89,
+        90,
+        95
+      ],
+      "impact": "Users request email, nicknames, contacts, calls, TikTok, Snapchat and Viber; scope expansion competes with stability.",
+      "action": "Make Gmail, Outlook and Teams first-class scoped providers; assess other networks separately. Keep a contacts view optional.",
+      "test": "Qualify each requested account type and route before making connection claims.",
+      "stage": "MVP foundation; more networks later",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "B22",
+      "app": "Beeper",
+      "kind": "Issue",
+      "group": "Trust",
+      "title": "Native-app and cross-device dependencies surprise users",
+      "pages": [
+        7,
+        24,
+        39,
+        46,
+        48,
+        85,
+        87,
+        97,
+        99
+      ],
+      "impact": "A unified hub is mistaken for a complete native replacement; linked-device renewal and mobile iMessage limitations disappoint users.",
+      "action": "Disclose device/session dependencies during setup. Multi-device encrypted sync is a later deliberate design, not an implicit promise.",
+      "test": "Explain and test renewal/handoff behavior; maintain access to native apps where required.",
+      "stage": "MVP disclosure; cross-device later",
+      "qualification": "Current Beeper WhatsApp guide confirms primary-app use every 12-14 days; cannot promise MINI bypasses it"
+    },
+    {
+      "id": "P01",
+      "app": "PocketPal",
+      "kind": "Positive",
+      "group": "Convenience",
+      "title": "Private AI on the phone without a core account",
+      "pages": [
+        64,
+        70,
+        71
+      ],
+      "impact": "Some users value local models and no hidden payment; privacy is a strong motivation.",
+      "action": "Retain local English drafting without a MINI cloud account; explain provider sign-in separately.",
+      "test": "After model setup, draft from synthetic local context in airplane mode.",
+      "stage": "MVP",
+      "qualification": "Current official project documentation states local inference and no account required for core AI"
+    },
+    {
+      "id": "P02",
+      "app": "PocketPal",
+      "kind": "Positive",
+      "group": "Convenience",
+      "title": "Flexible model choice and useful writing",
+      "pages": [
+        65,
+        66,
+        70,
+        71,
+        82
+      ],
+      "impact": "Successful users praise smooth local models, Hugging Face access and a useful complex letter.",
+      "action": "Choose a tested default for ordinary users; retain advanced model options only after compatibility qualification.",
+      "test": "Evaluate useful English communication drafts on target devices; model download alone is not success.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "P03",
+      "app": "PocketPal",
+      "kind": "Positive",
+      "group": "Convenience",
+      "title": "Voice can improve hands-free use",
+      "pages": [
+        69
+      ],
+      "impact": "A user combines read-aloud speech with keyboard dictation and requests picture input.",
+      "action": "Consider local voice accessibility after reliable text; distinguish phone dictation from MINI-owned processing.",
+      "test": "Run a complete offline voice flow with assets present and expose unsupported voice features.",
+      "stage": "Later",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "P04",
+      "app": "PocketPal",
+      "kind": "Unique",
+      "group": "Convenience",
+      "title": "Local model library, personas and benchmarking",
+      "pages": [
+        52,
+        61,
+        69,
+        70,
+        71,
+        83
+      ],
+      "impact": "Custom Pals and model discovery are powerful, but selection and diagnostic tools can become friction.",
+      "action": "Borrow device qualification and an optional diagnostic benchmark; keep personas/catalogs out of the main reply flow.",
+      "test": "A normal user can draft without selecting a persona or running a benchmark.",
+      "stage": "Default model in MVP; advanced tools later",
+      "qualification": "Distinctive in this sample, not exclusive to PocketPal; p69/83 also report benchmark crashes"
+    },
+    {
+      "id": "P05",
+      "app": "PocketPal",
+      "kind": "Issue",
+      "group": "AI availability",
+      "title": "Downloads fail near completion and waste mobile data",
+      "pages": [
+        52,
+        55,
+        59,
+        61,
+        65,
+        68,
+        70,
+        77,
+        78,
+        80,
+        81,
+        83
+      ],
+      "impact": "Large failed downloads waste hours and expensive bandwidth; retries may require starting over.",
+      "action": "Use resumable downloads where the host supports ranges, integrity checks, clear byte size and consent for mobile data.",
+      "test": "Interrupt at multiple stages, resume or explain unsupported resume, verify checksum, and count transferred bytes.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "P06",
+      "app": "PocketPal",
+      "kind": "Issue",
+      "group": "AI availability",
+      "title": "File size and storage requirements are misleading",
+      "pages": [
+        78
+      ],
+      "impact": "A reviewer reports a 2.44GB model becoming 4.30GB; free disk space alone does not ensure sufficient runtime memory.",
+      "action": "Show actual file size, extra installation space, runtime RAM needs and compatibility before downloading.",
+      "test": "Compare advertised and downloaded bytes; handle disk exhaustion safely and explain RAM separately.",
+      "stage": "MVP",
+      "qualification": "Reported discrepancy; its cause is not established here"
+    },
+    {
+      "id": "P07",
+      "app": "PocketPal",
+      "kind": "Issue",
+      "group": "AI availability",
+      "title": "App becomes unusable after model download",
+      "pages": [
+        51,
+        55,
+        56,
+        58,
+        60,
+        62,
+        63,
+        64,
+        69,
+        72,
+        73,
+        74,
+        77,
+        83
+      ],
+      "impact": "Crashes on loading, repeated startup crashes and failed recommended models block the first useful action.",
+      "action": "Never auto-load a repeatedly failing model; provide safe startup, explicit recovery and a working manual inbox.",
+      "test": "Install an invalid/incompatible synthetic artifact, restart and recover without reinstalling or deleting user conversations.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "P08",
+      "app": "PocketPal",
+      "kind": "Issue",
+      "group": "AI availability",
+      "title": "Compatibility is not just model size or RAM",
+      "pages": [
+        58,
+        59,
+        63,
+        64,
+        69,
+        74,
+        75,
+        77,
+        79,
+        82,
+        83
+      ],
+      "impact": "Reports span a 4GB Galaxy A05 and high-end phones; both small and large models fail. One severe kernel-panic report is unverified.",
+      "action": "Qualify exact model format, tokenizer/template, runtime version and device/backend combination. Do not assume high RAM guarantees success.",
+      "test": "Run a known model/runtime/device matrix; treat severe device failures as blockers until investigated.",
+      "stage": "MVP",
+      "qualification": "Reviewer assertions about enough RAM or universal failure are not diagnosed causes"
+    },
+    {
+      "id": "P09",
+      "app": "PocketPal",
+      "kind": "Issue",
+      "group": "AI availability",
+      "title": "Slow or endless loading and generation",
+      "pages": [
+        53,
+        57,
+        58,
+        62,
+        68,
+        72,
+        73,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        84
+      ],
+      "impact": "Even a greeting can hang; keyboard lag and long waits make on-device AI feel broken.",
+      "action": "Use bounded load/generation times, responsive cancellation and clear progress; qualify a useful default on low-RAM phones.",
+      "test": "Measure cold start, first token and completion; cancel a stuck draft and keep the inbox responsive.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "P10",
+      "app": "PocketPal",
+      "kind": "Issue",
+      "group": "AI availability",
+      "title": "GPU/NPU hardware claims exceed actual compatibility",
+      "pages": [
+        75,
+        77,
+        79,
+        82,
+        86
+      ],
+      "impact": "Users see CPU-only fallback despite a capable phone; broad hardware marketing creates false expectations.",
+      "action": "Report the backend actually used and measured performance; select only tested acceleration paths with fallback.",
+      "test": "Compare detected vs used backend and fallback on Qualcomm and MediaTek target devices.",
+      "stage": "MVP qualification",
+      "qualification": "Store AI summary p86 is not evidence that every chipset works; current project docs explicitly distinguish supported backends"
+    },
+    {
+      "id": "P11",
+      "app": "PocketPal",
+      "kind": "Issue",
+      "group": "AI availability",
+      "title": "Long conversations fill context and freeze",
+      "pages": [
+        53,
+        61,
+        73,
+        74
+      ],
+      "impact": "Replies stop after a few turns or paragraphs; users cannot continue the conversation.",
+      "action": "Budget context, preserve recent relevant messages, summarize only when qualified, and explain truncation instead of freezing.",
+      "test": "Use long synthetic threads; verify bounded prompts and no loss of current intent or invented missing details.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "P12",
+      "app": "PocketPal",
+      "kind": "Issue",
+      "group": "AI availability",
+      "title": "Switching apps interrupts work",
+      "pages": [
+        66,
+        67,
+        68,
+        69,
+        80,
+        81
+      ],
+      "impact": "Generation stops/unloads and downloads may stop when backgrounded; users perceive unfinished work as failure.",
+      "action": "Keep heavy drafting foreground-only for MVP. Save the composer and permitted partial draft, explain interruption and offer a fresh retry on return. Downloads have a separate lifecycle.",
+      "test": "Switch apps during load, generation and download; verify no hidden model restart, clear cancellation, preserved input and safe download recovery.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "P13",
+      "app": "PocketPal",
+      "kind": "Issue",
+      "group": "AI quality",
+      "title": "Empty, repeated or garbled output",
+      "pages": [
+        52,
+        56,
+        72,
+        74,
+        76,
+        78,
+        82
+      ],
+      "impact": "Blank replies, repeated characters and off-topic loops are unusable regardless of token speed.",
+      "action": "Validate engine/template/tokenizer compatibility; evaluate task usefulness and handle empty/failed output plainly.",
+      "test": "Use English cases with dates, prices, quoted context and user intent; flag empty/repetitive output and allow manual reply.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "P14",
+      "app": "PocketPal",
+      "kind": "Issue",
+      "group": "AI quality",
+      "title": "Generic answers and forced personality",
+      "pages": [
+        72,
+        74,
+        78,
+        82
+      ],
+      "impact": "Users dislike fake friendliness, misunderstood requests and inappropriate or off-topic output.",
+      "action": "Draft grounded, concise replies in the user-selected tone; require exact review and never send automatically.",
+      "test": "Blindly assess English drafts for factual/context accuracy, tone and editing effort; retain romanized Hindi/Telugu exploratory cases.",
+      "stage": "MVP",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "P15",
+      "app": "PocketPal",
+      "kind": "Issue",
+      "group": "Control",
+      "title": "Setup and sign-in boundaries are confusing",
+      "pages": [
+        51,
+        52,
+        61,
+        84,
+        86
+      ],
+      "impact": "People do not know how to load a model, get redirected unexpectedly or believe local Pals require sign-in.",
+      "action": "Guide the first usable draft; distinguish local AI setup, provider OAuth and optional online catalogs. No unexplained store redirect.",
+      "test": "Observe setup without coaching; core local drafting works without catalog sign-in.",
+      "stage": "MVP",
+      "qualification": "Developer p61 says local Pals do not require sign-in; the review establishes confusion, not a proven account requirement"
+    },
+    {
+      "id": "P16",
+      "app": "PocketPal",
+      "kind": "Issue",
+      "group": "Trust",
+      "title": "Offline and voice behavior is questioned",
+      "pages": [
+        67,
+        68,
+        69
+      ],
+      "impact": "A reviewer says disabling SIM stopped AI; another says voice needs internet repeatedly. These are trust concerns, not proof of cloud inference.",
+      "action": "Verify offline drafting and downloaded voice assets separately; disclose network use for downloads and communication sync.",
+      "test": "After provisioning, restart in airplane mode and measure network attempts with synthetic data; test text and voice separately.",
+      "stage": "Text MVP; voice later",
+      "qualification": "Unverified reviewer allegations; cannot infer data exfiltration or a privacy breach"
+    },
+    {
+      "id": "P17",
+      "app": "PocketPal",
+      "kind": "Request",
+      "group": "Control",
+      "title": "Readable formatting, images and accessible output",
+      "pages": [
+        65,
+        69
+      ],
+      "impact": "Correct generated math is hard to read without rendering; users ask for image input and spoken interaction.",
+      "action": "Use clear copyable/editable reply formatting in MVP. Consider math rendering and image/voice input only for demonstrated communication needs.",
+      "test": "Verify multiline text, copying and large-font display; qualify any later media model input.",
+      "stage": "Plain text MVP; math/media later",
+      "qualification": "Reviewer report; not reproduced here"
+    },
+    {
+      "id": "P18",
+      "app": "PocketPal",
+      "kind": "Issue",
+      "group": "Trust",
+      "title": "Updates can introduce regressions",
+      "pages": [
+        56,
+        57,
+        61,
+        64,
+        74
+      ],
+      "impact": "Previously working configurations break; developer replies describe engine and model-support fixes.",
+      "action": "Pin qualified runtime/model versions and rerun cold-start, repeated-use, cancellation and recovery checks before upgrades.",
+      "test": "Repeat the accepted device/model workflow after an upgrade with existing local state.",
+      "stage": "MVP",
+      "qualification": "Developer replies are proposed fixes; reviewers did not verify resolution in these screenshots"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "BR001",
+      "app": "Beeper",
+      "name": "Timothy Dougherty",
+      "pages": [
+        2,
+        3
+      ],
+      "summary": "Notifications require foreground despite battery-setting attempts.",
+      "findings": [
+        "B05"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR002",
+      "app": "Beeper",
+      "name": "Ryan Hobbs",
+      "pages": [
+        3,
+        4,
+        26,
+        27
+      ],
+      "summary": "Likes unified concept; clunky layout, sporadic links, missed alerts and battery use caused abandonment.",
+      "findings": [
+        "B01",
+        "B05",
+        "B06",
+        "B11",
+        "B16"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR003",
+      "app": "Beeper",
+      "name": "Greg Haines",
+      "pages": [
+        4,
+        5
+      ],
+      "summary": "Previously liked app; reports late alerts, hard reconnection and perceived decline after monetization.",
+      "findings": [
+        "B05",
+        "B06",
+        "B18"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR004",
+      "app": "Beeper",
+      "name": "Black Knight",
+      "pages": [
+        5,
+        6
+      ],
+      "summary": "Missing mobile notifications and sending spinner despite desktop delivery.",
+      "findings": [
+        "B05",
+        "B07"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR005",
+      "app": "Beeper",
+      "name": "Arin Taylor",
+      "pages": [
+        6,
+        7
+      ],
+      "summary": "Fast UI and rare reconnects; Messenger notifications, cloud discomfort and merged-source clarity remain problems.",
+      "findings": [
+        "B03",
+        "B04",
+        "B05",
+        "B17",
+        "B18"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR006",
+      "app": "Beeper",
+      "name": "Directive Taurus",
+      "pages": [
+        7,
+        8
+      ],
+      "summary": "Wants discoverable network filters and a different notification sound.",
+      "findings": [
+        "B10",
+        "B20"
+      ],
+      "note": "Developer explains an existing network filter."
+    },
+    {
+      "id": "BR007",
+      "app": "Beeper",
+      "name": "Michael Goodin",
+      "pages": [
+        8,
+        9
+      ],
+      "summary": "Broken Google Messages connection was unnoticed; critical messages missed.",
+      "findings": [
+        "B05",
+        "B06"
+      ],
+      "note": "Developer mentions disconnection banners; effectiveness still disputed."
+    },
+    {
+      "id": "BR008",
+      "app": "Beeper",
+      "name": "Chris Payne",
+      "pages": [
+        9,
+        10
+      ],
+      "summary": "Beautiful useful aggregation; background notifications fail.",
+      "findings": [
+        "B01",
+        "B03",
+        "B05"
+      ],
+      "note": "Developer references device-specific notification issues."
+    },
+    {
+      "id": "BR009",
+      "app": "Beeper",
+      "name": "Moshiur Rahman (Adib)",
+      "pages": [
+        11
+      ],
+      "summary": "Works but lags on weaker phone; requests hiding chats and folders.",
+      "findings": [
+        "B10",
+        "B16"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR010",
+      "app": "Beeper",
+      "name": "Aaron Knobloch",
+      "pages": [
+        11,
+        12
+      ],
+      "summary": "Cannot replace native apps due to delays, timeouts and missing native actions.",
+      "findings": [
+        "B07",
+        "B14",
+        "B22"
+      ],
+      "note": "2024 report, not a current capability audit."
+    },
+    {
+      "id": "BR011",
+      "app": "Beeper",
+      "name": "Will Widlof",
+      "pages": [
+        12,
+        41,
+        42,
+        103,
+        104
+      ],
+      "summary": "Stability before features: polls, battery, reply targets, Android behavior and foreground-only notifications.",
+      "findings": [
+        "B05",
+        "B12",
+        "B14",
+        "B16"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR012",
+      "app": "Beeper",
+      "name": "Edgar Perez",
+      "pages": [
+        13
+      ],
+      "summary": "Likes idea; background crashes and SMS delays.",
+      "findings": [
+        "B05",
+        "B16"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR013",
+      "app": "Beeper",
+      "name": "Mark Kim Caladcad",
+      "pages": [
+        13,
+        14
+      ],
+      "summary": "Requests more networks/deletion; reports delayed alerts, logouts and wrong Messenger content.",
+      "findings": [
+        "B05",
+        "B06",
+        "B12",
+        "B15",
+        "B21"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR014",
+      "app": "Beeper",
+      "name": "Syros Only",
+      "pages": [
+        14
+      ],
+      "summary": "Likes app but no Discord/Instagram alerts.",
+      "findings": [
+        "B05"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR015",
+      "app": "Beeper",
+      "name": "RACHA NIKHIL",
+      "pages": [
+        15
+      ],
+      "summary": "Praises app but intermittent missing notifications.",
+      "findings": [
+        "B05"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR016",
+      "app": "Beeper",
+      "name": "Chris",
+      "pages": [
+        15,
+        16
+      ],
+      "summary": "Notifications absent for months; support did not resolve.",
+      "findings": [
+        "B05",
+        "B19"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR017",
+      "app": "Beeper",
+      "name": "LUXE MTL",
+      "pages": [
+        15,
+        16
+      ],
+      "summary": "Consolidation is good; new-message alerts sometimes absent.",
+      "findings": [
+        "B01",
+        "B05"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR018",
+      "app": "Beeper",
+      "name": "Shehu Awwal",
+      "pages": [
+        16
+      ],
+      "summary": "No notifications while away from app.",
+      "findings": [
+        "B05"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR019",
+      "app": "Beeper",
+      "name": "Kady Cooley",
+      "pages": [
+        17,
+        18
+      ],
+      "summary": "Categories are essential; layout/font requests and objection to premium labels.",
+      "findings": [
+        "B10",
+        "B11",
+        "B18"
+      ],
+      "note": "Historical reviewer price is not current pricing."
+    },
+    {
+      "id": "BR020",
+      "app": "Beeper",
+      "name": "Sagasu Jin",
+      "pages": [
+        18
+      ],
+      "summary": "Multi-account function good; icon-only bar and buried low-priority view are confusing; reminders unwanted.",
+      "findings": [
+        "B01",
+        "B10",
+        "B11"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR021",
+      "app": "Beeper",
+      "name": "mauricio curiel",
+      "pages": [
+        19
+      ],
+      "summary": "Avoids social apps and enjoys optional person-based contact merging.",
+      "findings": [
+        "B01",
+        "B02",
+        "B04"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR022",
+      "app": "Beeper",
+      "name": "Ved",
+      "pages": [
+        19,
+        20
+      ],
+      "summary": "Likes clean design; requests reel alert suppression and typing indicators.",
+      "findings": [
+        "B03",
+        "B14",
+        "B20"
+      ],
+      "note": "Reviewer explanation of Meta API limits is speculation."
+    },
+    {
+      "id": "BR023",
+      "app": "Beeper",
+      "name": "Dan Goelz",
+      "pages": [
+        20,
+        21
+      ],
+      "summary": "Feed-free Instagram messaging good; audio tail missing and phone-number link clutter.",
+      "findings": [
+        "B02",
+        "B13"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR024",
+      "app": "Beeper",
+      "name": "Miguel Silveira",
+      "pages": [
+        21,
+        22
+      ],
+      "summary": "Staying on top of cross-platform messages became much easier.",
+      "findings": [
+        "B01"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR025",
+      "app": "Beeper",
+      "name": "Michael",
+      "pages": [
+        22
+      ],
+      "summary": "Wants stronger native Matrix support on all devices.",
+      "findings": [
+        "B04"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR026",
+      "app": "Beeper",
+      "name": "Emma Lantos",
+      "pages": [
+        22,
+        23
+      ],
+      "summary": "Setup problems then good experience; reduced social addiction; requests nicknames.",
+      "findings": [
+        "B02",
+        "B03",
+        "B21"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR027",
+      "app": "Beeper",
+      "name": "Andrew Selzer-Wong",
+      "pages": [
+        23
+      ],
+      "summary": "Single inbox helps with ADHD-related reply follow-through.",
+      "findings": [
+        "B01",
+        "B02"
+      ],
+      "note": "Review cropped at end; no invented continuation."
+    },
+    {
+      "id": "BR028",
+      "app": "Beeper",
+      "name": "Otto Werse",
+      "pages": [
+        24
+      ],
+      "summary": "Broken GIF picker; requests easier on-device cross-device sync.",
+      "findings": [
+        "B13",
+        "B22"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR029",
+      "app": "Beeper",
+      "name": "Zac Bird",
+      "pages": [
+        24
+      ],
+      "summary": "Can remove Instagram yet keep messages, receipts, audio and shared reels; minor bugs.",
+      "findings": [
+        "B02",
+        "B13"
+      ],
+      "note": "Review ends mid-sentence."
+    },
+    {
+      "id": "BR030",
+      "app": "Beeper",
+      "name": "Troy Greer",
+      "pages": [
+        25
+      ],
+      "summary": "Google Messages history lost after reconnect; unresolved support and recurrence.",
+      "findings": [
+        "B06",
+        "B08",
+        "B19"
+      ],
+      "note": "Developer mentions limited recent-chat backfill."
+    },
+    {
+      "id": "BR031",
+      "app": "Beeper",
+      "name": "James Petty",
+      "pages": [
+        25
+      ],
+      "summary": "Requests select-all deletion for archived junk messages.",
+      "findings": [
+        "B15"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR032",
+      "app": "Beeper",
+      "name": "Name cropped (developer addresses Tomas)",
+      "pages": [
+        26
+      ],
+      "summary": "Logout prevents reentry and partial feature coverage requires original apps.",
+      "findings": [
+        "B06",
+        "B14",
+        "B22"
+      ],
+      "note": "Reviewer identity cropped; not merged with Tomas Landovsky."
+    },
+    {
+      "id": "BR033",
+      "app": "Beeper",
+      "name": "Thevindu D",
+      "pages": [
+        26,
+        27
+      ],
+      "summary": "Instagram communication without unwanted feed content.",
+      "findings": [
+        "B02"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR034",
+      "app": "Beeper",
+      "name": "Nicholas Tom (partially visible)",
+      "pages": [
+        28
+      ],
+      "summary": "Uses Instagram inbox without scrolling.",
+      "findings": [
+        "B02"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR035",
+      "app": "Beeper",
+      "name": "Chris Raaz",
+      "pages": [
+        28
+      ],
+      "summary": "Requests scheduling and smoother account linking.",
+      "findings": [
+        "B06",
+        "B14"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR036",
+      "app": "Beeper",
+      "name": "Nicolas Pereira M.",
+      "pages": [
+        28,
+        29
+      ],
+      "summary": "Free version and reduced screen time praised; quoted reply persists after sending.",
+      "findings": [
+        "B02",
+        "B12",
+        "B18"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR037",
+      "app": "Beeper",
+      "name": "Dan Horner",
+      "pages": [
+        29
+      ],
+      "summary": "Instagram sync/history works and avoids doomscrolling.",
+      "findings": [
+        "B02",
+        "B08"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR038",
+      "app": "Beeper",
+      "name": "Yurii Bychenok",
+      "pages": [
+        29,
+        30
+      ],
+      "summary": "Useful on Fold; Telegram channel comments and reply/citation UI limited.",
+      "findings": [
+        "B03",
+        "B12",
+        "B14"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR039",
+      "app": "Beeper",
+      "name": "Name unclear (looks like elp)",
+      "pages": [
+        30
+      ],
+      "summary": "No ads praised; missing Instagram features and concern about data security.",
+      "findings": [
+        "B14",
+        "B17"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR040",
+      "app": "Beeper",
+      "name": "Name cropped, 7/25/26",
+      "pages": [
+        31
+      ],
+      "summary": "One inbox and less reel scrolling work well.",
+      "findings": [
+        "B01",
+        "B02"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR041",
+      "app": "Beeper",
+      "name": "Just Jesse",
+      "pages": [
+        31
+      ],
+      "summary": "Gets feed-free Instagram messaging but photos unavailable.",
+      "findings": [
+        "B02",
+        "B13"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR042",
+      "app": "Beeper",
+      "name": "Michelle Tasker",
+      "pages": [
+        31,
+        32
+      ],
+      "summary": "Frequent disconnects require setup-like recovery; deletion and per-person sounds lacking; value questioned.",
+      "findings": [
+        "B06",
+        "B15",
+        "B18",
+        "B20"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR043",
+      "app": "Beeper",
+      "name": "Don Quixote",
+      "pages": [
+        32
+      ],
+      "summary": "Messaging without reels helps reduce doomscrolling.",
+      "findings": [
+        "B02"
+      ],
+      "note": "Review cropped at end."
+    },
+    {
+      "id": "BR044",
+      "app": "Beeper",
+      "name": "Matt Molloy",
+      "pages": [
+        33
+      ],
+      "summary": "Reliable unified accounts and feature coverage praised.",
+      "findings": [
+        "B01",
+        "B03"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR045",
+      "app": "Beeper",
+      "name": "Damien Thompkins",
+      "pages": [
+        33,
+        34
+      ],
+      "summary": "Disconnects, failed sends, deletion and pricing concerns.",
+      "findings": [
+        "B06",
+        "B07",
+        "B15",
+        "B18"
+      ],
+      "note": "Developer acknowledges reliability work; quoted price unverified."
+    },
+    {
+      "id": "BR046",
+      "app": "Beeper",
+      "name": "Ezra Snow",
+      "pages": [
+        34
+      ],
+      "summary": "Google Messages/WhatsApp mostly work; polls/group data, Discord/Google Chat and old-history gaps.",
+      "findings": [
+        "B08",
+        "B14"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR047",
+      "app": "Beeper",
+      "name": "Noreen B",
+      "pages": [
+        34,
+        35
+      ],
+      "summary": "Instagram/WhatsApp reconnect loops; camera crash, video and voice playback errors.",
+      "findings": [
+        "B06",
+        "B13"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR048",
+      "app": "Beeper",
+      "name": "J. Dominic Jackson",
+      "pages": [
+        35
+      ],
+      "summary": "Instagram/Facebook messages without feeds.",
+      "findings": [
+        "B02"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR049",
+      "app": "Beeper",
+      "name": "Name cropped, 10/16/25",
+      "pages": [
+        36
+      ],
+      "summary": "Matrix appreciated; connection issues, pinch zoom and desktop polish requested.",
+      "findings": [
+        "B04",
+        "B06",
+        "B11"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR050",
+      "app": "Beeper",
+      "name": "Kris Bennett",
+      "pages": [
+        36
+      ],
+      "summary": "Paywall change left scheduled message unsent; subscription value disputed.",
+      "findings": [
+        "B18"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR051",
+      "app": "Beeper",
+      "name": "Isaiah Hawkins",
+      "pages": [
+        36,
+        38
+      ],
+      "summary": "Previously good, now messages no longer work.",
+      "findings": [
+        "B08",
+        "B16"
+      ],
+      "note": "Symptom broad; no diagnosed cause."
+    },
+    {
+      "id": "BR052",
+      "app": "Beeper",
+      "name": "Jl Rony",
+      "pages": [
+        37
+      ],
+      "summary": "One inbox replaces many heavy apps.",
+      "findings": [
+        "B01",
+        "B16"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR053",
+      "app": "Beeper",
+      "name": "Joshua Cordova",
+      "pages": [
+        37
+      ],
+      "summary": "Good organization; requests email, contacts and calls, prefers affordable lifetime pricing.",
+      "findings": [
+        "B01",
+        "B18",
+        "B21"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR054",
+      "app": "Beeper",
+      "name": "Alexander Gomez",
+      "pages": [
+        38
+      ],
+      "summary": "Deletion does not remove all chats.",
+      "findings": [
+        "B15"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR055",
+      "app": "Beeper",
+      "name": "Vlad Levitsky",
+      "pages": [
+        38,
+        39
+      ],
+      "summary": "Messenger reauth/zoom problems, archived chats reappear, polls/media gaps.",
+      "findings": [
+        "B06",
+        "B09",
+        "B11",
+        "B13",
+        "B14"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR056",
+      "app": "Beeper",
+      "name": "Harry Thompson",
+      "pages": [
+        39
+      ],
+      "summary": "Works as secondary-device aggregator but expectations for main-phone SMS replacement unmet.",
+      "findings": [
+        "B22"
+      ],
+      "note": "Review cropped at end; causality not verified."
+    },
+    {
+      "id": "BR057",
+      "app": "Beeper",
+      "name": "Dev .B",
+      "pages": [
+        40
+      ],
+      "summary": "Sync mostly good; new chats require opening on source app; avoids Instagram feed.",
+      "findings": [
+        "B02",
+        "B08"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR058",
+      "app": "Beeper",
+      "name": "Karas Elbardisy",
+      "pages": [
+        40,
+        41,
+        104
+      ],
+      "summary": "Unified inbox good; WhatsApp group mute resets repeatedly and support unresolved.",
+      "findings": [
+        "B01",
+        "B09",
+        "B19"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR059",
+      "app": "Beeper",
+      "name": "Sonal Saha",
+      "pages": [
+        42,
+        43,
+        102,
+        103
+      ],
+      "summary": "Texting via Instagram/LinkedIn without status and feeds is valuable.",
+      "findings": [
+        "B02"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR060",
+      "app": "Beeper",
+      "name": "Andy N (Andstein)",
+      "pages": [
+        43,
+        102
+      ],
+      "summary": "Instagram photo variants missing, losing photos and context.",
+      "findings": [
+        "B13"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR061",
+      "app": "Beeper",
+      "name": "Name cropped, 6/10/26",
+      "pages": [
+        44,
+        101
+      ],
+      "summary": "Google Chat tag loses first character of person name.",
+      "findings": [
+        "B12"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR062",
+      "app": "Beeper",
+      "name": "Kardam Nedyalkov",
+      "pages": [
+        44,
+        101
+      ],
+      "summary": "Can chat with friends without using Instagram.",
+      "findings": [
+        "B02"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR063",
+      "app": "Beeper",
+      "name": "Sadman Sakib",
+      "pages": [
+        44,
+        45,
+        100,
+        101
+      ],
+      "summary": "Pinned grid wastes space and hides last-message preview.",
+      "findings": [
+        "B11"
+      ],
+      "note": "Discriminatory insults excluded from analysis; retain only actionable UI criticism."
+    },
+    {
+      "id": "BR064",
+      "app": "Beeper",
+      "name": "Rizky",
+      "pages": [
+        45,
+        100
+      ],
+      "summary": "Reduced screen time praised; reports Instagram security restriction.",
+      "findings": [
+        "B02",
+        "B17"
+      ],
+      "note": "Ends mid-sentence; cause of security warning unproven."
+    },
+    {
+      "id": "BR065",
+      "app": "Beeper",
+      "name": "R",
+      "pages": [
+        46,
+        99
+      ],
+      "summary": "Expected WhatsApp without primary app; dependency disappointing.",
+      "findings": [
+        "B22"
+      ],
+      "note": "Developer explains periodic primary-app use."
+    },
+    {
+      "id": "BR066",
+      "app": "Beeper",
+      "name": "Rehan Zahid",
+      "pages": [
+        46,
+        47,
+        98,
+        99
+      ],
+      "summary": "Likes experience but cannot delete messages.",
+      "findings": [
+        "B15"
+      ],
+      "note": "Developer says deletion exists; route/failure/discoverability unresolved."
+    },
+    {
+      "id": "BR067",
+      "app": "Beeper",
+      "name": "Vaclav Zak",
+      "pages": [
+        47,
+        98
+      ],
+      "summary": "Cannot add two WhatsApp accounts free.",
+      "findings": [
+        "B18"
+      ],
+      "note": "Historical entitlement claim, not current plan policy."
+    },
+    {
+      "id": "BR068",
+      "app": "Beeper",
+      "name": "Micheal Hylman",
+      "pages": [
+        48,
+        97
+      ],
+      "summary": "Likes app; wants mobile iMessage parity.",
+      "findings": [
+        "B22"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR069",
+      "app": "Beeper",
+      "name": "Amirhosein Haddadiyan",
+      "pages": [
+        48,
+        97
+      ],
+      "summary": "Likes app; asks for iMessage-like sending sound.",
+      "findings": [
+        "B20"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR070",
+      "app": "Beeper",
+      "name": "XBHS",
+      "pages": [
+        48,
+        97
+      ],
+      "summary": "One consistent interface across networks praised.",
+      "findings": [
+        "B01",
+        "B03"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR071",
+      "app": "Beeper",
+      "name": "Yousef Rekaaney",
+      "pages": [
+        49,
+        96
+      ],
+      "summary": "One social inbox saves time and simplifies messaging.",
+      "findings": [
+        "B01"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR072",
+      "app": "Beeper",
+      "name": "Eric Graham",
+      "pages": [
+        49,
+        96
+      ],
+      "summary": "Expected editing with Apple users; cannot find/use it.",
+      "findings": [
+        "B15",
+        "B22"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR073",
+      "app": "Beeper",
+      "name": "Ivan Maurizi",
+      "pages": [
+        49,
+        50,
+        95,
+        96
+      ],
+      "summary": "Likes theme and removing social apps; frequent Facebook/Instagram authorization.",
+      "findings": [
+        "B02",
+        "B03",
+        "B06"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR074",
+      "app": "Beeper",
+      "name": "Papaya",
+      "pages": [
+        50,
+        95
+      ],
+      "summary": "Likes idea; wants smoother performance and TikTok support.",
+      "findings": [
+        "B16",
+        "B21"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR075",
+      "app": "Beeper",
+      "name": "Maximusuperplus Mass",
+      "pages": [
+        50,
+        94,
+        95
+      ],
+      "summary": "Centralization good; requests old UI option.",
+      "findings": [
+        "B01",
+        "B11"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR076",
+      "app": "Beeper",
+      "name": "Halbour",
+      "pages": [
+        85,
+        87
+      ],
+      "summary": "Chat tasks easier.",
+      "findings": [
+        "B01"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR077",
+      "app": "Beeper",
+      "name": "Greek-script reviewer, name unclear",
+      "pages": [
+        85,
+        87
+      ],
+      "summary": "Expected paid iMessage access for family communication.",
+      "findings": [
+        "B18",
+        "B22"
+      ],
+      "note": "Developer says mobile iMessage offering disabled in 2023."
+    },
+    {
+      "id": "BR078",
+      "app": "Beeper",
+      "name": "Tom Brand",
+      "pages": [
+        85
+      ],
+      "summary": "Likes chatting with app.",
+      "findings": [
+        "B01"
+      ],
+      "note": "Generic positive; little specific evidence."
+    },
+    {
+      "id": "BR079",
+      "app": "Beeper",
+      "name": "Tapan 254 254",
+      "pages": [
+        87,
+        88,
+        89
+      ],
+      "summary": "Requests delete chat history.",
+      "findings": [
+        "B15"
+      ],
+      "note": "Developer says available on some networks."
+    },
+    {
+      "id": "BR080",
+      "app": "Beeper",
+      "name": "Ureki Jeffery",
+      "pages": [
+        88,
+        89
+      ],
+      "summary": "Wants WhatsApp archive preserved on new messages.",
+      "findings": [
+        "B09"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR081",
+      "app": "Beeper",
+      "name": "Anas Shahid",
+      "pages": [
+        88,
+        89
+      ],
+      "summary": "Everything good; requests TikTok chat.",
+      "findings": [
+        "B21"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR082",
+      "app": "Beeper",
+      "name": "Jort",
+      "pages": [
+        90,
+        91
+      ],
+      "summary": "Praises newly available polls.",
+      "findings": [
+        "B14"
+      ],
+      "note": "Conflict with earlier polls complaints; provider/platform not specified."
+    },
+    {
+      "id": "BR083",
+      "app": "Beeper",
+      "name": "Jackson Baker",
+      "pages": [
+        90,
+        91
+      ],
+      "summary": "Likes app; requests Snapchat and starting Google Voice conversations.",
+      "findings": [
+        "B21"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR084",
+      "app": "Beeper",
+      "name": "Tomas Landovsky",
+      "pages": [
+        90
+      ],
+      "summary": "Unified inbox relief and easy setup.",
+      "findings": [
+        "B01",
+        "B03"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR085",
+      "app": "Beeper",
+      "name": "Eric Lobdell",
+      "pages": [
+        91,
+        92
+      ],
+      "summary": "Working unified messaging, support and frequent updates praised.",
+      "findings": [
+        "B01",
+        "B19"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR086",
+      "app": "Beeper",
+      "name": "Brandon Lam",
+      "pages": [
+        91
+      ],
+      "summary": "Messaging friends without Instagram doomscrolling.",
+      "findings": [
+        "B02"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR087",
+      "app": "Beeper",
+      "name": "B (name unclear)",
+      "pages": [
+        92,
+        93
+      ],
+      "summary": "Worries inability to delete history exposes chats if phone stolen.",
+      "findings": [
+        "B15",
+        "B17"
+      ],
+      "note": "Concern is not a demonstrated encryption failure."
+    },
+    {
+      "id": "BR088",
+      "app": "Beeper",
+      "name": "Saad Aamer",
+      "pages": [
+        92
+      ],
+      "summary": "Good experience but cannot delete chats.",
+      "findings": [
+        "B15"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR089",
+      "app": "Beeper",
+      "name": "Jackson",
+      "pages": [
+        93,
+        94
+      ],
+      "summary": "One inbox good; sometimes messages fail to load.",
+      "findings": [
+        "B01",
+        "B08"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR090",
+      "app": "Beeper",
+      "name": "Noah Roberts",
+      "pages": [
+        93
+      ],
+      "summary": "Instagram messages without opening the distracting app.",
+      "findings": [
+        "B02"
+      ],
+      "note": ""
+    },
+    {
+      "id": "BR091",
+      "app": "Beeper",
+      "name": "Benjamin",
+      "pages": [
+        94
+      ],
+      "summary": "Inbox removes excuses to extend Instagram screen time.",
+      "findings": [
+        "B02"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR001",
+      "app": "PocketPal",
+      "name": "Name cropped at top",
+      "pages": [
+        51
+      ],
+      "summary": "Heavy app makes phone hang.",
+      "findings": [
+        "P09"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR002",
+      "app": "PocketPal",
+      "name": "ketan patel",
+      "pages": [
+        51
+      ],
+      "summary": "App does not work.",
+      "findings": [
+        "P07"
+      ],
+      "note": "No specific failure detail."
+    },
+    {
+      "id": "PR003",
+      "app": "PocketPal",
+      "name": "Angel",
+      "pages": [
+        51
+      ],
+      "summary": "Repeated crashes.",
+      "findings": [
+        "P07"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR004",
+      "app": "PocketPal",
+      "name": "Ayan Khan",
+      "pages": [
+        51
+      ],
+      "summary": "Cannot use app; sees load-model requirement.",
+      "findings": [
+        "P15"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR005",
+      "app": "PocketPal",
+      "name": "Ammaar Mohammad",
+      "pages": [
+        52,
+        53,
+        54
+      ],
+      "summary": "Crashes and wasted data; offline promotion raised expectations.",
+      "findings": [
+        "P05",
+        "P07",
+        "P16"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR006",
+      "app": "PocketPal",
+      "name": "cokeandcake",
+      "pages": [
+        52
+      ],
+      "summary": "Sage Pal returns empty messages.",
+      "findings": [
+        "P04",
+        "P13"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR007",
+      "app": "PocketPal",
+      "name": "Weall Lovecashapp",
+      "pages": [
+        52
+      ],
+      "summary": "Model installation redirects to Play Store.",
+      "findings": [
+        "P05",
+        "P15"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR008",
+      "app": "PocketPal",
+      "name": "Muhammad Mustafa",
+      "pages": [
+        52
+      ],
+      "summary": "Only name/date visible.",
+      "findings": [],
+      "note": "No review body visible; cannot infer sentiment or issue."
+    },
+    {
+      "id": "PR009",
+      "app": "PocketPal",
+      "name": "Antony Lee",
+      "pages": [
+        53,
+        54,
+        55,
+        73
+      ],
+      "summary": "Long load followed by filled context and frozen chat.",
+      "findings": [
+        "P09",
+        "P11"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR010",
+      "app": "PocketPal",
+      "name": "Joshua",
+      "pages": [
+        53,
+        54,
+        55
+      ],
+      "summary": "Model-load crashes despite other loaders working.",
+      "findings": [
+        "P07",
+        "P08"
+      ],
+      "note": "Developer suggests version update and Flash Attention settings; response clipped."
+    },
+    {
+      "id": "PR011",
+      "app": "PocketPal",
+      "name": "D4rknecromancer",
+      "pages": [
+        55,
+        56
+      ],
+      "summary": "New model download leaves app unreopenable; reinstalls required.",
+      "findings": [
+        "P05",
+        "P07"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR012",
+      "app": "PocketPal",
+      "name": "Abid osuli",
+      "pages": [
+        55
+      ],
+      "summary": "Download crash near 90% in Afghanistan.",
+      "findings": [
+        "P05"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR013",
+      "app": "PocketPal",
+      "name": "Bryan Bunch",
+      "pages": [
+        56,
+        57
+      ],
+      "summary": "Unspecified bug.",
+      "findings": [
+        "P07"
+      ],
+      "note": "No reproducible detail; not counted as a diagnosed model-load failure."
+    },
+    {
+      "id": "PR014",
+      "app": "PocketPal",
+      "name": "shervin tavakoli",
+      "pages": [
+        56,
+        57
+      ],
+      "summary": "Force-close failures after update.",
+      "findings": [
+        "P07",
+        "P18"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR015",
+      "app": "PocketPal",
+      "name": "Asher",
+      "pages": [
+        56
+      ],
+      "summary": "Completion HostFunction exception; previously worked.",
+      "findings": [
+        "P13",
+        "P18"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR016",
+      "app": "PocketPal",
+      "name": "Electi",
+      "pages": [
+        57
+      ],
+      "summary": "Crash after Bonsai-8B download.",
+      "findings": [
+        "P07",
+        "P08"
+      ],
+      "note": "Developer says engine updated in 1.13.3; not a verified fix here."
+    },
+    {
+      "id": "PR017",
+      "app": "PocketPal",
+      "name": "Bengali-script reviewer, name unclear",
+      "pages": [
+        58,
+        59
+      ],
+      "summary": "Startup crash after reported 64MB model on Galaxy A05, Android 15, 4GB RAM.",
+      "findings": [
+        "P07",
+        "P08"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR018",
+      "app": "PocketPal",
+      "name": "Abubakar S.",
+      "pages": [
+        58
+      ],
+      "summary": "Requests fewer crashes.",
+      "findings": [
+        "P07"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR019",
+      "app": "PocketPal",
+      "name": "Cameron",
+      "pages": [
+        57,
+        58,
+        74,
+        75
+      ],
+      "summary": "Slow/hanging/crashing on RedMagic 10 Pro with 16GB RAM.",
+      "findings": [
+        "P08",
+        "P09"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR020",
+      "app": "PocketPal",
+      "name": "Alessandro Zannone",
+      "pages": [
+        59,
+        60
+      ],
+      "summary": "1-2GB models crash on Galaxy S25 Ultra.",
+      "findings": [
+        "P07",
+        "P08"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR021",
+      "app": "PocketPal",
+      "name": "ch umer",
+      "pages": [
+        59
+      ],
+      "summary": "SmolVLM2 does not load; Qwen 2.5 3B download timeout.",
+      "findings": [
+        "P05",
+        "P08"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR022",
+      "app": "PocketPal",
+      "name": "Prim Aski (Prim)",
+      "pages": [
+        60,
+        63
+      ],
+      "summary": "Gemma load crashes despite perceived sufficient RAM.",
+      "findings": [
+        "P07",
+        "P08"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR023",
+      "app": "PocketPal",
+      "name": "liquidReverb",
+      "pages": [
+        60,
+        63
+      ],
+      "summary": "App will not open.",
+      "findings": [
+        "P07"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR024",
+      "app": "PocketPal",
+      "name": "Tim J",
+      "pages": [
+        60
+      ],
+      "summary": "Download, complete or incomplete, leads to persistent crashes.",
+      "findings": [
+        "P05",
+        "P07"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR025",
+      "app": "PocketPal",
+      "name": "Xenia",
+      "pages": [
+        61,
+        62
+      ],
+      "summary": "Local Pal sign-in confusion and replies stop after a few turns.",
+      "findings": [
+        "P11",
+        "P15"
+      ],
+      "note": "Developer says local Pals require no sign-in; clarify discoverability."
+    },
+    {
+      "id": "PR026",
+      "app": "PocketPal",
+      "name": "Arnab Ghose",
+      "pages": [
+        61
+      ],
+      "summary": "Broad complaint app does not function.",
+      "findings": [
+        "P07"
+      ],
+      "note": "No diagnosed cause."
+    },
+    {
+      "id": "PR027",
+      "app": "PocketPal",
+      "name": "Rajakishor Sahoo",
+      "pages": [
+        61
+      ],
+      "summary": "Failed model download wastes 400MB.",
+      "findings": [
+        "P05"
+      ],
+      "note": "Review continuation clipped."
+    },
+    {
+      "id": "PR028",
+      "app": "PocketPal",
+      "name": "LunarLight",
+      "pages": [
+        62,
+        64,
+        76
+      ],
+      "summary": "Initially works, later same model/settings load forever even for Hello.",
+      "findings": [
+        "P09",
+        "P18"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR029",
+      "app": "PocketPal",
+      "name": "RAFAELHWEJJ 1",
+      "pages": [
+        62
+      ],
+      "summary": "App closes when model selected.",
+      "findings": [
+        "P07"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR030",
+      "app": "PocketPal",
+      "name": "rajeev kr.",
+      "pages": [
+        62
+      ],
+      "summary": "Fresh install does not open.",
+      "findings": [
+        "P07"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR031",
+      "app": "PocketPal",
+      "name": "LuminumLX",
+      "pages": [
+        63
+      ],
+      "summary": "Reports Galaxy S10 kernel panics.",
+      "findings": [
+        "P08"
+      ],
+      "note": "Severe allegation; not reproduced or diagnosed."
+    },
+    {
+      "id": "PR032",
+      "app": "PocketPal",
+      "name": "Mark Fleener",
+      "pages": [
+        63
+      ],
+      "summary": "Repeated crashes regardless of attempts.",
+      "findings": [
+        "P07"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR033",
+      "app": "PocketPal",
+      "name": "nemesisx47",
+      "pages": [
+        64
+      ],
+      "summary": "Responsive local LLM app with no hidden payment praised.",
+      "findings": [
+        "P01"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR034",
+      "app": "PocketPal",
+      "name": "Raivis Alksnins",
+      "pages": [
+        64
+      ],
+      "summary": "Previously worked; model now crashes on Z Fold4.",
+      "findings": [
+        "P07",
+        "P18"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR035",
+      "app": "PocketPal",
+      "name": "Usmani Usmani",
+      "pages": [
+        65,
+        66
+      ],
+      "summary": "Repeated near-end download failures waste costly slow internet.",
+      "findings": [
+        "P05"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR036",
+      "app": "PocketPal",
+      "name": "Rajdeep Barma",
+      "pages": [
+        65
+      ],
+      "summary": "Models smooth and capable; requests proper LaTeX rendering.",
+      "findings": [
+        "P02",
+        "P17"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR037",
+      "app": "PocketPal",
+      "name": "Yordan Tuzsuzov",
+      "pages": [
+        65
+      ],
+      "summary": "Only name visible.",
+      "findings": [],
+      "note": "No review body visible; cannot infer sentiment or issue."
+    },
+    {
+      "id": "PR038",
+      "app": "PocketPal",
+      "name": "Raymond Tracer",
+      "pages": [
+        66,
+        67
+      ],
+      "summary": "Generation stops/model unloads on switching apps.",
+      "findings": [
+        "P12"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR039",
+      "app": "PocketPal",
+      "name": "Rishi Singh",
+      "pages": [
+        66
+      ],
+      "summary": "Praises app and argues oversized models can overwhelm phones.",
+      "findings": [
+        "P02",
+        "P08"
+      ],
+      "note": "Reviewer explanation is not proof of other reviewers causes."
+    },
+    {
+      "id": "PR040",
+      "app": "PocketPal",
+      "name": "fredi1356",
+      "pages": [
+        67,
+        68
+      ],
+      "summary": "Reports AI stops when all networking including SIM is disabled.",
+      "findings": [
+        "P16"
+      ],
+      "note": "Beginning partly clipped; no proof of cloud processing."
+    },
+    {
+      "id": "PR041",
+      "app": "PocketPal",
+      "name": "Mohamed Emad",
+      "pages": [
+        67
+      ],
+      "summary": "Supertonic voice inconsistent and reportedly needs initial internet each time.",
+      "findings": [
+        "P03",
+        "P16"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR042",
+      "app": "PocketPal",
+      "name": "Mike Dean",
+      "pages": [
+        68,
+        69,
+        80,
+        81,
+        83
+      ],
+      "summary": "Downloads interrupted on exit; model loads incorrectly.",
+      "findings": [
+        "P05",
+        "P12"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR043",
+      "app": "PocketPal",
+      "name": "kaestruu kaestru",
+      "pages": [
+        68,
+        80,
+        81
+      ],
+      "summary": "Small model slow, inaccurate and crashes on Poco X7 Pro.",
+      "findings": [
+        "P08",
+        "P09",
+        "P14"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR044",
+      "app": "PocketPal",
+      "name": "Toyin Blessed",
+      "pages": [
+        69
+      ],
+      "summary": "Voice/keyboard combo useful; suggests settings tuning and picture input.",
+      "findings": [
+        "P03",
+        "P17"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR045",
+      "app": "PocketPal",
+      "name": "James MC Lee",
+      "pages": [
+        69,
+        83
+      ],
+      "summary": "Recommended model and benchmark button crash.",
+      "findings": [
+        "P04",
+        "P07",
+        "P08"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR046",
+      "app": "PocketPal",
+      "name": "Dawid Chmielewski",
+      "pages": [
+        70,
+        71
+      ],
+      "summary": "Cannot download a model.",
+      "findings": [
+        "P05"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR047",
+      "app": "PocketPal",
+      "name": "Jake",
+      "pages": [
+        70,
+        71
+      ],
+      "summary": "Local model loading praised.",
+      "findings": [
+        "P01"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR048",
+      "app": "PocketPal",
+      "name": "Bronze James",
+      "pages": [
+        70,
+        71
+      ],
+      "summary": "Fast Hugging Face downloads praised.",
+      "findings": [
+        "P02"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR049",
+      "app": "PocketPal",
+      "name": "Justin Becker",
+      "pages": [
+        70
+      ],
+      "summary": "Crashes loading any model.",
+      "findings": [
+        "P07"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR050",
+      "app": "PocketPal",
+      "name": "Name cropped, continuation on p72",
+      "pages": [
+        72
+      ],
+      "summary": "Dissatisfied with factual/current-events answers.",
+      "findings": [
+        "P14"
+      ],
+      "note": "Incomplete body; neither factual claims nor identity verified."
+    },
+    {
+      "id": "PR051",
+      "app": "PocketPal",
+      "name": "Brennon",
+      "pages": [
+        72
+      ],
+      "summary": "Downloaded model never loads.",
+      "findings": [
+        "P07"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR052",
+      "app": "PocketPal",
+      "name": "Mazhar Ali",
+      "pages": [
+        72
+      ],
+      "summary": "Slow response and poor answers.",
+      "findings": [
+        "P09",
+        "P14"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR053",
+      "app": "PocketPal",
+      "name": "Vaidik bhoi",
+      "pages": [
+        72
+      ],
+      "summary": "Downloaded models do not load.",
+      "findings": [
+        "P07"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR054",
+      "app": "PocketPal",
+      "name": "Jason Whitney",
+      "pages": [
+        73,
+        74
+      ],
+      "summary": "Only a few paragraphs then off-topic/inappropriate output.",
+      "findings": [
+        "P11",
+        "P14"
+      ],
+      "note": "Cause may be model, template or runtime; not established."
+    },
+    {
+      "id": "PR055",
+      "app": "PocketPal",
+      "name": "Denis Plenert",
+      "pages": [
+        73
+      ],
+      "summary": "Good but not all models work.",
+      "findings": [
+        "P02",
+        "P08"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR056",
+      "app": "PocketPal",
+      "name": "Seth Allen",
+      "pages": [
+        73
+      ],
+      "summary": "Downloaded models fail and are slow.",
+      "findings": [
+        "P07",
+        "P09"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR057",
+      "app": "PocketPal",
+      "name": "W Anderson",
+      "pages": [
+        74,
+        75
+      ],
+      "summary": "Gemma 4 e2b fails on Pixel 9 Pro.",
+      "findings": [
+        "P08",
+        "P18"
+      ],
+      "note": "Developer says support added in 1.13.3; no follow-up confirming fix."
+    },
+    {
+      "id": "PR058",
+      "app": "PocketPal",
+      "name": "Soumyadeep Ghosh",
+      "pages": [
+        75,
+        77
+      ],
+      "summary": "CPU-only on Realme X2 Pro despite expected acceleration.",
+      "findings": [
+        "P10"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR059",
+      "app": "PocketPal",
+      "name": "Blake Houghton",
+      "pages": [
+        76
+      ],
+      "summary": "Garbled outputs and repeated single Kanji.",
+      "findings": [
+        "P13"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR060",
+      "app": "PocketPal",
+      "name": "Kamil Pawelczyk",
+      "pages": [
+        76
+      ],
+      "summary": "Repeated download attempts followed by gibberish.",
+      "findings": [
+        "P05",
+        "P13"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR061",
+      "app": "PocketPal",
+      "name": "Kurikutsu Nanami",
+      "pages": [
+        76,
+        77
+      ],
+      "summary": "GPU/NPU unrecognized; slow CPU-only lightweight model.",
+      "findings": [
+        "P09",
+        "P10"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR062",
+      "app": "PocketPal",
+      "name": "Quincy Beezel",
+      "pages": [
+        77
+      ],
+      "summary": "Requests lighter/faster model; smallest chosen model crashes.",
+      "findings": [
+        "P07",
+        "P08",
+        "P09"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR063",
+      "app": "PocketPal",
+      "name": "Hi Hay (name partly visible)",
+      "pages": [
+        77
+      ],
+      "summary": "Downloads repeatedly fail and take too long.",
+      "findings": [
+        "P05"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR064",
+      "app": "PocketPal",
+      "name": "MONISHA KAWART",
+      "pages": [
+        78,
+        82
+      ],
+      "summary": "Slow, generic/off-topic, repetitive replies and unwanted personality.",
+      "findings": [
+        "P13",
+        "P14"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR065",
+      "app": "PocketPal",
+      "name": "Mia",
+      "pages": [
+        78
+      ],
+      "summary": "Hours spent downloading; advertised and observed model size differ.",
+      "findings": [
+        "P05",
+        "P06"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR066",
+      "app": "PocketPal",
+      "name": "A B",
+      "pages": [
+        79
+      ],
+      "summary": "Many small models fail while a very large quantized model runs slowly.",
+      "findings": [
+        "P08",
+        "P09"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR067",
+      "app": "PocketPal",
+      "name": "Eduardo Farkas",
+      "pages": [
+        79
+      ],
+      "summary": "MediaTek/Mali backend unsupported; very slow Hello prompt.",
+      "findings": [
+        "P09",
+        "P10"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR068",
+      "app": "PocketPal",
+      "name": "Scott Egerton",
+      "pages": [
+        79,
+        82
+      ],
+      "summary": "Useful complex letter comparable to online AI.",
+      "findings": [
+        "P02"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR069",
+      "app": "PocketPal",
+      "name": "dnel",
+      "pages": [
+        80,
+        81
+      ],
+      "summary": "Design good but models load forever.",
+      "findings": [
+        "P09"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR070",
+      "app": "PocketPal",
+      "name": "Vikash Kumar",
+      "pages": [
+        82
+      ],
+      "summary": "Qwen model heavily lags Redmi Note 5 Pro and affects display.",
+      "findings": [
+        "P08",
+        "P09"
+      ],
+      "note": "Exact quantization OCR uncertain; not used as a verified specification."
+    },
+    {
+      "id": "PR071",
+      "app": "PocketPal",
+      "name": "Kosis Ray",
+      "pages": [
+        83,
+        84
+      ],
+      "summary": "Large model download fails at end wasting time/data.",
+      "findings": [
+        "P05"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR072",
+      "app": "PocketPal",
+      "name": "KIM",
+      "pages": [
+        84,
+        86
+      ],
+      "summary": "Setup instructions missing and replies stream extremely slowly.",
+      "findings": [
+        "P09",
+        "P15"
+      ],
+      "note": ""
+    },
+    {
+      "id": "PR073",
+      "app": "PocketPal",
+      "name": "Sparky Keffer",
+      "pages": [
+        84
+      ],
+      "summary": "Keyboard crashes and system lag.",
+      "findings": [
+        "P09"
+      ],
+      "note": ""
+    }
+  ],
+  "pages": [
+    {
+      "page": 1,
+      "app": "Beeper",
+      "kind": "Promotional screenshot",
+      "reviewIds": [],
+      "text": "8:47 0 M\nAll your chats,\nfinally in one place.\n9:30\nConnect Chat Accounts\n5 free accounts remaining\nQ Search...\nO\nWhatsApp\nGoogle\nChat\nLinkedIn\nTumblr\nInstagram\nGoogle\nMessages\nSignal\n9\nViber\nFacebook\nMessenger\nGoogle\nVoice\nSlack\nx\nDiscord\nLine\nTelegram\n"
+    },
+    {
+      "page": 2,
+      "app": "Beeper",
+      "kind": "Store AI summary + reviews",
+      "reviewIds": [
+        "BR001"
+      ],
+      "text": ",lll\n8:49 0 M\nRatings and reviews\nSearch reviews\n57\nMessaging Features 79\nAccount Managemen\nUsers are saying they praise the seamless\nmulti-device data sync and distraction-free social\nmessaging. They appreciate consolidated\nmessaging in a unified inbox and easy\nmulti-account management, though some report\nlogin glitches or disconnections. The user interface\nis loved for its clean design, despite a controversial\ntoolbar update.\n+ Summarized by Al\nMost relevant\nRating\nLatest vers\nReviews are provided by people with a verified\nGoogle Account based on their experience\nwith apps they have downloaded.\nTimothy Dougherty\n6/9/26\nNotifications are not coming through unless I\nopen the beeper app and bring it to the\nforeground. Seems the app isn't running in the\nbackground or something. I've made sure battery\noptimization is disabled for the app. I've even\n"
+    },
+    {
+      "page": 3,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR001",
+        "BR002"
+      ],
+      "text": ",lll\n8:49 0 M\nRatings and reviews\napps ley I ldve uuvvl IIUdUeU.\nTimothy Dougherty\n6/9/26\n57\nNotifications are not coming through unless I\nopen the beeper app and bring it to the\nforeground. Seems the app isn't running in the\nbackground or something. I've made sure battery\noptimization is disabled for the app. I've even\nlocked the app in the recent apps so it doesn't get\nkilled when clearing recent apps. Not sure what\nelse to do to get notifications to show up without\nhaving to open the app.\n2 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n6/9/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nRyan Hobbs\n8/18/26\nUsed for 2 weeks. Good, in theory but not in\npractice. The ability to have all your messaging\norganized and in one place would be great, but this\napp isn't it. The layout is clunky and connections\n"
+    },
+    {
+      "page": 4,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR002",
+        "BR003"
+      ],
+      "text": ",lll\n8:49 0 M\nRatings and reviews\nAutomattic, lnc\n57\n6/9/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nRyan Hobbs\n8/18/26\nUsed for 2 weeks. Good, in theory but not in\npractice. The ability to have all your messaging\norganized and in one place would be great, but this\napp isn't it. The layout is clunky and connections\nbetween different platforms is sporadic at best. I\nended up missing notifications and important\nmessages when the app failed to run in the\nbackground. Battery usage was a little high and\ncustomization was limited... it ended being so\nmessy that it was simpler not to use\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n8/19/26\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nGreg Haines\n2/14/26\n"
+    },
+    {
+      "page": 5,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR003",
+        "BR004"
+      ],
+      "text": "8:49 0 M\nRatings and reviews\n•Ill\nThanks for sharing your experience with us.\nWe'll continue to make this better.\ne Greg Haines\n2/14/26\nWhat the hell happened? This app was pretty\nmuch great, I was using it since pretty early on. But\nit feels like since it's become a paid app it's gone\ncompletely down hill. I often only see messages\nfrom people when I click I to the app.\nNotifications are hit or miss. Every now and then I'll\nget a message randomly pop up that was sent\nliterally IO hours earlier. And the reconnecting to\nservices is a nightmare. I've uninstalled for now but\nI'm sad about it. Spend some of that E on fixing it.\n8 people found this helpful\nWas this review helpful?\nAutomattic, lnc\n2/16/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nBlack Knight\n11/12/24\n"
+    },
+    {
+      "page": 6,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR004",
+        "BR005"
+      ],
+      "text": "8:49 0 M\nRatings and reviews\nAutomat-tic, lnc\n•Ill\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nBlack Knight\n11/12/24\nThe last month or so Beeper has stopped working\nproperly. I often don't get notified for new\nmessages (that I know I got because of the\ndesktop app). They don't show up when I close\nand reopen the app, or when when I force stop and\nrelaunch. When I send a message, often it will sit\nthere with the \"sending pinwheel\" but if I check on\nthe desktop app I can see the message was sent,\nand I'll often get replies to them despite the\npinwheel. It's quickly becoming useless to me.\n77 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n11/12/24\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nArin Taylor\n8/26/26\n"
+    },
+    {
+      "page": 7,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR005",
+        "BR006"
+      ],
+      "text": "8:49 0 M\nRatings and reviews\nArin Taylor\n8/26/26\n•Ill\nI tried out Beeper for a few months to consolidate\nmy existing suite of 5+ messaging apps. I have now\nuninstalled Beeper & am switching back to using\nthe native apps directly. + Solid Ul, snappy\nperformance + Rarely need to reconnect accounts\n- No notifications for FB Messenger unless\nBeeper app already open - Cloud accounts make\nme uncomfortable (Google Messages, Discord) -\nMerge chats seems cool but pricey; expected\nvisualization for which chat messages were from\n(e.g. swiping left or color)\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n9/1/26\nThanks for the feedback, Arin. We'll continue\nto make Beeper better.\nDirective Taurus\n2/12/25\nThe concept is good.... I've been using it for quite a\nwhile now.. The problem is that it gets very\nfrustrating to look for individual messages from\neach network connection... so it would be better if\nyou could add a way around the corner or on top\nto filter for which network connection i would like\n"
+    },
+    {
+      "page": 8,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR006",
+        "BR007"
+      ],
+      "text": "8:49 0 M\nRatings and reviews\nWas this review helpful?\nAutomattic, lnc\n•Ill\nYes\nNo\n9/1/26\nThanks for the feedback, Arin. We'll continue\nto make Beeper better.\nDirective Taurus\n2/12/25\nThe concept is good.... I've been using it for quite a\nwhile now.. The problem is that it gets very\nfrustrating to look for individual messages from\neach network connection... so it would be better if\nyou could add a way around the corner or on top\nto filter for which network connection i would like\nto see... also the notification sound... im sorry, but\nthe default notification sound for beeper is very\nannoying for me.. please add a way to change\nnotification sound to the system notification etc\n4 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n2/13/25\nHi there! This is actually available by pressing\non the search bar and selecting the chat\nnetwork you want to filter to. We're happy to\nMichael Goodin\n"
+    },
+    {
+      "page": 9,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR007",
+        "BR008"
+      ],
+      "text": "8:49 0 M\nRatings and reviews\nWas this review helpful?\nAutomattic, lnc\n•Ill\nYes\nNo\n2/13/25\nHi there! This is actually available by pressing\non the search bar and selecting the chat\nnetwork you want to filter to. We're happy to\nMichael Goodin\n6/17/25\ncool idea, but breaks when you need it most. I've\nbeen using this for a couple of weeks when the\nAndroid Messages connection broke and I was\nnone the wiser since i wasn't getting notifications\nafter switching over to Beeper. That's\nunacceptable - i missed some very critical, time\nsensitive messages. Never again\n20 people found this helpful\nWas this review helpful?\nAutomattic, lnc\n6/20/25\nHey there, Michael. Apologies for that lacking\nexperience. There are banner notifications that\nannounce when connection disconnects, and\nChris Payne\n6/5/24\n"
+    },
+    {
+      "page": 10,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR008"
+      ],
+      "text": "8:49 0 M\nRatings and reviews\nAutomattic, lnc\n•Ill\n6/20/25\nHey there, Michael. Apologies for that lacking\nexperience. There are banner notifications that\nannounce when connection disconnects, and\nChris Payne\n6/5/24\nI should say at the outset - I think the app is\nbeautiful and genuinely solves a long term issue by\naggregating all my messages. I definitely\nappreciate the hard work by devs to build the app!\nI can only score 3 at the moment due to an ongoing\nbug where the app doesn't send me notifications\nwithout me opening it in the foreground, so I've\nhad to actually turn back on notifications in the\nseparate apps themselves. I know this is being\ninvestigated and if a fix emerges I will be happy to\nre-rate!\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\n6/5/24\nThanks for the feedback, Chris. We've seen\nthe described issue as being related to\nspecific devices that includes Motorola. We\n"
+    },
+    {
+      "page": 11,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR009",
+        "BR010"
+      ],
+      "text": "8:49 0 M\nRatings and reviews\nMoshiur Rahman (Adib)\n4/10/24\n•Ill\nMain functions of the app work fine for now, but\nthe performance need to be improved. It's way\nmore laggy compared to other apps. I don't have\na really good phone but it shouldn't lag this much.\nAlso please add option to hide some chats as\ncombining multiple messengers makes the list very\nlong and all of them is not needed. For the same\nreason having an option to create folders of chats\nwould be nice. Otherwise good app\n19 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n5/22/24\nHi, Moshiur. We have since rolled out new\nupdates to the app. If you're still seeing the\nlagginess described here, can you send us an\nAaron Knobloch\n5/19/24\nBeeper tries to replace your chat apps, but\nunfortunately it can never fully do that. Which\nmakes it useless, for me. Everything is relayed, so\nthere are unavoidable bugs with sending, such\nas timeouts. And bugs with receiving, such as\n"
+    },
+    {
+      "page": 12,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR010",
+        "BR011"
+      ],
+      "text": "8:49 0 M\nRatings and reviews\nb/ IY/Z4\n•Ill\nBeeper tries to replace your chat apps, but\nunfortunately it can never fully do that. Which\nmakes it useless, for me. Everything is relayed, so\nthere are unavoidable bugs with sending, such\nas timeouts. And bugs with receiving, such as\ndelays. It's also not as featured as the native apps\nit wants to replace. So you cannot do things like\ntimed message delivery, make or receive\nWhatsApp calls, tag people in groups, etc. The\nannoyance of using Beeper is greater than the\nannoyance of using many apps\n2 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n5/20/24\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nWill Widlof\n3/6/26\nIt's a good app generally. But there needs to be\nmore focus on stabilising what's there. new\nfeatures are being added while existing ones are\nleft broken. * WhatsApp polls don't render votes\nforcing opening that app separately which defeats\nthe point. * Regular battery drain issues from\nupdates * Navigation animations match iOS not\nAndroid * Reolies to earlier messaaes in threads\n"
+    },
+    {
+      "page": 13,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR012",
+        "BR013"
+      ],
+      "text": "8:49 0 M\nRatings and reviews\nAutomattic, lnc\n•Ill\n3/6/26\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nEdgar Perez\n7/22/24\nIt's 0k. Needs more work. In theory it's amazing but\nit lags and crashes in the background and the\ndelay on sms is atrocious. If they fix it. Would\ndefinitely recommend.\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n7/23/24\nThanks for the feedback, Edgar. We hope you\ncan reconsider the rating once these issues\nare resolved.\nMark Kim Caladcad\n6/10/25\nfor future you shoud add more apps and Viber or\nany apps that you want to show notif in one place.\nthis is better app so far. add delete message to this\napp. notifications not realtime auto log out\naccounts need to login. pls fix it. Random\nmessages on the messenger not the real proper\n"
+    },
+    {
+      "page": 14,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR013",
+        "BR014"
+      ],
+      "text": "8:49 0 M\nRatings and reviews\n•Ill\nfor future you shoud add more apps and Viber or\nany apps that you want to show notif in one place.\nthis is better app so far. add delete message to this\napp. notifications not realtime auto log out\naccounts need to login. pls fix it. Random\nmessages on the messenger not the real proper\nmessage listed as on the messenger app. if fix this\n5star and share this to my entire community\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n6/10/25\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nS Syros Only\n5/5/24\nGreat! But could be better, I usually don't receive\nany notifications from the app when I receive\nmessages from Discord and Instagram.\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n5/9/24\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\n"
+    },
+    {
+      "page": 15,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR015",
+        "BR016",
+        "BR017"
+      ],
+      "text": "8:49 0 M\nRatings and reviews\nRACHA NIKHIL\n5/11/24\n•Ill\nExceptional app, but need to do too many\nchanges, sometimes I cant receive notifications. I\nhope they fix soon\nWas this review helpful?\nC Chris\n4/29/25\nYes\nNo\nThe app worked well at first, but I haven't had\nnotifications for months. I have reported the bug\nmultiple times, they replied but nothing gets\nresolved.\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n4/29/25\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nL LUXE MTL\n12/23/24\nGreat ann to consolidate evervthina Would be 5\n"
+    },
+    {
+      "page": 16,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR016",
+        "BR017",
+        "BR018"
+      ],
+      "text": "8:50 0 M\nRatings and reviews\n•Ill\nmultiple times, they replied but nothing gets\nresolved.\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n4/29/25\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nL LUXE MTL\n12/23/24\nGreat app to consolidate everything. Would be 5\nstars but sometimes I don't get alerted that a\nnew message has come in.\n1 person found this helpful\nWas this review helpful?\nShehu Awwal\n9/21/24\nYes\nNo\nNice app tho But you need to work on the\nnotification I don't get notifications when I'm not\non the app\nWas this review helpful?\nYes\nNo\n"
+    },
+    {
+      "page": 17,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR019"
+      ],
+      "text": "8:50 0 M\nRatings and reviews\nbummanzea oy Al\nv' Most relevant\nRating\nLatest vers\nReviews are provided by people with a verified\nGoogle Account based on their experience\nwith apps they have downloaded.\nKady Cooley\n7/15/26\nEDIT: they went and made labels a premium\nfeature entirely. $100 a year. I am beyond\nheartbroken and hope they will at least consider\nallowing free users to make at least a couple\ncategories would love to see italics support for\nsystem default font. not a huge fan of the native\nfont. I switched to this because I absolutely\nneeded to be able to categorize my messages\nafter they nixed Samsung Messages, so this app is\nmy saving grace. but the \"label\" (category) layout\nleaves a bit to be desired.\n28 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nThanks for the feedback. We'll share this with\nthe team!\nYes\nNo\n7/6/26\n"
+    },
+    {
+      "page": 18,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR019",
+        "BR020"
+      ],
+      "text": ",lll\n8:50 0 M\nRatings and reviews\nleaves a bit to be desired.\n28 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\n57\nNo\n7/6/26\nThanks for the feedback. We'll share this with\nthe team!\nS Sagasu Jin\n8/7/26\nI love the function but the new IJI leaves much to\nbe desired. Icons instead of text makes everything\nmuch more confusing than helpful and most of the\nicons aren't actually anything I use. I don't want\nany reminders anything within Beeper. I just want a\nmessaging service that simplifies multiple\naccounts. I don't need to access archives regularly.\nI do check on Low Priority semi-regularly, which\nmeans that burying it under layers of menus is\nreally annoying. The whole bottom Ul bar is\nannoying.\n7 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n7/18/26\nThanks for sharing your experience with us.\n"
+    },
+    {
+      "page": 19,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR021",
+        "BR022"
+      ],
+      "text": ",lll\n8:50 0 M\nRatings and reviews\n57\n1 1 IWI ICti II yuul I\nWe'll continue to make this better.\nmauricio curiel\n8/11/26\nAmazing solution that helps me keep in touch with\neveryone without having time consuming apps like\nInstagram installed. It also makes it easy to\nmessage people without negotiating which app\nto use. They can use whatever they want and I'll\nkeep using Beeper. Also they keep adding features\nto make it better. I'm so happy for the contact\nmerging feature. Messaging someone on text,\nInstagram, and what's app quickly clutters the\namount of messages I have. Now they're grouped\nper person.\n2 people found this helpful\nWas this review helpful?\nVed\n8/4/26\nYes\nNo\nGreat app. Something needs fixing also i\npersonally need an option to not show notification\nwhen someone sends me a reel on instagram.\nother than it i would be great if they could add the\ntyping feature but ik meta limits the information\nthat passes through their api so unless meta\nallows it we will be waiting but maybe i am wrong.\n"
+    },
+    {
+      "page": 20,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR022",
+        "BR023"
+      ],
+      "text": "8:50 0 M\n•Ill\nRatings and reviews\nGreat app. Something needs fixing also i\npersonally need an option to not show notification\nwhen someone sends me a reel on instagram.\nother than it i would be great if they could add the\ntyping feature but ik meta limits the information\nthat passes through their api so unless meta\nallows it we will be waiting but maybe i am wrong.\nother than that the app has very good desing\nclean , minimalistic desing suits my taste. All\nfeatures work great the premium is great too\nthough I didn't buy it.\n5 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n8/5/26\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nD Dan Goelz\n5/20/26\nThis is a great app. Thank you for making it so I can\nuse insta messages without having to go on the\napp. My two gripes: The final few seconds of voice\nnotes from insta are dead air. I will receive a\n50-second long voice note, and only 40 seconds\nof it has actual audio. Beeper can see the message\nis 50s long, but the final IOS is missing. Also, if you\ninclude a phone # in your message, there's a giant\n"
+    },
+    {
+      "page": 21,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR023",
+        "BR024"
+      ],
+      "text": "8:50 0 M\nRatings and reviews\n•Ill\nThis is a great app. Thank you for making it so I can\nuse insta messages without having to go on the\napp. My two gripes: The final few seconds of voice\nnotes from insta are dead air. I will receive a\n50-second long voice note, and only 40 seconds\nof it has actual audio. Beeper can see the message\nis 50s long, but the final IOS is missing. Also, if you\ninclude a phone # in your message, there's a giant\nURL for their WhatsApp contact that appears in\nthe messages. Otherwise, no notes\n6 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n5/20/26\nThanks for the feedback, Dan. Is there any\nchance you can send a bug report by long\npressing on any Instagram voice note?\nM Miguel Silveira\n9/18/26\nWorks can't describe how great this app is. To me\nit was a life changer. Staying on top of messages\non different platforms became easy like never\nbefore. Can't recommend it enough. Love it.\nWas this review helpful?\nYes\nNo\n"
+    },
+    {
+      "page": 22,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR024",
+        "BR025",
+        "BR026"
+      ],
+      "text": "8:50 0 M\nRatings and reviews\n9/18/26\n•Ill\nWorks can't describe how great this app is. To me\nit was a life changer. Staying on top of messages\non different platforms became easy like never\nbefore. Can't recommend it enough. Love it.\nWas this review helpful?\n6M Michael\n8/23/26\nYes\nNo\nIt's a shame that the Matrix part of Beeper is\nshunted into the background and not even fully\nsupported on all devices, because this could\notherwise be an excellent gateway to wean friends\nand family off of centralized messaging and into\nthe FOSS Matrix ecosystem. Not bad, but I'll stick\nto a proper Matrix server for now.\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n8/24/26\nThank you for sharing your feedback with us,\nSteve. We'll continue to make this better.\nEmma Lantos\nQ 4/28/26\nI had some problems with the set-up at the\nbeqinninq but then it was workinq perfectly. There\n"
+    },
+    {
+      "page": 23,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR026",
+        "BR027"
+      ],
+      "text": "8:50 0 M\nRatings and reviews\n•Ill\nI nanK you Tor snaring your TeeaoacK witn us,\nSteve. We'll continue to make this better.\nEmma Lantos\n4/28/26\nI had some problems with the set-up at the\nbeginning but then it was working perfectly. There\nare many good features that make it easy to use\nand to have a similar experience to the other chat\nservers like fb messenger. Although I wish I could\ngive people nicknames for other people. Overall I\nreally like this app and it really helped me with my\nsocial media addiction, while still being able to\nconnect with my friends.\n2 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n4/28/26\nThanks for sharing your experience with us\nEmma. We'll continue to make this better.\nAndrew Selzer-Wong\n7/20/26\nwell this is the game changer. with my ADHD it's\nreally hard to get back to people since I have to\nswitch to so many apps. since I now have to check\nonly one place I've been a lot better about\n"
+    },
+    {
+      "page": 24,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR028",
+        "BR029"
+      ],
+      "text": "8:50 0 M\nRatings and reviews\n•Ill\n1 1 lal 01 lal 11 IY yuul uO.\nWe'll continue to make this better.\nOtto Werse\n8/3/26\nGIF picker is broken right now. Why is there no\nway to sync on device accounts across devices\neasily? Can't be that hard to sync messages from\none client to another without saving them in the\ncloud in 2026...\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\n8/3/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nZ Zac Bird\nQ 5/23/26\nI'm using the app sot to have Insta removed. It is\namazing for this. All your msgs move over, even\nlike if people are on mute. you can still see if\nsomething is sent or seen. you can still hear voice\nnotes and you can still watch a reel if a mate sends\nyou one. only reason its 4 and not 5 is theres a few\nvery minor bugs that I tried to flag to the team but I\nA;rqnl+ Ar\n"
+    },
+    {
+      "page": 25,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR030",
+        "BR031"
+      ],
+      "text": "8:50 0 M\nRatings and reviews\nTroy Greer\n7/1/26\n•Ill\nI just lost my conversation history in my Google\nMessages chats in Beeper after having to\nreconnect my account. Not happy. I refer back to\nold messages and pictures frequently, so now this\nrequires me to switch to the Google Messages app\nto see messages that were sent or received prior\nto today. Unacceptable. This was not resolved. I\nwas ghosted by support after sending what they\nasked for via email. The lost messages never\nreturned. Edit: It happened once again. Ridiculous.\n17 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n4/7/26\nHi Troy, your Google Messages chats should\nbe backfilled in Beeper (most recent 25 chats).\nIf you could send us a bug report, we're happy\nJames Petty\n8/11/26\nI would give this app 5 stars but doesn't have a\nselect all to delete all archive messages. How\nmany junk text you get today. it takes to long to\ndelete all archive messages.\nWas this review heloful?\nYes\nNo\n"
+    },
+    {
+      "page": 26,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR002",
+        "BR032",
+        "BR033"
+      ],
+      "text": "8:50 0 M\nRatings and reviews\n4/16/26\n•Ill\nWorked for like a month than it logged me out and I\ncan't login back. (the login works fine in the original\nmessager apps) But even when it worked it worked\nfor around 50% of the features so you still need\nthe original messager apps. So it's kinda pointless\ncool concept but far from working app that\nreplaces all/some of your messages apps.\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\n4/20/26\nHey Tomas! Could you please reach out to us\nat help@beeper.com? Happy to take a look at\nthis.\nThevindu D\n8/25/26\nThank you for an app that allows me to keep up\nwith instagram messages without having to deal\nwith the rest of slop on that app\nWas this review helpful?\nRyan Hobbs\n8/18/26\n"
+    },
+    {
+      "page": 27,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR002",
+        "BR033"
+      ],
+      "text": "8:50 0 M\nRatings and reviews\n8/25/26\n•Ill\nThank you for an app that allows me to keep up\nwith instagram messages without having to deal\nwith the rest of slop on that app\nWas this review helpful?\nRyan Hobbs\n8/18/26\nYes\nNo\nUsed for 2 weeks. Good, in theory but not in\npractice. The ability to have all your messaging\norganized and in one place would be great, but\nthis app isn't it. The layout is clunky and\nconnections between different platforms is\nsporadic at best. I ended up missing notifications\nand important messages when the app failed to\nrun in the background. Battery usage was a little\nhigh and customization was limited... it ended\nbeing so messy that it was simpler not to use\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\nNo\n8/19/26\nThanks for sharing your experience with us.\nWe'll continue to make this better.\n"
+    },
+    {
+      "page": 28,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR034",
+        "BR035",
+        "BR036"
+      ],
+      "text": "8:50 0 M\nRatings and reviews\nINIcn01as 10m\n9/2/26\n•Ill\ni am using it to view my instagram inbox only so\nthat i dont go scrolling after viewing my inbox\nnice app in my opinion\nWas this review helpful?\nC Chris Raaz\n5/30/26\nYes\nNo\nthe concept is really good! however the following\nthings could be better: - Ability to schedule\nmessages. - Smoother accounts connect ( I get\nseveral errors before being able to link accounts)\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n6/1/26\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nN Nicolas Pereira M.\n10/16/25\nWorks great, the free option is fantastic. There are\nstill bugs that need ironing out (e.g. when replying\nto messages, after hitting send, the message is\npersistently quoted). The app has allowed me to\nrat-II err—an timp hw Izøønintl mp frnm\n"
+    },
+    {
+      "page": 29,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR036",
+        "BR037",
+        "BR038"
+      ],
+      "text": "8:50 0 M\nRatings and reviews\n10/16/25\n•Ill\nWorks great, the free option is fantastic. There are\nstill bugs that need ironing out (e.g. when replying\nto messages, after hitting send, the message is\npersistently quoted). The app has allowed me to\nreduce screen time by keeping me away from\n\"reels\" and allowing me to focus on interacting\nwith the people I care about. I think the Beeper\nteam should advertise the app like this too, as I\nknow this is struggle for many. One can keep social\napps locked, but still be able to chat.\n11 people found this helpful\nWas this review helpful?\nDan Horner\n6/20/26\nYes\nNo\nfirst impression is good! The Instagram sync is\nworking fine and new messages are coming\nthrough, most chat history syncs. very much\nallows me to stay away from doomscrolling and\nonly message people.\nWas this review helpful?\nYurii Bychenok\n3/27/26\nYes\nNo\nI started to use it because Telegram on Fold\n"
+    },
+    {
+      "page": 30,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR038",
+        "BR039"
+      ],
+      "text": "8:51 0 M\nRatings and reviews\nYurii Bychenok\nQ 3/27/26\n•Ill\nI started to use it because Telegram on Fold\ndevices works very badly and Beeper is solution.\nBut in general, it's so-so as it doesn't support\ncomment sections in Telegram channels, and\nmost importantly, I find the comment/citation\nscheme weird and not logical.\n3 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n3/27/26\nThanks for sharing your experience with us.\nWe'll continue to make this better.\n6/30/26\nA lot of missing features in Instagram chats but\nstill works i hope no data breaches happen No ads\nwhich is rare Good app needs more care\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n6/30/26\nWe'd love to hear what types of features\nyou're looking for Instagram in Beeper - we\n"
+    },
+    {
+      "page": 31,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR040",
+        "BR041",
+        "BR042"
+      ],
+      "text": "8:51 0 M\nRatings and reviews\n7/25/26\n•Ill\nworks great to easily put all your messages in\none spot and to help stop scrolling reels\nWas this review helpful?\nO\nJust Jesse\n5/12/26\nYes\nNo\nso far pretty good i wanted Instagrams\nmessaging without the reels and i got it\nwhenever someone sends me a reel i can still see it\ni cannot see photos sent on Instagram which is my\nonly issue\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n5/13/26\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nMichelle Tasker\n1/12/26\nYou want to be PAID for this? What's wrong with it?\nLet's begin. 1. I use this to connect Google\nmessages to different platforms. It's a miracle if it\nran Stav conneeted for more than half a dav And\n"
+    },
+    {
+      "page": 32,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR042",
+        "BR043"
+      ],
+      "text": "8:51 0 M\nRatings and reviews\nIVIlcnelle lasKer\n1/12/26\n•Ill\nYou want to be PAID for this? What's wrong with it?\nLet's begin. 1. I use this to connect Google\nmessages to different platforms. It's a miracle if it\ncan stay connected for more than half a day. And\nto reconnect is not just a simple button but a whole\non process like it was a fresh install. 2. It doesn't\ndo anything special. I can't delete messages, I\ncan't change the notification sound per each\nperson. This software has not evolved since\ninception but the desire for money sure has.\n65 people found this helpful\nWas this review helpful?\nAutomattic, lnc\n1/12/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nDon Quixote\n6/1/26\nAwesome app! It has helped me stop doom\nscrolling. So many people use Instagram for\nmessaging but reels have been a real\ndistraction. now I can message with peace of\nmind. I know that's not the main use for beeper but\nit really has helped me. it also gets better with\n"
+    },
+    {
+      "page": 33,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR044",
+        "BR045"
+      ],
+      "text": "8:51 0 M\nRatings and reviews\nMatt Molloy\n6/3/26\n•Ill\nbeeper does a fantastic job of keeping all my chat\naccounts in one place. it is very reliable and fully\nfeatured.\nWas this review helpful?\nDamien Thompkins\n1/21/26\nIf all the bugs were addressed, my rating would\nimprove. Currently, the application frequently\ndisconnects from linked platforms, does not\npermit message deletion, often fails to deliver\nmessages, and does not reliably link with other\napps such as Messenger. And the price to upgrade\nyour subscription is ridiculously high... $49.99/\nmonth!!!\n4 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nNo\n1/23/26\nThanks for the detailed review. You're right.\nDisconnects and failed sends shouldn't\nhappen, and we're working on reliability. Quick\n"
+    },
+    {
+      "page": 34,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR045",
+        "BR046",
+        "BR047"
+      ],
+      "text": "8:51 0 M\nRatings and reviews\n11\n•Ill\nhappen, and we're working on reliability. Quick\nEzra Snow\n9/27/25\nWorks kinda well actually at least for Google\nMessages and WhatsApp (although polls on\nWhatsApp don't work and I can't see all group chat\ninfo, just the name, picture, and member list). It\ndoesn't work so well for Discord (mainly because\nDiscord's format is so different from normal\nmessaging apps) or Google Chat. For some reason\nI can't see DMs on Google Chat, not sure why. It\nalso can't load message history from before I\nconnected Beeper. Otherwise it's not bad!\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n9/29/25\nHi Ezra, we'll pass this feedback along to the\nteam. Regarding Google Chats, we don't\nbackfill chat history for Google Chats and can\nNoreen B\n1/12/26\nNot sure what's been happening recently but\nInstagram and Whatsapp keep randomly\n"
+    },
+    {
+      "page": 35,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR047",
+        "BR048"
+      ],
+      "text": "8:51 0 M\nRatings and reviews\n1/12/26\n•Ill\nNot sure what's been happening recently but\nInstagram and Whatsapp keep randomly\ndisconnecting and reconnecting, the app\nsometimes crashes when you try to take pictures\nor it shows errors when you want to play videos\nand voice messages so you either have to go out\nof the chat and back in or just go to the chat on\nthe native app to see what was sent. Hoping these\nissues will be ironed out because I hate using\nInstagram lol\n5 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n1/12/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nJ. Dominic Jackson\n7/4/26\nthis is a great app it does exactly what I needed\nand I can access ig and FB messages without\nlooking at the reels and feeds\nWas this review helpful?\nYes\nNo\n"
+    },
+    {
+      "page": 36,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR049",
+        "BR050",
+        "BR051"
+      ],
+      "text": "8:51 0 M\nRatings and reviews\n10/16/25\n•Ill\nI love the Matrix interoperability so much. More\npeople need to know about Matrix! There are\noccasional connection problems, I miss being able\nto pinch to zoom messages, and the PC app is a\nlittle clunky at times, but it's not like there are any\nbetter alternatives to compare to.\n1 person found this helpful\nWas this review helpful?\nKris Bennett\n12/6/25\nYes\nNo\nWas great.. now scheduled sending of messages\nis behind a pay wall.. also they decided to do this\nwhen I had a scheduled message queued for\nsending that never went out!.. they could have\nmade it so it applied to new messages only. Also\n$17.99 a month for \"limited pro features\" is just a\ncomplete rip off!.. should NOT be a subscription.\n22 people found this helpful\nWas this review helpful?\nIsaiah Hawkins\n4/14/26\nYes\nNo\ndoes not work at all with messages anymore.\n"
+    },
+    {
+      "page": 37,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR052",
+        "BR053"
+      ],
+      "text": "8:51 0 M\nRatings and reviews\nJl Jl Rony\n6/23/26\n•Ill\nAbsolute life saver. Instead using multiple heavy\napps, I get all my messages in one place.\nWas this review helpful?\nJoshua Cordova\n11/10/25\nYes\nNo\nThis is the best app of its kind! Great to organize all\nchats in one place! I do have some\nrecommendations for improvement. First please\nlook into email integration! Second the\nsubscription fees are just to high. I would love to\nsubscribe for a price of 20-30 for a lifetime. Third\nright now the only thing truly holding this app back\nis not having a dedicated contacts tab. If you add a\ndedicated contacts app similar to Google's this\nwould be a stand alone app! lastly phone call\nintegration pls!\n6 people found this helpful\nWas this review helpful?\nYes\nAutomattic, lnc\nThanks for the feedback, Richard. We'll pass\nthis along to the team.\nNo\n11/13/25\n"
+    },
+    {
+      "page": 38,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR051",
+        "BR054",
+        "BR055"
+      ],
+      "text": "8:51 0 M\nRatings and reviews\nU\nIsaiah Hawkins\n4/14/26\n•Ill\ndoes not work at all with messages anymore.\ncompletely useless, im disappointed this app was\nreally good until recently\n3 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n4/14/26\nSorry to hear this, Isaiah. We'd love to\ninvestigate. Could you send us a bug report via\nSettings > Report a Problem?\nAlexander Gomez\n6/21/26\nGreat app! But has issues deleting chats. Doesn't\nlet you get rid of all chats\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n6/23/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nVlad Levitsky\n"
+    },
+    {
+      "page": 39,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR055",
+        "BR056"
+      ],
+      "text": "8:51 0 M\nRatings and reviews\n2/7/26\n•Ill\nGood concept, but the app is not as good as I first\nthought. Free version lets me connect 5 services in\none place on my Android phone, but in reality it\ndidn't happen. Why I'm uninstalling after 2 months\nof use: 1) Messenger constantly disconnects.\nBetween Meta 2FA & Beeper's lame reconnection\nUl always at the wrong zoom, it's a pain in the\nneck, 2) archived WhatsApp chats keep\nreappearing after every update, 3) some\nWhatsApp features don't work, e.g. polls, some\nmedia (which I tolerated, tbh).\n2 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n2/11/26\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nHarry Thompson\n3/7/26\nit's a mix between a joke and actually being legit,\nit's a joke because it's not a messaging app for\nsms/mms/rcs. instead it CONNECTS to whatever,\nlike Google messages, discord, Google voice, and\na couple more. so for a second device this is\nactually perfect but using this for the main phone\nisn't ideal, messaqes will be delayed since it's\n"
+    },
+    {
+      "page": 40,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR057",
+        "BR058"
+      ],
+      "text": "8:51 0 M\nRatings and reviews\nWas this review helpful?\nAutomattic, lnc\n•Ill\n3/10/26\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nO\nD Dev .B\n12/2/25\nPretty decent app, I didn't have much problem with\nsyncs, although it does not automatically show you\nnew chats which you haven't opened at least once\nin whatever platform you're using. Gets the job\ndone and I can finally DM my friends without\ngoing through Instagram\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n12/3/25\nHi there! Are you saying that your messages\naren't automatically being pulled in? We'd love\nto investigate this. If you could long press on\nKaras Elbardisy\n2/11/26\nThe app is generally good. I'm very happy to have\nmy messages in one app. My rating is low\nbecause there's a bug that randomly unmutes my\nWhatsApp group chats. It's been going on for\n"
+    },
+    {
+      "page": 41,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR011",
+        "BR058"
+      ],
+      "text": "8:51 0 M\nRatings and reviews\nWas this review helpful?\nAutomattic, lnc\n•Ill\nYes\nNo\n12/3/25\nHi there! Are you saying that your messages\naren't automatically being pulled in? We'd love\nto investigate this. If you could long press on\nKaras Elbardisy\n2/11/26\nThe app is generally good. I'm very happy to have\nmy messages in one app. My rating is low\nbecause there's a bug that randomly unmutes my\nWhatsApp group chats. It's been going on for\nalmost 5 months. Support previously said it would\nbe fixed and has pushed several updates since\nsaying that. Now support doesn't respond to me.\nMy rating will stay low until this bug is fixed.\n5 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n2/11/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nWill Widlof\n3/6/26\n"
+    },
+    {
+      "page": 42,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR011",
+        "BR059"
+      ],
+      "text": "8:51 0 M\nRatings and reviews\n•Ill\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nWill Widlof\n3/6/26\nIt's a good app generally. But there needs to be\nmore focus on stabilising what's there. new\nfeatures are being added while existing ones are\nleft broken. * WhatsApp polls don't render votes\nforcing opening that app separately which defeats\nthe point. * Regular battery drain issues from\nupdates * Navigation animations match iOS not\nAndroid * Replies to earlier messages in threads\naren't clear which message it will respond to. *\nFrequently notifications are not received until the\napp is opened\n2 people found this helpful\nWas this review helpful?\nAutomattic, lnc\n3/6/26\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nS Sonal Saha\n1/30/26\nConsidering the amount of garbage that is\n"
+    },
+    {
+      "page": 43,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR059",
+        "BR060"
+      ],
+      "text": "8:51 0 M\nRatings and reviews\n•Ill\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nS Sonal Saha\n1/30/26\nConsidering the amount of garbage that is\nshovelling at us these days, like status,\ncommunities updates. it's great to app with just for\ntexting. I love that I can also use it for instagram\nand linked in messages. I don't have to get sucked\ninto their feeds while replying to messages. Great\napp.\nWas this review helpful?\nAndy N (Andstein)\n10/7/25\nYes\nNo\nlooked for an app where i can access only the IG\nDMs. While it works, It does not support IGs photo\nfeature (allow reply, keep in chat, view once) so i\nmissed lots of photos and context. LE: thanks, let\nus know when the feature is live. have a good day!\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n10/7/25\nThanks for sharing your experience with us.\nWe'll continue to make this better.\n"
+    },
+    {
+      "page": 44,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR061",
+        "BR062",
+        "BR063"
+      ],
+      "text": "8:52 0 M\nRatings and reviews\n6/10/26\n•Ill\nHi, When I use Google chat and tag someone; first\nletter of the tagged person is getting\nremoved .This is bug in beeper Please check the\nmail\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n6/1/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nO\nKardam Nedyalkov\n4/24/26\nThe best app if you don't want to use\nInstagram,but still chat with your friends\nWas this review helpful?\nSadman Sakib\n12/9/25\ncannot see last message of pinned chats,l have\nto click and enter just to view what was the last\nmessage. so whats the point of pinning? also\npinned messages takes lots of screen space,main\npurpose of pinned messages is to Access them\nfast, not to show just chat photo in a 3*3 large\n"
+    },
+    {
+      "page": 45,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR063",
+        "BR064"
+      ],
+      "text": "8:52 0 M\nRatings and reviews\n12/9/25\n•Ill\ncannot see last message of pinned chats,l have\nto click and enter just to view what was the last\nmessage. so whats the point of pinning? also\npinned messages takes lots of screen space,main\npurpose of pinned messages is to Access them\nfast, not to show just chat photo in a 3*3 large\narray. it's great to see beeper letting mentally\ndisabled people for IJI design but i prefer normal\npeople doing Ul design,or let any people design\ntheir which u strongly refuse for the sake of autistic\ndesigners.\n4 people found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n12/9/25\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nO Rizky\n1/20/26\nso far, i have good experience from beeper for\nreplacing Instagram app because i can reduce my\nscreentime without sacrificing my\ncommunication, even Instagram thinks my account\nwas compromised and my security setting account\nis restricted to change for a few days, and this is\n"
+    },
+    {
+      "page": 46,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR065",
+        "BR066"
+      ],
+      "text": "8:52 0 M\nRatings and reviews\n11/8/25\n•Ill\nNot what I was hoping for. I wanted to be able to\nchat with users on WhatsApp without having to\ninstall the actual App ( using an existing account)\nas I don't want MetaAl invading my life.\nUnfortunately, because of the way it links, you have\nto have it installed. Maybe no other way.\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n11/13/25\nHi there. WhatsApp requires that you open\ntheir app every 12-14 days to keep your\naccount online. Here's more information:\nRehan Zahid\n1/27/26\nFor me the experience was wonderful until I\nrealized you can't delete messages. This should\nbe a feature you guys should add since that's the\nonly reason I still have use default apps.\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n1/28/26\n"
+    },
+    {
+      "page": 47,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR066",
+        "BR067"
+      ],
+      "text": "8:52 0 M\nRatings and reviews\nRehan Zahid\n1/27/26\n•Ill\nFor me the experience was wonderful until I\nrealized you cant delete messages. This should\nbe a feature you guys should add since that's the\nonly reason I still have use default apps.\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n1/28/26\nHi there! We do have message deletion\nfeatures. Could you send a bug report by long\npressing the message you're unable to delete\nZak\n6/25/26\nI had to uninstall this app. I am using only\nwhatsapp and google messages and cant add 2\nWA accounts for free. That is useless for my\npurposes.\nWas this review helpful?\nAutomattic, lnc\n5/1/25\nHi Vaclav, we'd love to know more about how\nwe can turn this into a 5-star experience for\n"
+    },
+    {
+      "page": 48,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR068",
+        "BR069",
+        "BR070"
+      ],
+      "text": "8:52 0 M\nRatings and reviews\nMicheal Hylman\n11/14/25\n•Ill\nbeen using this since it's release and it's been\ngreat, only wish I could have imessges on the\nmobile apps not just desktop but I understand\nthat's an apple conflict.\nWas this review helpful?\nAmirhosein Haddadiyan\n10/16/25\nHello, everything is great about this app, just\nplease make the message sending sound like the\niPhone iMessage. It will be much better and the\napp will look beautiful... Thanks to the app creator.\nWas this review helpful?\nO\nXBHS\n11/7/25\nYes\nNo\nI love this app for combining all of my messaging\napps into one. It's so helpful. also having the same\ndesign over all of them is really nice.\n1 person found this helpful\nWas this review helpful?\nYes\nNo\n"
+    },
+    {
+      "page": 49,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR071",
+        "BR072",
+        "BR073"
+      ],
+      "text": "8:52 0 M\nRatings and reviews\nY Yousef Rekaaney\n12/9/25\n•Ill\none of the best messaging apps out there. having\nall of my social media messages in one app\nsaves me so much time and makes messaging\ngenerally easier.\n1 person found this helpful\nWas this review helpful?\nEric Graham\n2/14/26\nYes\nNo\nI just downloaded this to communicate with apple\nusers. one feature that chatted was the ability to\nedit a message. I can't seem to edit, can anyone\nelse edit chats with apple users?\nWas this review helpful?\nAutomattic, lnc\nYes\nNo\n2/16/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nIvan Maurizi\n1/3/26\nLove not needing Instagram and Facebook\n"
+    },
+    {
+      "page": 50,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR073",
+        "BR074",
+        "BR075"
+      ],
+      "text": "8:52 0 M\nRatings and reviews\nIVd11 IVIdUl ILI\n1/3/26\n•Ill\nLove not needing Instagram and Facebook\ninstalled to chat. I also appreciate the dynamic\ntheme. Update: 4 stars now, because of the\nfrequent need to authorize chat, specifically FB/IG\nWas this review helpful?\nAutomattic, lnc\nNo\n1/5/26\nThanks for sharing your experience with us.\nWe'll continue to make this better.\np Papaya\n3/2/26\nthe app is great and I like the idea but if the code\nwould be optimized to make running it Easier and\nSmoother experience would be nice. If it will have\nmessage support for Tiktok it's all we will need\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\n3/3/26\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nMaximusunernlus Masg\n"
+    },
+    {
+      "page": 51,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR001",
+        "PR002",
+        "PR003",
+        "PR004"
+      ],
+      "text": "9:45\ne Ratings and reviews\nheavy app my mobile hanging from this app it is\nnot a light app.\n1 person found this helpful\nWas this review helpful?\nketan patel\n5/3/26\nfake app it's not working orking\nWas this review helpful?\nA Angel\n6/11/26\napp crashes all the time\n1 person found this helpful\nWas this review helpful?\nA Ayan Khan\n4/2/26\nI hate this app It's not working and saying that\nonly load model\n"
+    },
+    {
+      "page": 52,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR005",
+        "PR006",
+        "PR007",
+        "PR008"
+      ],
+      "text": "9:45\nRatings and reviews\nAmmaar Mohammad\n3/30/26\nworst app i wanted give minus star although there\nwas no option accept this. waste of net and\ncrashes are like hell. iam also angry on the\npromoters or influencers for telling offline best ai\nWas this review helpful?\ncokeandcake\n9/13/26\nsage pal doesn't work, every time I send a\nmessage he sends a message with nothing\nWas this review helpful?\nW Weall Lovecashapp\n6/21/26\nkeeps throwing me back in Play store when I try\nto install model\n1 person found this helpful\nWas this review helpful?\nMuhammad Mustafa\n9/14/26\n"
+    },
+    {
+      "page": 53,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR005",
+        "PR009",
+        "PR010"
+      ],
+      "text": "9:45\ne Ratings and reviews\nWas this review helpful?\nAntony Lee\n5/28/26\nwaste of 3 hours to load. a few chat then context\nis fulled and freeze there.\nWas this review helpful?\nJoshua\n4/20/26\nCrashes while loading any model that any other\noffline LLM loader could load fine.\nWas this review helpful?\nLLM Ventures\n4/24/26\nSorry about the crashes! Please try:\n1. Update to 1.14.0 (latest)\n2. Settings Advanced Flash Attention\nA Ammaar Mohammad\n3/30/26\nworst app i wanted give minus star although there\nwas no option accept this. waste of net and\ncrashes are like hell. iam also angry on the\n"
+    },
+    {
+      "page": 54,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR005",
+        "PR009",
+        "PR010"
+      ],
+      "text": "9:28 X M O\ne Ratings and reviews\nWas this review helpful?\nAntony Lee\n5/28/26\nall\nwaste of 3 hours to load. a few chat then context\nis fulled and freeze there.\nWas this review helpful?\nJoshua\n4/20/26\nCrashes while loading any model that any other\noffline LLM loader could load fine.\nWas this review helpful?\nLLM Ventures\n4/24/26\nSorry about the crashes! Please try:\n1. Update to 1.14.0 (latest)\n2. Settings Advanced Flash Attention\nA Ammaar Mohammad\n3/30/26\nworst app i wanted give minus star although there\nwas no option accept this. waste of net and\ncrashes are like hell. iam also angry on the\n"
+    },
+    {
+      "page": 55,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR009",
+        "PR010",
+        "PR011",
+        "PR012"
+      ],
+      "text": "9:28 k. 01:10\ne Ratings and reviews\nvvv•\nWas this review helpful?\nD4rknecromancer\n4/2/26\nwhenever I download any new models it bugs out\nand won't let me reopen the app have to uninstall\nand redownload each time.\nWas this review helpful?\nA Abid osuli\n5/19/26\nthe worst app, in Afghanistan it doesn't work when\nI download a model it crashes in 90 percent.\nWas this review helpful?\nAntony L\n5/28/26\nwaste of 3 hours to load. a few chat then context\nis fulled and freeze there.\nWas this review helpful?\nJoshua\n"
+    },
+    {
+      "page": 56,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR011",
+        "PR013",
+        "PR014",
+        "PR015"
+      ],
+      "text": "9:28 • 01:07\ne Ratings and reviews\nmodel engine in vl.13.3, which should improve\nstability when loading models. Please update\nB Bryan Bunch\n9/13/26\nthis app has a bug needs fixed\n1 person found this helpful\nWas this review helpful?\nshervin tavakoli\n5/5/26\nforce close all the time!! after update!\nWas this review helpful?\nA Asher\n8/31/26\nCompletion failed: Exception in HostFunction: i\nget this alot it used to work before\nWas this review helpful?\nD4rknecromancer\n4/2/26\n"
+    },
+    {
+      "page": 57,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR013",
+        "PR014",
+        "PR016",
+        "PR019"
+      ],
+      "text": "9:28 k. 01:04\ne Ratings and reviews\nUnacceptably slow on a RedMagic IO Pro - 16GB\nRAM. Already tried every little setting. Slow,\ncrashes/hangs, lags, etc. Garbage.\n6 people found this helpful\nWas this review helpful?\nEl ecti\n4/3/26\nApp crashes after downloading bonsai-8b model\nWas this review helpful?\nLLM Ventures\n4/7/26\nSorry about the crash! We've updated the\nmodel engine in vl.13.3, which should improve\nstability when loading models. Please update\nB Bryan Bunch\n9/13/26\nthis app has a bug needs fixed\n1 person found this helpful\nWas this review helpful?\nshervin tavakoli\n"
+    },
+    {
+      "page": 58,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR017",
+        "PR018",
+        "PR019"
+      ],
+      "text": "9:28 •e 01:02\ne Ratings and reviews\n3/30/26\nThe App Crashed after an ai model download I\ncan't use this app the app keeps crashing Phone\nName : Samsung galaxy A05 Android Version :\nAndroid 15 Ram : 4GB Storage : 64 GB I just\ndownloaded an 64mb model and it started to crash\nwhen I open the app it crashes. please fix this\nissue\n1 person found this helpful\nWas this review helpful?\nA Abubakar S.\n5/19/26\nOptimize it so it crashes less often please\nWas this review helpful?\nCameron\n3/25/26\nUnacceptably slow on a RedMagic IO Pro - 16GB\nRAM. Already tried every little setting. Slow,\ncrashes/hangs, lags, etc. Garbage.\n6 people found this helpful\nWag thig review helnfl IP\nYeg\n"
+    },
+    {
+      "page": 59,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR017",
+        "PR020",
+        "PR021"
+      ],
+      "text": "9:28 Qoo:58\ne Ratings and reviews\n8/7/26\nliterally useless, any model I load even of Igb -\n2gb app immediately crashes on my s25 ultra, it's\neasier and more stable to run ollama through\ntermux instead\nWas this review helpful?\nch umer\n3/24/26\nI'm facing two issues in the app: 1. I downloaded\nSmolVLM2-5, but it doesn't load or work in chat.\n2. I'm having trouble downloading Qwen 2.5 3B — it\nkeeps failing due to a timeout error. Please help me\nfix these issues.\n8 people found this helpful\nWas this review helpful?\n3/30/26\nThe App Crashed after an ai model download I\ncan't use this app the app keeps crashing Phone\nName : Samsung galaxy A05 Android Version :\nAndroid 15 Ram : 4GB Storage : 64 GB I just\ndownloaded an 64mb model and it started to crash\nwhen I open the app it crashes. please fix this\n"
+    },
+    {
+      "page": 60,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR020",
+        "PR022",
+        "PR023",
+        "PR024"
+      ],
+      "text": "9:28 k. 00:55\ne Ratings and reviews\n8/2/26\nCrashes when attempting Gemma, even with\nsufficient RAM\nWas this review helpful?\nliquidReverb\n6/16/26\ni downloaded the app and it won't even open, I've\nbeen trying for the past ten minutes gang\n3 people found this helpful\nWas this review helpful?\nTim J\n4/1/26\nwhether the model download completes or not\nthe app crashes and never works again\n1 person found this helpful\nWas this review helpful?\nAlessandro Zannone\n8/7/26\nliterally useless, any model I load even of Igb -\n2gb app immediately crashes on my s25 ultra, it's\n"
+    },
+    {
+      "page": 61,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR025",
+        "PR026",
+        "PR027"
+      ],
+      "text": "9:28 k. 00:48\ne Ratings and reviews\nXenia\n4/20/26\nWants to sign in when creating a pal. Allow local\npal without sign in. Also replies stop after 3-4th\none.\nWas this review helpful?\nLLM Ventures\n4/24/26\nThanks for the feedback! Creating local Pals\ndoes not require sign-in. Tap the + in the\nmiddle of the bottom bar (sign-in is only for\nArnab Ghose\n9/1/26\nis this app vibe coded by any chance? Pretty much\na non functionable App.\nWas this review helpful?\nRajakishor Sahoo\n4/8/26\n\"Wasted 400 MB on a failed download a model e.\nKeeps stopping midway. Fix the download issue\nASAP!\" \"Uninstalled. Not worth the data loss.\n\"E DOWNLOAD CRASH LANDING Wasted 400\n"
+    },
+    {
+      "page": 62,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR025",
+        "PR028",
+        "PR029",
+        "PR030"
+      ],
+      "text": "9:28 • 00:44\ne Ratings and reviews\nLunarLight\n7/14/26\nwork okay on the first try, several days later, using\nthe same settings and model, for some reason the\nmodel is loading but the reply takes forever, it's\nonly doing the loading the prompt even as simple\nas \"Hello\", I've restarted and forced close and start\nagain.\nWas this review helpful?\nRAFAELHWEJJ 1\n8/11/26\ndoesn't work, it keeps closing the app when i\nchoose the model.\nWas this review helpful?\nO\nrajeev kr.\n4/1/26\nInstalled the app just now and uninstalling it. The\napp is not opening.Trying to open it,but it fails\n2 people found this helpful\nWas this review helpful?\nXenia\n"
+    },
+    {
+      "page": 63,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR022",
+        "PR023",
+        "PR031",
+        "PR032"
+      ],
+      "text": "9:28 k. 00:52\ne Ratings and reviews\n1 person found this helpful\nWas this review helpful?\nLuminumLX\n8/24/26\nApplication is triggering kernel panics on my\ndevice (Galaxy SIO, 4.14.113)\n1 person found this helpful\nWas this review helpful?\nMark Fleener\n8/13/26\nKeeps crashing, doesn't work no matter what I try.\nWas this review helpful?\nPrim Aski (Prim)\n8/2/26\nCrashes when attempting Gemma, even with\nsufficient RAM\nWas this review helpful?\nO\nliquidReverb\n"
+    },
+    {
+      "page": 64,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR028",
+        "PR033",
+        "PR034"
+      ],
+      "text": "9:28 k. 00:40\ne Ratings and reviews\n00\nnemesisx47\n4/8/26\nGreat app! It lets you run LLMs on your phone. No\nhidden payment is required to access the\nfunctions of the app. Seems responsive and bug\nfree. Highly recommended.\n10 people found this helpful\nWas this review helpful?\nRaivis Alksnins\n6/11/26\nUsed to work great. Now crashes every single\ntime when loading a model which makes the app\ntotally useless. I'm using zfold 4.\n8 people found this helpful\nWas this review helpful?\nLunarLight\n7/14/26\nwork okay on the first try, several days later, using\nthe same settings and model, for some reason the\nmodel is loading but the reply takes forever, it's\nonly doing the loading the prompt even as simple\nas \"Hello\", I've restarted and forced close and start\naaain-\n"
+    },
+    {
+      "page": 65,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR035",
+        "PR036",
+        "PR037"
+      ],
+      "text": "9:28 k. 00:31\nU\nRatings and reviews\nUsmani Usmani\n4/10/26\nWorst app ever, download failed twice in end.\nDon't try to download this app because it will\nwaste your time by failing and failing process will\nannoy you very much especially in those countries\nwhere there internet is too much expensive and\nslow like in Afghanistan.\n15 people found this helpful\nWas this review helpful?\nR Rajdeep Barma\n4/5/26\nthe app runs smoothly, renders models perfectly,\neven supports latest models (which even fails at\nlmstudio sometimes) . but I request developers to\nadd proper LaTeX support for the text generation.\nthe models are obviously generating proper text,\nbut there seems to be no LaTeX rendering so it is\nnot much understandable. so kindly add that and\nthis will be the best app of it's kind\n8 people found this helpful\nWas this review helpful?\nYordan Tuzsuzov\n"
+    },
+    {
+      "page": 66,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR035",
+        "PR038",
+        "PR039"
+      ],
+      "text": "9:28 k. 00:28\nRatings and reviews\nRaymond Tracer\n8/10/26\nit stops generating output and unloads the\nmodel when you switch to another app, how\nuseless!\n2 people found this helpful\nWas this review helpful?\nRISHI\nRICH\nRishi Singh\n8/19/26\nVery great App, idk why people in comment\nsaying mobile is lagging etc, dude if you run 27\nBillion parameter on a phone y it will crash\n3 people found this helpful\nWas this review helpful?\nU Usmani Usmani\n4/10/26\nWorst app ever, download failed twice in end.\nDon't try to download this app because it will\nwaste your time by failing and failing process will\nannoy you very much especially in those countries\nwhere there internet is too much expensive and\nslow like in Afghanistan.\n15 people found this helpful\n"
+    },
+    {
+      "page": 67,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR038",
+        "PR040",
+        "PR041"
+      ],
+      "text": "9:27 k. 00:25\ne Ratings and reviews\nVVV• 1 vvao app\nGemini researching the possibility for fully local run\nAl to ensure that if preferred, a fully confidential\nchat could be experienced. How i created the\nisolation? I disabled Wi-Fi, Bluetooth, NFC and any\nactivated SIM. When SIM was deactivated the Al\nstopped working. Everything else worked as good\nas for what it was promised to be able to do.\n40 people found this helpful\nWas this review helpful?\nMohamed Emad\n8/3/26\nSUPERTONIC voices doesn't work all the time\nand require initial internet connection to work\noffline every time, testing on Samsung Galaxy\nS25 Ultra\n1 person found this helpful\nWas this review helpful?\nRaymond Tracer\n8/10/26\nit stops generating output and unloads the\nmodel when you switch to another app, how\nuseless!\n2 people found this helpful\n"
+    },
+    {
+      "page": 68,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR040",
+        "PR042",
+        "PR043"
+      ],
+      "text": "9:27 k. 00:22\ne Ratings and reviews\nWas this review helpful?\nM Mike Dean\n8/27/26\nYes\nNo\nThe download will be interrupted if the program\nis exited while downloading the model.\nFurthermore, the model frequently loads\nincorrectly.\n5 people found this helpful\nWas this review helpful?\nkaestruu kaestru\n7/25/26\nI don't understand i literally downloaded the lowest\nmodel and it's still make mistakes and takes ages\nto reply and my phone isn't bad I got Poco x7 pro\nwhat's the reason for the models to be so slow??\nnot just that it keeps crashing out during\nresponses what's going on???\n5 people found this helpful\nWas this review helpful?\nfredi1356\n4/3/26\nNOT FULLY LOCAL !!! When the device was fully\n"
+    },
+    {
+      "page": 69,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR042",
+        "PR044",
+        "PR045"
+      ],
+      "text": "9:27 •oo:18\ne Ratings and reviews\nToyin Blessed\n9/5/26\nI like this app it's well made even with a tts voice\nfor read aloud I even paired it with yuto keyboard\ntranscribe voice and it felt hand free. for any one\nexperiencing lags or keyboard crashes try tuning\nthe ai in the settings then you will enjoy it.\ndevelopers you did a real great job but please add\npic features so I can send pictures to my ai. thanks\n4 people found this helpful\nWas this review helpful?\nJames MC Lee\n9/9/26\nCant even load the model it recommended, always\ncrash. I try clicking the benchmarking button, also\ncrash on every click\n3 people found this helpful\nWas this review helpful?\nM Mike Dean\n8/27/26\nThe download will be interrupted if the program\nis exited while downloading the model.\n"
+    },
+    {
+      "page": 70,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR046",
+        "PR047",
+        "PR048",
+        "PR049"
+      ],
+      "text": "9:27\nall\nD\nRatings and reviews\nDawid Chmielewski\n6/22/26\nFails to download any model\n1 person found this helpful\nWas this review helpful?\nJake\n3/24/26\nBest app for local on hardware ai loading\nWas this review helpful?\nBronze James\n4/11/26\nI love how you can download HuggingFace\nmodels fast\nWas this review helpful?\nJustin Becker\n4/8/26\ncrashes when loading any model :(\nWas this review helpful?\n"
+    },
+    {
+      "page": 71,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR046",
+        "PR047",
+        "PR048"
+      ],
+      "text": "9:27\nWas this review helpful?\nD Dawid Chmielewski\n6/22/26\nFails to download any model\n1 person found this helpful\nWas this review helpful?\nJake\n3/24/26\nBest app for local on hardware ai loading\nWas this review helpful?\nBronze James\n4/11/26\nI love how you can download HuggingFace\nmodels fast\nWas this review helpful?\n"
+    },
+    {
+      "page": 72,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR050",
+        "PR051",
+        "PR052",
+        "PR053"
+      ],
+      "text": "9:27 X M O\ne Ratings and reviews\nIran IS naving a war witn USA...... worst al ever, tney\njust taking advantage of it being able to be used\noffline, would not recommend, worst thing ever\nWas this review helpful?\nB\nBrennon\n4/8/26\nI downloaded the app installed the model but\nthe model does not load at all\nWas this review helpful?\nM Mazhar Ali\n6/29/26\nThat's okay but very slow to respond and not give\ngood response\n1 person found this helpful\nWas this review helpful?\nV Vaidik bhoi\n7/5/26\nmodel not loading every model i download\n2 people found this helpful\nWas this review helpful?\nYes\nNo\n"
+    },
+    {
+      "page": 73,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR009",
+        "PR054",
+        "PR055",
+        "PR056"
+      ],
+      "text": "9:27 X M O\ne Ratings and reviews\nalso glitched out talking about, miners, sex, illegal\nactivities.... not sure what excatly they are training\nthese models on.\n2 people found this helpful\nWas this review helpful?\nD Denis Plenert\n8/28/26\ngood but not every ai works\nWas this review helpful?\nAntony Lee\n5/28/26\nwaste of 3 hours to load. a few chat then context\nis fulled and freeze there.\nWas this review helpful?\nS Seth Allen\n3/26/26\nnone of the AIs I downloaded worked and was\noverall slow.\n1 person found this helpful\n"
+    },
+    {
+      "page": 74,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR019",
+        "PR054",
+        "PR057"
+      ],
+      "text": "9:27 X M O\ne Ratings and reviews\nRAM. Already tried every little setting. Slow,\ncrashes/hangs, lags, etc. Garbage.\n6 people found this helpful\nWas this review helpful?\nW Anderson\n4/5/26\n\"failed to load model\" Gemma 4 e2b on a pixel 9\npro that should work fine.\n1 person found this helpful\nWas this review helpful?\nLLM Ventures\n4/7/26\nThanks for reporting this! Gemma 4 support\nwas added in vl.13.3, which is now rolling out.\nPlease update and try again, it should load\nJason Whitney\n3/26/26\nwont go further then a couple of paragraphs.\nalso glitched out talking about, miners, sex, illegal\nactivities.... not sure what excatly they are training\nthese models on.\n2 people found this helpful\n"
+    },
+    {
+      "page": 75,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR019",
+        "PR057",
+        "PR058"
+      ],
+      "text": "9:27 X M O\ne Ratings and reviews\nS Soumyadeep Ghosh\n5/17/26\nusing realme x2 pro 12Gb ram. it says, Cpu only -\nno hardware excelration found. why? cpu getting\n100 percent while gpu is 2 - 3 percentage usage.\nwhat to do?\nWas this review helpful?\nCameron\n3/25/26\nUnacceptably slow on a RedMagic 10 Pro - 16GB\nRAM. Already tried every little setting. Slow,\ncrashes/hangs, lags, etc. Garbage.\n6 people found this helpful\nWas this review helpful?\nW Anderson\n4/5/26\n\"failed to load model\" Gemma 4 e2b on a pixel 9\npro that should work fine.\n1 person found this helpful\nWas this review helpful?\n"
+    },
+    {
+      "page": 76,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR028",
+        "PR059",
+        "PR060",
+        "PR061"
+      ],
+      "text": "9:27 X M O\ne Ratings and reviews\n7/14/26\nwork okay on the first try, several days later, using\nthe same settings and model, for some reason\nthe model is loading but the reply takes forever,\nit's only doing the loading the prompt even as\nsimple as \"Hello\", I've restarted and forced close\nand start again.\nWas this review helpful?\nBlake Houghton\n7/24/26\nIt has a lot of bells and whistles, but the LLMs\ndon't actually work in this environment. whatever\nis happening here, all outputs of all models are\ngarbled messes, if they do more than output a\nsingle Kanji repeatedly.\nWas this review helpful?\nK Kamil Pawelczyk\n8/29/26\nbroken garbage, took 10 tries to download a\nmodel and it answers gibberish\nWas this review helpful?\nKurikutsu Nanami\n"
+    },
+    {
+      "page": 77,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR058",
+        "PR061",
+        "PR062",
+        "PR063"
+      ],
+      "text": "9:27 X M O\ne Ratings and reviews\n9/14/26\nIt can't recognize the GPU and NPU acceleration\non my phone, so I can only use CPU to generate\nthe token and it's really slow even for lightweight\nmodels\n1 person found this helpful\nWas this review helpful?\nQ Quincy Beezel\n8/25/26\nNeed Improve Performance or at least lighter\nmodel. I could dl model but even the lightest model\nnot function. It crashed right at the time loading.\nWas this review helpful?\n4/26/26\nso frustrating download are keep failed and take\ntoo long\nWas this review helpful?\nS Soumyadeep Ghosh\n5/17/26\n"
+    },
+    {
+      "page": 78,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR064",
+        "PR065"
+      ],
+      "text": "9:26 X M O\ne Ratings and reviews\n5/18/26\nPocket Pal Al is hands-down the worst chatbot I've\never used. It's painfully slow, constantly\nmisunderstands basic questions, and gives\ngeneric, useless answers that feel copied.The\n\"personality\" is cringy and robotic - it tries way\ntoo hard to be friendly but ends up sounding fake\nand annoying. Half the time it repeats itself or goes\ncompletely off-topic. Even simple conversations\nturn into frustrating loops. On top of that, it feels\ninvasive with how it pushes point.\n4 people found this helpful\nWas this review helpful?\nMia\n4/25/26\nI wasted 4 hours downloading a 2.44GB model, I\nhave 300GB of storage. And once it finally\ncompleted \"WHOOPS no you downloaded\n4.30GB!! NOT 2.44!!\" HOW??? I wasted so much\ntime waiting and got my hopes up for no reason\nman.\n6 people found this helpful\nWas this review helpful?\nLLM Ventures\n4/28/26\n"
+    },
+    {
+      "page": 79,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR066",
+        "PR067",
+        "PR068"
+      ],
+      "text": "9:26 X M O\ne Ratings and reviews\n1 person found this helpful\nWas this review helpful?\nO'\n7/20/26\nToo many small models don't run. Bonsai 27B\nQI O however runs, but quite slowly.\nWas this review helpful?\nEduardo Farkas\n5/3/26\nDoes not support MediaTek Dimensity 8500 Ultra\nnor the Mali-G720 MC8 GPU and not even mention\nMediatek Neuropilot architecture. LLMs run\nextremely slow, even the smallest. 1 minute or\nmore for a \"Hello\" prompt!!! I really hope the\ndevelopers incorporate these new chipsets.\n5 people found this helpful\nWas this review helpful?\nScott Egerton\n4/16/26\nfantastic app I've been looking for an Al that I can\nengage with before hitting limits. I had the ai write\n"
+    },
+    {
+      "page": 80,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR042",
+        "PR043",
+        "PR069"
+      ],
+      "text": "9:25 X M O\ne Ratings and reviews\nM Mike Dean\n8/27/26\nThe download will be interrupted if the program is\nexited while downloading the model. Furthermore,\nthe model frequently loads incorrectly.\n5 people found this helpful\nWas this review helpful?\nkaestruu kaestru\n7/25/26\nI don't understand i literally downloaded the\nlowest model and it's still make mistakes and\ntakes ages to reply and my phone isn't bad I got\nPoco x7 pro what's the reason for the models to be\nso slow??not just that it keeps crashing out during\nresponses what's going on???\n5 people found this helpful\nWas this review helpful?\ndnel\n8/21/26\nmodels kept loading forever I never got to use\nthem otherwise nicely designed app\n1 person found this helpful\n"
+    },
+    {
+      "page": 81,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR042",
+        "PR043",
+        "PR069"
+      ],
+      "text": "9:26 X M O\ne Ratings and reviews\nM Mike Dean\n8/27/26\nThe download will be interrupted if the program is\nexited while downloading the model. Furthermore,\nthe model frequently loads incorrectly.\n5 people found this helpful\nWas this review helpful?\nkaestruu kaestru\n7/25/26\nI don't understand i literally downloaded the\nlowest model and it's still make mistakes and\ntakes ages to reply and my phone isn't bad I got\nPoco x7 pro what's the reason for the models to be\nso slow??not just that it keeps crashing out during\nresponses what's going on???\n5 people found this helpful\nWas this review helpful?\ndnel\n8/21/26\nmodels kept loading forever I never got to use\nthem otherwise nicely designed app\n1 person found this helpful\n"
+    },
+    {
+      "page": 82,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR064",
+        "PR068",
+        "PR070"
+      ],
+      "text": "9:26 X M O\ne Ratings and reviews\nScott Egerton\n4/16/26\nfantastic app I've been looking for an Al that I can\nengage with before hitting limits. I had the ai write\nquite a complex letter and it did just as good as\nany other online AI.\n2 people found this helpful\nWas this review helpful?\nV Vikash Kumar\n4/7/26\nThis app is not compatable for Redmi note 5 Pro. I\ndownloaded Queen 2.5 -1.5B -Instruct (Q8_8) in it.\nAfter that there is a problem in the display of my\nphone. This model was lagging heavily on the\nmobile phone.@.\n1 person found this helpful\nWas this review helpful?\nM MONISHA KAWART\n5/18/26\nPocket Pal Al is hands-down the worst chatbot I've\never used. It's painfully slow, constantly\nmisunderstands basic questions, and gives\ngeneric, useless answers that feel copied.The\n"
+    },
+    {
+      "page": 83,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR042",
+        "PR045",
+        "PR071"
+      ],
+      "text": "9:25 X M O\ne Ratings and reviews\n11 people found this helpful\nWas this review helpful?\nKosis Ray\n8/9/26\none of the worst app ever.lt just waste your time\nand data.lt says download the model first which is\nbetween 1-2 gb but when the download starts it\nshowing downloading and conserve your data and\nat the last point where your data was already\ninvested it shows download faild try again.just a\nwaste of times\n6 people found this helpful\nWas this review helpful?\nJames MC Lee\n9/9/26\nCant even load the model it recommended,\nalways crash. I try clicking the benchmarking\nbutton, also crash on every click\n3 people found this helpful\nWas this review helpful?\nM Mike Dean\n"
+    },
+    {
+      "page": 84,
+      "app": "PocketPal",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "PR071",
+        "PR072",
+        "PR073"
+      ],
+      "text": "9:25 X M O\ne Ratings and reviews\nAccount oaseu on tnel[ exper 'ence\nwith apps they have downloaded.\nK KIM\n9/7/26\nA There's no point being proud that it can do this\nthat and the other because in my experience I\ndiscover that No instructions on how to set it\nup. Neither in his app nor anybody's YouTube\nvideos. A Very slow at replying. One\ncharacter at a time appears. It's like you can see\ntyping one character at a time.\n4 people found this helpful\nWas this review helpful?\nSparky Keffer\n8/4/26\nNot worth your time. causes excessive lag,\nkeyboard crashes, and overall poor\nperformance. unless you're using a phone with\nabsolutely nothing else on it except this app, your\nphone is guaranteed to constantly crash!\n11 people found this helpful\nWas this review helpful?\nKosis Ray\n"
+    },
+    {
+      "page": 85,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR076",
+        "BR077",
+        "BR078"
+      ],
+      "text": "9:24 X M O\ne Ratings and reviews\nHalbour\n9/29/25\nReally makes everything chat-related easier.\n1 person found this helpful\nWas this review helpful?\nnåvvnq Aå0KapaKQ\n12/9/25\nI got this for my brother cause I have an iphone\nnow he needs to pay to use imessage network I\nhave to have green bubbles when talking\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\n12/10/25\nWe disabled our iMessage offering for iOS and\nAndroid due to reliability issues caused by\nApple in December 2023. As a replacement for\nT Tom Brand\n7/30/26\nI like to chat with it\nWas this review helpful?\n"
+    },
+    {
+      "page": 86,
+      "app": "PocketPal",
+      "kind": "Store AI summary + reviews",
+      "reviewIds": [
+        "PR072"
+      ],
+      "text": "9:25 X M O\ne Ratings and reviews\nQ Search reviews\nPerformance\n64\nApp Stability 61\nFeatu\n64 reviews mention performance\n09 @ 55\nUsers praise the performance, highlighting flexible\nhardware acceleration across CPU, OpenCL, and\nNPUs that deliver remarkably fast, smooth\nprocessing on supported devices. When properly\nconfigured, token speeds are impressive. A few\nusers constructively mention occasional loading\ncrashes, slow replies, or battery drain on specific\nchipsets.\nSummarized by Al\nMost relevant\nRating\nLatest versi\nReviews are provided by people with a verified\nGoogle Account based on their experience\nwith apps they have downloaded.\nK KIM\n9/7/26\nA There's no point being proud that it can do this\nthat and the other because in my experience I\ndiscover that No instructions on how to set it\n"
+    },
+    {
+      "page": 87,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR076",
+        "BR077",
+        "BR079"
+      ],
+      "text": "9:24 X M O\ne Ratings and reviews\nTapan 254 254\n12/17/25\ngood app but need some option , like delete chat\nhistory\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\n12/17/25\nHey Tapan! That's already released across a\nfew networks and we're adding support for\nmore as we go by.\nHalbour\n9/29/25\nReally makes everything chat-related easier.\n1 person found this helpful\nWas this review helpful?\nnåvvnq Aå0KapaKQ\n12/9/25\nI got this for my brother cause I have an iphone\nnow he needs to pay to use imessage network I\nhave to have green bubbles when talking\n1 person found this helpful\n"
+    },
+    {
+      "page": 88,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR079",
+        "BR080",
+        "BR081"
+      ],
+      "text": "8:52 0 M\ne Ratings and reviews\nWas this review helpful?\nU Ureki Jeffery\n1/3/26\nall\non whatsapp archive messages should remain on\narchive even when new messages come in\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\n1/5/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nAnas Shahid\n5/22/26\neverything is perfect but can you please add\nTikTok chat please\nWas this review helpful?\no\nTapan 254 254\n12/17/25\ngood app but need some option , like delete chat\n"
+    },
+    {
+      "page": 89,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR079",
+        "BR080",
+        "BR081"
+      ],
+      "text": "9:24 X M O\ne Ratings and reviews\nWas this review helpful?\nU Ureki Jeffery\n1/3/26\non whatsapp archive messages should remain on\narchive even when new messages come in\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\n1/5/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nAnas Shahid\n5/22/26\neverything is perfect but can you please add\nTikTok chat please\nWas this review helpful?\no\nTapan 254 254\n12/17/25\ngood app but need some option , like delete chat\n"
+    },
+    {
+      "page": 90,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR082",
+        "BR083",
+        "BR084"
+      ],
+      "text": "8:52 0 M\ne Ratings and reviews\nJort\n7/31/26\nAmazing app, now with polls!\n1 person found this helpful\nWas this review helpful?\nJackson Baker\n12/25/25\nall\nit is good but I wish I could link Snapchat and\nstart new messages through Google voice\nWas this review helpful?\nAutomattic, lnc\n12/25/25\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nTomåö LandovskY\n10/21/25\nunified inbox is such a relief. setting up was a\nbreeze.\n1 person found this helpful\nWas this review helpful?\n"
+    },
+    {
+      "page": 91,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR082",
+        "BR083",
+        "BR085",
+        "BR086"
+      ],
+      "text": "8:52 0 M\ne Ratings and reviews\nEric Lobdell\n10/8/25\nall\nUnified messaging that works, awesome user\nsupport, and frequent updates and new features.\nWas this review helpful?\nBrandon Lam\n12/25/25\nThe best way so far to cure Instagram doom\nscrolling while still being able to message your\nfriends\nWas this review helpful?\nJort\n7/31/26\nAmazing app, now with polls!\n1 person found this helpful\nWas this review helpful?\nJackson Baker\n12/25/25\nit is good but I wish I could link Snapchat and\n•tart naw thrn• Ifih unina\n"
+    },
+    {
+      "page": 92,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR085",
+        "BR087",
+        "BR088"
+      ],
+      "text": "8:52 0 M\ne Ratings and reviews\n1/12/26\nall\nYou cant delete your chat history so if you lose\nor somebody steals your device they have access\nto all your chat history from all your networks.\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\n1/12/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nSaad Aamer\n2/23/26\nEverything has been good but one thing that you\nare unable to delete chats that is one of the\nserious hassles in this app.\nWas this review helpful?\nAutomattic, lnc\n2/23/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nEric Lobdell\n"
+    },
+    {
+      "page": 93,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR087",
+        "BR089",
+        "BR090"
+      ],
+      "text": "8:52 0 M\ne Ratings and reviews\nJackson\n11/26/25\nall\ngood app to keep all my messages together\nkeeping me from going to other apps constantly,\nbut sometimes it fails to load my messages\n2 people found this helpful\nWas this review helpful?\nAutomattic, lnc\n11/27/25\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nNoah Roberts\n5/2/26\ngoated: see Instagram messages without\nopening Instagram (doom scrolling immune!!!!)\nWas this review helpful?\n1/12/26\nYou cant delete your chat history so if you lose\nor somebody steals your device they have access\nto all your chat history from all your networks.\n"
+    },
+    {
+      "page": 94,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR075",
+        "BR089",
+        "BR091"
+      ],
+      "text": "8:52 0 M\ne Ratings and reviews\nMaximusuperplus Mass\n12/23/25\nall\nVery good application to centralize all your\nmessages. I wish there were an option to use the\nold ui.\n1 person found this helpful\nWas this review helpful?\nB Benjamin\n1/30/26\ni limit screen time on Instagram and now that i can\nsee the messages through this i have no more\nexcuses to extend screen time on ig\nWas this review helpful?\nJackson\n11/26/25\ngood app to keep all my messages together\nkeeping me from going to other apps constantly,\nbut sometimes it fails to load my messages\n2 people found this helpful\nWas this review helpful?\n"
+    },
+    {
+      "page": 95,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR073",
+        "BR074",
+        "BR075"
+      ],
+      "text": "8:52 0 M\ne Ratings and reviews\nIVdll IVIdUl ILI\n1/3/26\nall\nLove not needing Instagram and Facebook\ninstalled to chat. I also appreciate the dynamic\ntheme. Update: 4 stars now, because of the\nfrequent need to authorize chat, specifically FB/IG\nWas this review helpful?\nAutomattic, lnc\n1/5/26\nThanks for sharing your experience with us.\nWe'll continue to make this better.\n3/2/26\nthe app is great and I like the idea but if the code\nwould be optimized to make running it Easier and\nSmoother experience would be nice. If it will have\nmessage support for Tiktok it's all we will need\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\n3/3/26\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nMaximusuoerolus Mass\n"
+    },
+    {
+      "page": 96,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR071",
+        "BR072",
+        "BR073"
+      ],
+      "text": "8:52 0 M\ne Ratings and reviews\nY Yousef Rekaaney\n12/9/25\nall\none of the best messaging apps out there. having\nall of my social media messages in one app\nsaves me so much time and makes messaging\ngenerally easier.\n1 person found this helpful\nWas this review helpful?\nEric Graham\n2/14/26\nI just downloaded this to communicate with apple\nusers. one feature that chatted was the ability to\nedit a message. I can't seem to edit, can anyone\nelse edit chats with apple users?\nWas this review helpful?\nAutomattic, lnc\n2/16/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nIvan Maurizi\n1/3/26\nLove not needing Instagram and Facebook\n"
+    },
+    {
+      "page": 97,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR068",
+        "BR069",
+        "BR070"
+      ],
+      "text": "8:52 0 M\ne Ratings and reviews\nMicheal Hylman\n11/14/25\nall\nbeen using this since it's release and it's been\ngreat, only wish I could have imessges on the\nmobile apps not just desktop but I understand\nthat's an apple conflict.\nWas this review helpful?\nA Amirhosein Haddadiyan\n10/16/25\nHello, everything is great about this app, just\nplease make the message sending sound like the\niPhone iMessage. It will be much better and the\napp will look beautiful... Thanks to the app creator.\nWas this review helpful?\nO\nXBHS\n11/7/25\nI love this app for combining all of my messaging\napps into one. It's so helpful. also having the same\ndesign over all of them is really nice.\n1 person found this helpful\nWas this review helpful?\n"
+    },
+    {
+      "page": 98,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR066",
+        "BR067"
+      ],
+      "text": "8:52 0 M\ne Ratings and reviews\nRehan Zahid\n1/27/26\nall\nFor me the experience was wonderful until I\nrealized you cant delete messages. This should\nbe a feature you guys should add since that's the\nonly reason I still have use default apps.\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\n1/28/26\nHi there! We do have message deletion\nfeatures. Could you send a bug report by long\npressing the message you're unable to delete\nV Vaclav Zak\n6/25/26\nI had to uninstall this app. I am using only\nwhatsapp and google messages and cant add 2\nWA accounts for free. That is useless for my\npurposes.\nWas this review helpful?\nAutomattic, lnc\n5/1/25\nHi Vaclav, weld love to know more about how\nwe can turn this into a 5-star experience for\n"
+    },
+    {
+      "page": 99,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR065",
+        "BR066"
+      ],
+      "text": "8:52 0 M\ne Ratings and reviews\n11/8/25\nall\nNot what I was hoping for. I wanted to be able to\nchat with users on WhatsApp without having to\ninstall the actual App ( using an existing account)\nas I don't want MetaAl invading my life.\nUnfortunately, because of the way it links, you have\nto have it installed. Maybe no other way.\nWas this review helpful?\nAutomattic, lnc\n11/13/25\nHi there. WhatsApp requires that you open\ntheir app every 12-14 days to keep your\naccount online. Here's more information:\n$ Rehan Zahid\n1/27/26\nFor me the experience was wonderful until I\nrealized you cant delete messages. This should\nbe a feature you guys should add since that's the\nonly reason I still have use default apps.\n1 person found this helpful\nWas this review helpful?\nAutomattic, lnc\n1/28/26\n"
+    },
+    {
+      "page": 100,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR063",
+        "BR064"
+      ],
+      "text": "8:52 0 M\ne Ratings and reviews\n12/9/25\nall\ncannot see last message of pinned chats,l have\nto click and enter just to view what was the last\nmessage. so whats the point of pinning? also\npinned messages takes lots of screen space,main\npurpose of pinned messages is to Access them\nfast, not to show just chat photo in a 3*3 large\narray. it's great to see beeper letting mentally\ndisabled people for Ul design but i prefer normal\npeople doing Ul design,or let any people design\ntheir which u strongly refuse for the sake of autistic\ndesigners.\n4 people found this helpful\nWas this review helpful?\nAutomattic, lnc\n12/9/25\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nO Rizky\n1/20/26\nso far, i have good experience from beeper for\nreplacing Instagram app because i can reduce my\nscreentime without sacrificing my\ncommunication, even Instagram thinks my account\nwas compromised and my security setting account\nis restricted to change for a few days, and this is\n"
+    },
+    {
+      "page": 101,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR061",
+        "BR062",
+        "BR063"
+      ],
+      "text": "8:52 0 M\ne Ratings and reviews\n6/10/26\nall\nHi, When I use Google chat and tag someone; first\nletter of the tagged person is getting\nremoved .This is bug in beeper Please check the\nmail\nWas this review helpful?\nAutomattic, lnc\n6/1/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nKardam Nedyalkov\n4/24/26\nThe best app if you don't want to use\nInstagram,but still chat with your friends\nWas this review helpful?\nSadman Sakib\n12/9/25\ncannot see last message of pinned chats,l have\nto click and enter just to view what was the last\nmessage. so whats the point of pinning? also\npinned messages takes lots of screen space,main\npurpose of pinned messages is to Access them\nfast, not to show just chat photo in a 3*3 large\n"
+    },
+    {
+      "page": 102,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR059",
+        "BR060"
+      ],
+      "text": "8:51 0 M\ne Ratings and reviews\nall\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nS Sonal Saha\n1/30/26\nConsidering the amount of garbage that is\nshovelling at us these days, like status,\ncommunities updates. it's great to app with just for\ntexting. I love that I can also use it for instagram\nand linked in messages. I don't have to get sucked\ninto their feeds while replying to messages. Great\napp.\nWas this review helpful?\nAndy N (Andstein)\n10/7/25\nlooked for an app where i can access only the IG\nDMs. While it works, It does not support IGs photo\nfeature (allow reply, keep in chat, view once) so i\nmissed lots of photos and context. LE: thanks, let\nus know when the feature is live. have a good day!\nWas this review helpful?\nAutomattic, lnc\n10/7/25\nThanks for sharing your experience with us.\nWe'll continue to make this better.\n"
+    },
+    {
+      "page": 103,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR011",
+        "BR059"
+      ],
+      "text": "8:51 0 M\ne Ratings and reviews\nall\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nWill Widlof\n3/6/26\nIt's a good app generally. But there needs to be\nmore focus on stabilising what's there. new\nfeatures are being added while existing ones are\nleft broken. * WhatsApp polls dont render votes\nforcing opening that app separately which defeats\nthe point. * Regular battery drain issues from\nupdates * Navigation animations match iOS not\nAndroid * Replies to earlier messages in threads\naren't clear which message it will respond to. *\nFrequently notifications are not received until the\napp is opened\n2 people found this helpful\nWas this review helpful?\nAutomattic, lnc\n3/6/26\nThanks for sharing your experience with us.\nWe'll continue to make this better.\nS Sonal Saha\n1/30/26\nConsidering the amount of garbage that is\n"
+    },
+    {
+      "page": 104,
+      "app": "Beeper",
+      "kind": "Review screenshots",
+      "reviewIds": [
+        "BR011",
+        "BR058"
+      ],
+      "text": "8:51 0 M\ne Ratings and reviews\nWas this review helpful?\nAutomattic, lnc\nall\nYes\nNo\n12/3/25\nHi there! Are you saying that your messages\naren't automatically being pulled in? Weld love\nto investigate this. If you could long press on\nKaras Elbardisy\n2/11/26\nThe app is generally good. I'm very happy to have\nmy messages in one app. My rating is low\nbecause there's a bug that randomly unmutes my\nWhatsApp group chats. It's been going on for\nalmost 5 months. Support previously said it would\nbe fixed and has pushed several updates since\nsaying that. Now support doesn't respond to me.\nMy rating will stay low until this bug is fixed.\n5 people found this helpful\nWas this review helpful?\nAutomattic, lnc\n2/11/26\nHey there! Could you please reach out to us at\nhelp@beeper.com? Happy to take a look at\nthis.\nWill Widlof\n3/6/26\n"
+    }
+  ]
+}
