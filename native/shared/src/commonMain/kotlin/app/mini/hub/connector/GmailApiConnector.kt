@@ -28,6 +28,19 @@ class GmailApiConnector(
         checkpoint: SyncCheckpoint,
         transport: ProviderHttpTransport,
         maxMessages: Int,
+    ): SyncResult = sync(account, accessToken, checkpoint, transport, maxMessages) { false }
+
+    /**
+     * Same as [sync], but skips the per-message metadata request for IDs the caller already has.
+     * Known messages are still counted as listed so callers can tell "nothing new" from "nothing listed".
+     */
+    fun sync(
+        account: ConnectedAccount,
+        accessToken: StoredAccessToken,
+        checkpoint: SyncCheckpoint,
+        transport: ProviderHttpTransport,
+        maxMessages: Int,
+        isKnown: (providerMessageId: String) -> Boolean,
     ): SyncResult {
         require(account.id.provider == Provider.GMAIL)
         require(maxMessages in 1..100)
@@ -38,8 +51,11 @@ class GmailApiConnector(
         }
         val listJson = get(transport, query, accessToken)
         val ids = listJson.objects("messages").take(maxMessages)
+        var listed = 0
         val messages = ids.mapNotNull { objectJson ->
             val id = optionalJsonString(objectJson, "id") ?: return@mapNotNull null
+            listed++
+            if (isKnown(id)) return@mapNotNull null
             val thread = optionalJsonString(objectJson, "threadId") ?: id
             val detail = get(transport, "$apiBase/messages/$id?format=metadata", accessToken)
             ProviderMessage(
@@ -56,6 +72,7 @@ class GmailApiConnector(
             messages = messages,
             next = checkpoint.copy(cursor = next, processedCount = checkpoint.processedCount + messages.size),
             state = ConnectionState.Healthy,
+            listedCount = listed,
         )
     }
 

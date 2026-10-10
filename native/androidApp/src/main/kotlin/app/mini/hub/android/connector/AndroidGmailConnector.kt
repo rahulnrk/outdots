@@ -106,13 +106,18 @@ class AndroidGmailConnector(
             return GmailSyncReport(current.id.localId, checkpoint, 0, 0, ConnectionState.AuthorizationRequired, false, "no_credential")
         }
         var refreshed = false
+        // Skip the per-message metadata request for messages this account already stored. Without
+        // this, every sync re-fetched all 50 listed messages (about 40-70 s per account on device).
+        val isKnown: (String) -> Boolean = { id ->
+            observationStore.getObservationByNotificationKeyIncludingRemoved("provider:${current.id.key}:$id") != null
+        }
         if (token.isExpired(nowMillis + EXPIRY_SKEW_MILLIS)) {
             token = refreshOrMark(current, token, nowMillis)
                 ?: return GmailSyncReport(current.id.localId, checkpoint, 0, 0, accounts.get(current.id)?.state ?: current.state, false, "refresh_failed")
             refreshed = true
         }
         val result = try {
-            connector.sync(current, token, checkpoint, transport)
+            connector.sync(current, token, checkpoint, transport, PAGE_SIZE, isKnown)
         } catch (error: ConnectorHttpException) {
             if (error.statusCode == 401 && !refreshed) {
                 // The access token may have been invalidated early (for example by revocation).
@@ -120,7 +125,7 @@ class AndroidGmailConnector(
                     ?: return GmailSyncReport(current.id.localId, checkpoint, 0, 0, accounts.get(current.id)?.state ?: current.state, false, "refresh_failed_after_401")
                 refreshed = true
                 try {
-                    connector.sync(current, retryToken, checkpoint, transport)
+                    connector.sync(current, retryToken, checkpoint, transport, PAGE_SIZE, isKnown)
                 } catch (retryError: ConnectorHttpException) {
                     classifyAndMark(current, retryError)
                     throw retryError
@@ -150,7 +155,7 @@ class AndroidGmailConnector(
                 lastSuccessfulSyncMillis = nowMillis,
             ),
         )
-        return GmailSyncReport(current.id.localId, result.next, result.messages.size, observations.size, ConnectionState.Healthy, refreshed)
+        return GmailSyncReport(current.id.localId, result.next, result.listedCount, observations.size, ConnectionState.Healthy, refreshed)
     }
 
     private fun refreshOrMark(account: ConnectedAccount, token: StoredAccessToken, nowMillis: Long): StoredAccessToken? =
@@ -195,6 +200,7 @@ class AndroidGmailConnector(
 
     companion object {
         const val LOG_TAG = "MiniGmailSync"
+        private const val PAGE_SIZE = 50
         private const val EXPIRY_SKEW_MILLIS = 60_000L
         private val SCOPE_REASONS = setOf("insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT")
         const val RECONNECT_ACTION = "Reconnect Gmail to resume this account. Local history is preserved."

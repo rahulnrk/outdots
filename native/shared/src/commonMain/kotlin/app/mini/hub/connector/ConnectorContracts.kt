@@ -125,6 +125,8 @@ data class SyncResult(
     val next: SyncCheckpoint,
     val state: ConnectionState,
     val userActionRequired: String? = null,
+    /** Messages listed by the provider in this page, including ones skipped as already stored. */
+    val listedCount: Int = messages.size,
 )
 
 data class ProviderHttpResponse(

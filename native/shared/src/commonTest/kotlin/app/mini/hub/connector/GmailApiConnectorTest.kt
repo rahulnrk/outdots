@@ -98,6 +98,32 @@ class GmailApiConnectorTest {
     }
 
     @Test
+    fun knownMessagesSkipMetadataRequests() {
+        val requested = mutableListOf<String>()
+        val transport = ProviderHttpTransport { url, _ ->
+            requested += url
+            when {
+                url.contains("/messages?") -> ProviderHttpResponse(
+                    200,
+                    "{\"messages\":[{\"id\":\"old1\",\"threadId\":\"t\"},{\"id\":\"new1\",\"threadId\":\"t\"},{\"id\":\"old2\",\"threadId\":\"t\"}]}",
+                )
+                url.contains("/messages/new1") -> ProviderHttpResponse(200, "{\"id\":\"new1\",\"snippet\":\"s\"}")
+                else -> error("Unexpected URL: $url")
+            }
+        }
+        val account = ConnectedAccount(
+            AccountId(Provider.GMAIL, "local-a"), "owner@example.com", "Owner", AccountType.GoogleConsumer,
+            ConnectorRoute.OfficialProviderApi, ConnectionState.Authorized,
+        )
+        val result = GmailApiConnector("https://gmail.test/users/me").sync(
+            account, StoredAccessToken("t", null), SyncCheckpoint(), transport, 10,
+        ) { it.startsWith("old") }
+        assertEquals(listOf("new1"), result.messages.map { it.providerMessageId })
+        assertEquals(3, result.listedCount)
+        assertEquals(2, requested.size)
+    }
+
+    @Test
     fun authorizationAndTransientFailuresAreExplicit() {
         val connector = GmailApiConnector("https://gmail.test/users/me")
         val token = StoredAccessToken("access-token", null)
