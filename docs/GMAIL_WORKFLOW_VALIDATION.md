@@ -1,14 +1,16 @@
 # Gmail workflow validation boundary
 
-**Updated:** 2026-10-09
+**Updated:** 2026-10-10
 **Scope:** The Gmail connector work after commit `68e44c5`. This document separates locally verified behavior from live account and device evidence that is still required.
 
 ## Current implementation
 
 - Google authorization uses a browser-based public OAuth client flow with PKCE. The Android app accepts only a client ID supplied through the Gradle property `mini.googleOAuthClientId`. There is no client-secret field, resource, or build value.
 - The redirect is derived from the Android public client ID as `com.googleusercontent.apps.<client-id-prefix>:/oauth2redirect/google`. The callback validates the OAuth state, code verifier flow, derived scheme, and path before exchanging the code.
-- Access and refresh tokens are stored in the Android Keystore-backed account token store. Account metadata stores the provider identity, account type, route, scopes, health, and required user action separately.
-- Reconnecting the same Gmail provider identity reuses its stable local account ID. Disconnect removes that account's credential and metadata, not observations already stored under other account IDs.
+- Access and refresh tokens are stored in the Android Keystore-backed account token store. Account metadata stores the provider identity, account type, route, scopes, health, and required user action separately. Since `d21ab4c` both stores write synchronously (`commit()`) and log state and credential changes under the `MiniGmailAudit` tag with local IDs only.
+- Reconnecting the same Gmail provider identity reuses its stable local account ID. Since `908edbb`, Disconnect removes only that account's credential and keeps its metadata in the `Disconnected` state, so a later reconnect reuses the same local ID and existing history. Before `908edbb`, Disconnect deleted the metadata, so a reconnect created a new local account and would have stored every message a second time.
+- Expired access tokens are refreshed with the stored refresh token (public-client grant, no secret). A rejected refresh (`invalid_grant`) marks the account `Revoked` and drops the dead credential. A 403 for missing scope marks it `AuthorizationRequired`. Other failures mark it `Degraded`. One account's failure never changes another account's state.
+- Background sync: `GmailSyncJobService` (JobScheduler) runs every 15 minutes (Android minimum) and on demand when the listener sees a Gmail-app notification. It stores messages only. MINI does not post its own OS notification for new Gmail mail.
 - The Gmail API adapter is read-only and bounded. It discovers `users/me/profile`, lists a page of messages, fetches metadata, and returns a cursor. Coverage is shown as partial provider sync until history completeness and gap recovery are proven.
 - The Accounts surface shows connected provider accounts and setup state. The Sources surface controls notification observation. A notification observation is not presented as an authorized mailbox.
 - Leaving the foreground cancels local drafting, preserves the typed draft, and explains how to retry. Draft usefulness feedback is local and is not used as automatic model training. AI remains foreground-only and independent of background notification intake.
@@ -23,7 +25,7 @@ These checks use fake HTTP transports, in-memory stores, deterministic identitie
 | Account isolation | Per-account metadata and token store tests | Proves store boundaries, not two real Gmail accounts |
 | Duplicate handling | Same provider message produces the same account-scoped observation and notification key | Does not prove every Gmail history or notification duplicate case |
 | Reconnection | Same provider identity keeps its account ID and clears reconnect action | Does not prove revoked-token recovery on a device |
-| History preservation | Disconnect path removes only credential and account metadata | Full history and cursor-gap recovery still require provider fixtures and device testing |
+| History preservation | Disconnect removes only the credential and marks metadata `Disconnected` (since `908edbb`) | Full history and cursor-gap recovery still require provider fixtures and device testing |
 | Connection status | Authorized, expired, degraded, and authorization-required states are explicit | Does not prove all provider error bodies map correctly |
 | Notification independence | Existing listener path and source filtering do not call AI | Background OS delivery still needs a physical-device matrix |
 | Interrupted drafts | Foreground lifecycle preserves typed text and reports cancellation | Low-memory process death and rotation need device testing |
@@ -89,7 +91,7 @@ Live device checks that did run:
 - The complete four-test instrumentation suite previously produced 3 passes and 1 failure. `MemoryPressureDeviceTest` exposed a stale assertion: production intentionally returns `Failed(reason=Local AI paused because the device is low on memory)` for the user-facing low-memory refusal, while the test looked for the internal `Pressured` state name. The assertion now checks the low-memory reason and confirms the result is neither a cancellation nor a repeated-failure recovery state. The corrected isolated test passed on the connected Pixel on the current retry.
 - `GmailOAuthConfigurationDeviceTest` passed on the connected Pixel with the documentation placeholder. It proved the placeholder is not configured, the setup status begins with `Google connection setup incomplete`, and the browser launch path is blocked. The rebuilt APK's merged manifest fell back to `app.mini.hub` and did not register the placeholder Google scheme. This is configuration-guard evidence, not Gmail authorization evidence.
 
-Gmail-specific live requirements that remain unrun: single-account revoke or disconnect, visible recovery from provider failures, token refresh after expiry, screen-off and battery-restricted delivery, and reconnect after revocation.
+The Gmail reliability matrix status is tracked in the reliability run section below.
 
 ## Live two-account Gmail run: 2026-10-09
 
@@ -103,13 +105,37 @@ Defects found and fixed during this run:
 
 Live results (counts only, no mailbox content recorded):
 
-| Check | Result |
-|---|---|
-| Two Gmail accounts authorized and stored with distinct local IDs and distinct provider identities | Passed (`GmailLiveSyncDeviceTest`) |
-| Each account returns at least one message through the official Gmail API | Passed |
-| Replaying the same first page adds no duplicate observations for either account | Passed |
-| Every stored summary stays under its owning account | Passed |
-| Per-account history counts unchanged after `am force-stop` and process restart | Passed (`GmailHistoryAfterRestartDeviceTest`) |
+| Check | Result as originally recorded | Corrected status |
+|---|---|---|
+| Two Gmail accounts authorized and stored with distinct local IDs and distinct provider identities | Passed | Still valid |
+| Each account returns at least one message through the official Gmail API | Passed | Still valid, but weaker than it read. Each sync fetched a 50-message page and stored only 1 (see parser defect below). |
+| Replaying the same first page adds no duplicate observations for either account | Passed | Invalidated as stated. Only 1 message per account was stored, so the check compared 1 row with 1 row. Re-proven with 50 rows per account after `908edbb`, see below. |
+| Every stored summary stays under its owning account | Passed | Still valid for the 1-row data, re-proven for 50 rows |
+| Per-account history counts unchanged after `am force-stop` and process restart | Passed | Invalidated as stated. The counts compared were the summary `observation_count`, which was always written as 1. Re-proven with true counts after `908edbb`, see below. |
+
+## Defects that invalidated earlier claims (fixed in `908edbb`)
+
+- **Message list parser kept only one message.** The Gmail list response is pretty-printed (`},\n {`), and the parser split on the literal `},{`. A 50-message page parsed as one message. Fix: depth-aware object walk plus a regression test with a pretty-printed multi-message response.
+- **Conversation counts were constant.** The encrypted store wrote `observation_count = 1` and `unread_count = 0|1` on every insert, regardless of stored rows. Fix: counts are derived from `notification_observations` rows inside the same transaction.
+- **Disconnect broke reconnect identity.** Disconnect deleted the account metadata, so a reconnect created a new local account ID. Every message would then have been stored again under the new ID. Fix: Disconnect keeps the metadata in `Disconnected` state. `forget()` exists separately for permanent removal.
+- **Expired access caused a forced reconnect.** An expired access token immediately set `Expired` and asked the user to reconnect, although a refresh token was stored. Fix: silent refresh. Only `invalid_grant` leads to `Revoked`.
+- **Background scheduling could crash the listener.** A network-constrained job needs `ACCESS_NETWORK_STATE`. Without it, `JobScheduler.schedule` threw a `SecurityException` inside `onNotificationPosted`. Fix: permission added and scheduling wrapped so a failure is logged, not thrown.
+- **Account and credential writes were asynchronous** (`apply()`). After the first reconnect attempt on 2026-10-09 23:27 IST, the OAuth log said the account was stored, but the next read showed `Disconnected` with no credential. The log buffer had been cleared by the step runner, so the cause could not be proven. `d21ab4c` switches both stores to `commit()` and adds the `MiniGmailAudit` trail so a repeat is diagnosable. This item is **open** until a reconnect passes on the audited build.
+
+## Reliability run: 2026-10-09 to 2026-10-10
+
+Account A = local `gmail-13a6451f…`, account B = local `gmail-de284ee8…`. Steps are methods of `GmailReliabilityDeviceTest`, run one at a time with `am instrument`. Logs (`MiniGmailLive`, `MiniGmailSync`, `MiniGmailOAuth`, `MiniGmailAudit`) contain local IDs, states and counts only.
+
+| Check | Evidence | Status |
+|---|---|---|
+| Baseline after parser and count fixes | `GmailLiveSyncDeviceTest`: each account stored 50 messages, replay added 0. `GmailHistoryAfterRestartDeviceTest`: 50 and 50 after `force-stop`. | Passed live |
+| Disconnect A, B unaffected | `step1`: A state `Disconnected`, credential removed, A skipped with `disconnected`, A history 50 → 50. B `Healthy`, fetched 50, inserted 0. | Passed live (data layer). The Accounts UI after disconnect was not inspected because the phone was locked. |
+| B baseline before reconnect | `step1b`: B 50 messages, 50 stored rows, 0 count mismatches | Passed live |
+| Reconnect A reuses record, keeps history, no duplicates | First attempt 23:27 IST: OAuth log `stored account (new=false)` proves the existing record was matched. `step2` then found A `Disconnected` with no credential, so it failed before any sync. History 50 rows was intact. | **Failed live, open.** Re-run on `d21ab4c` required. |
+| Simulated expiry | `step4`: A's stored expiry rewritten to the past. A real refresh against Google succeeded, state `Healthy`, new token, future expiry. | Passed live. This is **simulated**: Google had not expired the token. |
+| Natural expiry | `step5` requires B's token to be past Google's own expiry, then proves Google returns 401 for it before the refresh. At 23:29 IST B had 58 minutes left. | Not yet run |
+| Revoke A at Google, B unaffected, re-authorize | `step3`, `step3b` | Not yet run |
+| Background new-mail sync, screen off | `step6`, `step7` with a user-sent synthetic email | Not yet run |
 
 ## Send qualification gate
 
