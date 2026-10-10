@@ -46,6 +46,7 @@ sealed class LocalDraftResult {
         val warning: String,
         val latencyMs: Long,
         val wasCold: Boolean,
+        val styleProfileApplied: Boolean = false,
     ) : LocalDraftResult()
 
     data class Refused(val reason: String, val warning: String) : LocalDraftResult()
@@ -277,6 +278,7 @@ class LocalDraftExperiment internal constructor(
                 warning = warning,
                 latencyMs = nowMillis() - started,
                 wasCold = cold,
+                styleProfileApplied = request.styleProfile != null,
             )
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()

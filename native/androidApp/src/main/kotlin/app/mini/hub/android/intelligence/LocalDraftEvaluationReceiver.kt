@@ -17,6 +17,7 @@ import app.mini.hub.observation.CorrelationConfidence
 import app.mini.hub.observation.ObservationProvenance
 import app.mini.hub.observation.ObservedNotification
 import app.mini.hub.observation.TruncationState
+import app.mini.hub.style.AdaptiveStyleEngine
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -31,9 +32,10 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
         val forcedTimeoutMillis = intent.getLongExtra(EXTRA_TIMEOUT_MILLIS, 0L)
         val verifyTimeoutRecovery = intent.getBooleanExtra(EXTRA_VERIFY_TIMEOUT_RECOVERY, false)
         val englishOnly = intent.getBooleanExtra(EXTRA_ENGLISH_ONLY, false)
+        val styleCompare = intent.getBooleanExtra(EXTRA_STYLE_COMPARE, false)
         val pending = goAsync()
         Thread {
-            runEvaluation(context.applicationContext, selectedCaseId, forcedTimeoutMillis, verifyTimeoutRecovery, englishOnly)
+            runEvaluation(context.applicationContext, selectedCaseId, forcedTimeoutMillis, verifyTimeoutRecovery, englishOnly, styleCompare)
         }.start()
         // This is a debug-only long-running harness. Release the broadcast token immediately
         // so Android does not classify model evaluation as a receiver ANR. The notification
@@ -41,11 +43,15 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
         pending.finish()
     }
 
-    private fun runEvaluation(context: Context, selectedCaseId: String?, forcedTimeoutMillis: Long, verifyTimeoutRecovery: Boolean, englishOnly: Boolean) {
+    private fun runEvaluation(context: Context, selectedCaseId: String?, forcedTimeoutMillis: Long, verifyTimeoutRecovery: Boolean, englishOnly: Boolean, styleCompare: Boolean) {
         MiniHubRuntime.init(context)
         val experiment = MiniHubRuntime.localDraftExperiment
-        val selectedCases = syntheticCases().filter {
-            (selectedCaseId == null || it.id == selectedCaseId) && (!englishOnly || !it.isExploratoryLanguage)
+        val selectedCases = if (styleCompare) {
+            styleCases().filter { selectedCaseId == null || it.id == selectedCaseId }
+        } else {
+            syntheticCases().filter {
+                (selectedCaseId == null || it.id == selectedCaseId) && (!englishOnly || !it.isExploratoryLanguage)
+            }
         }
         if (selectedCases.isEmpty()) {
             Log.w("MiniDraftEval", "No matching synthetic case; evaluation skipped.")
@@ -53,7 +59,13 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
         }
         val recoveryRun = verifyTimeoutRecovery && selectedCases.size == 1 && forcedTimeoutMillis in 1L..60_000L
         val cases = if (recoveryRun) selectedCases + selectedCases.single().copy(id = "$selectedCaseId-after-timeout") else selectedCases
-        val artifactId = if (recoveryRun) "$selectedCaseId-timeout-recovery" else selectedCaseId ?: if (englishOnly) "english-mvp" else null
+        val artifactId = when {
+            styleCompare -> "style-compare"
+            recoveryRun -> "$selectedCaseId-timeout-recovery"
+            selectedCaseId != null -> selectedCaseId
+            englishOnly -> "english-mvp"
+            else -> null
+        }
         val artifactFile = reviewArtifactFile(context, artifactId)
         val artifactCases = JSONArray()
         val artifact = JSONObject()
@@ -65,6 +77,9 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
             .put("forcedTimeoutMillis", forcedTimeoutMillis)
             .put("verifyTimeoutRecovery", recoveryRun)
             .put("englishOnly", englishOnly)
+            .put("styleCompare", styleCompare)
+            .put("draftRealization", "mediapipe-prompt-only")
+            .put("deterministicComposerPostProcessed", false)
             .put("mvpLanguage", "english")
             .put("exploratoryLanguagesBlockMvp", false)
             .put("modelId", MediaPipeInferenceEngine.MODEL_ID)
@@ -120,6 +135,8 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
                     .put("reason", reason)
                     .put("latencyMs", latency)
                     .put("cold", cold)
+                    .put("styleProfileApplied", (result as? LocalDraftResult.Success)?.styleProfileApplied == true)
+                    .put("styleCategory", testCase.request.styleProfile?.category?.name ?: JSONObject.NULL)
                     .put("humanReviewRequired", true)
                     .put(
                         "humanReviewReason",
@@ -397,5 +414,101 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
         const val EXTRA_TIMEOUT_MILLIS = "timeout_ms"
         const val EXTRA_VERIFY_TIMEOUT_RECOVERY = "verify_timeout_recovery"
         const val EXTRA_ENGLISH_ONLY = "english_only"
+        const val EXTRA_STYLE_COMPARE = "style_compare"
+    }
+
+    private fun styleCases(): List<SyntheticCase> {
+        val evidence = listOf("Please send the signed proposal by Friday. No price was discussed.")
+        val intent = "Acknowledge the request and say I will review. Do not invent a date, price, or commitment."
+        val professional = app.mini.hub.style.CompactStyleProfile(
+            id = "eval-professional",
+            category = app.mini.hub.style.ContextCategory.Professional,
+            recipientId = "synthetic|alex",
+            traits = app.mini.hub.style.StyleTraits(0.85, 0.4, 0.4, 0.0, "Formal greeting", "Formal signoff"),
+            exampleSnippets = listOf("Dear Alex, please find the attached proposal.", "I will follow up with confirmed details only."),
+            observationCount = 4,
+            confidence = 0.62,
+            updatedAt = UtcInstant(1_760_000_000_000L),
+        )
+        val casual = professional.copy(
+            id = "eval-casual",
+            category = app.mini.hub.style.ContextCategory.Friends,
+            traits = app.mini.hub.style.StyleTraits(0.2, 0.8, 0.8, 0.5, "Casual greeting", "Warm signoff"),
+            exampleSnippets = listOf("Hey, thanks for the ping.", "Sounds good, I'll take a look."),
+        )
+        val restored = AdaptiveStyleEngine(
+            app.mini.hub.style.StyleConsent(
+                isEnabled = true,
+                grantedCategories = setOf(app.mini.hub.style.ContextCategory.Professional),
+            ),
+        ).let { engine ->
+            engine.learnFromText(professional.exampleSnippets[0], app.mini.hub.style.TextAuthorship.UserAuthoredSentMessage, app.mini.hub.style.ContextCategory.Professional, "synthetic|alex", UtcInstant(1_760_000_000_000L), "eval-restored-1")
+            engine.learnFromText(professional.exampleSnippets[1], app.mini.hub.style.TextAuthorship.UserAuthoredSentMessage, app.mini.hub.style.ContextCategory.Professional, "synthetic|alex", UtcInstant(1_760_000_000_000L), "eval-restored-2")
+            val imported = AdaptiveStyleEngine()
+            imported.importState(engine.exportState())
+            imported.resolveProfile(app.mini.hub.style.ContextCategory.Professional, "synthetic|alex", UtcInstant(1_760_000_000_000L))
+        }
+        return listOf(
+            styleRequest("style-a-baseline", "style-baseline", evidence, intent, null),
+            styleRequest("style-a-professional", "style-professional", evidence, intent, professional),
+            styleRequest("style-b-casual", "style-casual", evidence, intent, casual),
+            styleRequest("style-c-cold", "style-cold", evidence, intent, null),
+            styleRequest("style-d-restored", "style-restored-codec", evidence, intent, restored),
+        )
+    }
+
+    private fun styleRequest(
+        id: String,
+        category: String,
+        messages: List<String>,
+        intent: String,
+        profile: app.mini.hub.style.CompactStyleProfile?,
+    ): SyntheticCase = SyntheticCase(id, category, requestForStyle(id, messages, intent, profile))
+
+    private fun requestForStyle(
+        id: String,
+        messages: List<String>,
+        intent: String,
+        profile: app.mini.hub.style.CompactStyleProfile?,
+    ): LocalDraftRequest {
+        val compartment = CompartmentId("gmail|synthetic-style-eval")
+        val account = AccountId(Provider.GMAIL, "synthetic-style-eval")
+        val conversation = ScopedId(account, ScopedId.Kind.CONVERSATION, id)
+        val observations = messages.mapIndexed { index, text ->
+            ObservedNotification(
+                id = ScopedId(account, ScopedId.Kind.OBSERVATION, "$id-$index"),
+                accountId = account,
+                conversationId = conversation,
+                packageId = "synthetic.local",
+                notificationKey = "$id-key-$index",
+                notificationId = index,
+                tag = "synthetic",
+                senderHint = "Synthetic Sender",
+                title = "Synthetic conversation",
+                textFragments = listOf(text),
+                rawTextDigest = "synthetic-digest-$id-$index",
+                observedAt = UtcInstant(1_760_000_000_000L + index),
+                postTime = UtcInstant(1_760_000_000_000L + index),
+                revision = index.toLong() + 1L,
+                isRemoved = false,
+                isGroupSummary = false,
+                truncationState = TruncationState.Complete,
+                correlationConfidence = CorrelationConfidence.High,
+                provenance = ObservationProvenance.SyntheticFixture,
+            )
+        }
+        val evidence = observations.map {
+            EvidenceRef(SourceId(it.id.key), it.revision, compartment)
+        }
+        return LocalDraftRequest(
+            conversationLabel = "Synthetic $id",
+            sender = "Synthetic Sender",
+            compartment = compartment,
+            context = ContextBundle(compartment, evidence, 100, false),
+            observations = observations,
+            coverageWarning = "",
+            userIntent = intent,
+            styleProfile = profile,
+        )
     }
 }

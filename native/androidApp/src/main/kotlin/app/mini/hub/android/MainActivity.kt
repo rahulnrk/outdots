@@ -102,6 +102,7 @@ class MainActivity : ComponentActivity() {
                         MiniHubRuntime.styleEngine.updateConsent(consent.copy(isEnabled = enabled))
                         MiniHubRuntime.styleStore.save(MiniHubRuntime.styleEngine)
                         styleLearningEnabled.value = enabled
+                        if (enabled) MiniHubRuntime.bootstrapStyleFromStoredHistory()
                     },
                     accountsVersion = accountsVersion.value,
                     onSourceSelectionChanged = { refreshInbox() },

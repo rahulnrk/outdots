@@ -2,6 +2,28 @@
 
 Only commands actually executed are recorded here. Results were independently rerun by the coordinator.
 
+## 2026-10-10, local-intelligence device qualification
+
+Target: Pixel 10 Pro `56270DLCH000KZ`, product `blazer`, Android 16. Debug APK installed with `adb install -r`. Host tests were run first.
+
+| Command | Result |
+|---|---|
+| `gradlew.bat :shared:jvmTest --no-daemon --max-workers=1` | Pass: 139 JVM tests, 0 failures |
+| `gradlew.bat :androidApp:testDebugUnitTest --no-daemon --max-workers=1` | Pass after fixing invalid `companion object` inside `MiniHubRuntime` |
+| `gradlew.bat :androidApp:assembleDebug` | Pass |
+| `adb install -r androidApp-debug.apk` | Pass |
+| `adb shell am instrument ... StyleProfilePersistDeviceTest` | Pass: Keystore round-trip, inbound rejected, duplicate sample IDs ignored |
+| `adb shell am force-stop app.mini.hub` then `StyleProfileAfterRestartDeviceTest` | Pass: compact profile counts survived process death (not reinstall) |
+| `adb shell am instrument ... GmailStyleLearningDeviceTest` | Skipped: `AssumptionViolatedException: Authorized Gmail accounts are required` |
+| `adb shell am instrument ... StylePersonalizationDeviceTest` | Skipped: `AssumptionViolatedException: On-device MediaPipe model is required` |
+| `adb shell am instrument ... GmailOAuthConfigurationDeviceTest` | Skipped as designed: client ID is configured, so the placeholder-block test does not apply |
+| `adb shell am instrument ... AttentionWorkflowDeviceTest` | Pass: 2 tests |
+| `adb shell dumpsys meminfo app.mini.hub` after `MainActivity` launch | TOTAL PSS 94,087 kB (~91.9 MiB) with no MediaPipe model loaded |
+
+Gradle `connectedDebugAndroidTest` uninstalled the app after its first run, which removed previously stored Gmail credentials and the app-private `.task` model. Later qualification used `adb install -r` plus `am instrument` so data was not wiped again.
+
+Live Gmail history learning and MediaPipe baseline-vs-personalized drafts were **not** executed. Fixture JVM tests still cover those behaviors synthetically.
+
 ## 2026-10-10, local intelligence checkpoint (fixture)
 
 Run from `C:\Users\nande\Downloads\Mini\native` on Windows. No adb device was attached.

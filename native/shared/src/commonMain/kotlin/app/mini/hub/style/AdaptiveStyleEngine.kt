@@ -221,6 +221,10 @@ class AdaptiveStyleEngine(
 
     fun hasLearnedSample(sampleId: String): Boolean = synchronized(lock) { sampleId in learnedSampleIds }
 
+    fun learnedSampleCount(): Int = synchronized(lock) { learnedSampleIds.size }
+
+    fun snapshot(): List<CompactStyleProfile> = synchronized(lock) { profiles.values.toList() }
+
     /**
      * Serializes only the compact local profile state. The Android host encrypts this blob with an
      * Android Keystore key before persistence. Keeping the codec here makes restore deterministic

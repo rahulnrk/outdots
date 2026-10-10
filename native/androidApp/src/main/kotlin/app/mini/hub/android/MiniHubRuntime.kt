@@ -43,6 +43,8 @@ import java.util.concurrent.Executors
  * durable encrypted persistence, and thread-safe dispatch across components.
  */
 object MiniHubRuntime {
+    const val MAX_BOOTSTRAP_CONVERSATIONS = 50
+    const val MAX_BOOTSTRAP_SAMPLES_PER_ACCOUNT = 200
     private val lock = Any()
     @Volatile private var isInitialized = false
 
@@ -136,7 +138,7 @@ object MiniHubRuntime {
             retrievalEngine = ScopedRetrievalEngine(observationStore)
             styleEngine = AdaptiveStyleEngine(
                 StyleConsent(
-                    isEnabled = true,
+                    isEnabled = false,
                     grantedCategories = setOf(ContextCategory.Professional, ContextCategory.Friends, ContextCategory.Family),
                 ),
             )
@@ -219,14 +221,16 @@ object MiniHubRuntime {
         var learned = 0
         val now = clock.now()
         connectors.listAccounts().forEach { account ->
-            observationStore.getConversationSummaries(account.id).forEach { summary ->
-                learned += StyleContext.learnFromObservations(
-                    styleEngine,
-                    account,
-                    observationStore.getObservationsForConversation(summary.conversationId),
-                    now,
-                )
-            }
+            val observations = observationStore.getConversationSummaries(account.id)
+                .take(MAX_BOOTSTRAP_CONVERSATIONS)
+                .flatMap { observationStore.getObservationsForConversation(it.conversationId) }
+            learned += StyleContext.learnFromObservations(
+                styleEngine,
+                account,
+                observations,
+                now,
+                maxSamples = MAX_BOOTSTRAP_SAMPLES_PER_ACCOUNT,
+            )
         }
         if (learned > 0) styleStore.save(styleEngine)
     }
