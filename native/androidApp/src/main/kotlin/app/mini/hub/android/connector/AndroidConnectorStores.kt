@@ -14,6 +14,14 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+/** Audit tag: local account IDs, states and caller class names only. Never tokens or addresses. */
+const val AUDIT_TAG = "MiniGmailAudit"
+
+/** Short caller description (class.method) for audit logs, skipping store frames. */
+internal fun callerHint(): String = Throwable().stackTrace
+    .firstOrNull { f -> !f.className.contains("AndroidConnectorStores") && !f.className.contains("AndroidConnectedAccountStore") && !f.className.contains("AndroidKeystoreAccessTokenStore") }
+    ?.let { "${it.className.substringAfterLast('.')}.${it.methodName}" } ?: "unknown"
+
 /** Account metadata is durable, while token bytes are separately encrypted with Android Keystore. */
 class AndroidConnectedAccountStore(context: Context) : ConnectedAccountStore {
     private val prefs = context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -24,10 +32,15 @@ class AndroidConnectedAccountStore(context: Context) : ConnectedAccountStore {
 
     override fun get(id: AccountId): ConnectedAccount? = synchronized(this) { decode(prefs.getString(key(id.key), null)) }
 
-    override fun upsert(account: ConnectedAccount) = synchronized(this) {
+    override fun upsert(account: ConnectedAccount) { synchronized(this) {
+        val previous = decode(prefs.getString(key(account.id.key), null))?.state
         val ids = prefs.getStringSet(KEY_IDS, emptySet()).orEmpty().toMutableSet().apply { add(account.id.key) }
-        prefs.edit().putStringSet(KEY_IDS, ids).putString(key(account.id.key), encode(account)).apply()
-    }
+        // commit(): account state must be durable before any other component reads it.
+        prefs.edit().putStringSet(KEY_IDS, ids).putString(key(account.id.key), encode(account)).commit()
+        if (previous != account.state) {
+            android.util.Log.i(AUDIT_TAG, "account=${account.id.localId} state $previous -> ${account.state} by=${callerHint()}")
+        }
+    } }
 
     override fun remove(id: AccountId): Boolean = synchronized(this) {
         val existed = prefs.contains(key(id.key))
@@ -83,15 +96,20 @@ class AndroidKeystoreAccessTokenStore(context: Context) : AccessTokenStore {
         }.getOrNull()
     }
 
-    override fun put(accountId: AccountId, token: StoredAccessToken) = synchronized(this) {
+    override fun put(accountId: AccountId, token: StoredAccessToken) { synchronized(this) {
         val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, secretKey()) }
         val plain = "${token.expiresAtMillis ?: ""}|${token.refreshToken.orEmpty()}|${token.value}".toByteArray(StandardCharsets.UTF_8)
         val payload = Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(cipher.doFinal(plain), Base64.NO_WRAP)
-        prefs.edit().putString(key(accountId), payload).apply()
-    }
+        prefs.edit().putString(key(accountId), payload).commit()
+        android.util.Log.i(AUDIT_TAG, "account=${accountId.localId} credential stored hasRefresh=${token.refreshToken != null} by=${callerHint()}")
+    } }
 
     override fun remove(accountId: AccountId) {
-        synchronized(this) { prefs.edit().remove(key(accountId)).apply() }
+        synchronized(this) {
+            val existed = prefs.contains(key(accountId))
+            prefs.edit().remove(key(accountId)).commit()
+            android.util.Log.i(AUDIT_TAG, "account=${accountId.localId} credential removed existed=$existed by=${callerHint()}")
+        }
     }
 
     private fun secretKey(): SecretKey {

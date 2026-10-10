@@ -48,6 +48,9 @@ class GmailReliabilityDeviceTest {
     private fun count(a: ConnectedAccount) = MiniHubRuntime.observationStore.getConversationSummaries(a.id).sumOf { it.observationCount }
     private fun log(msg: String) = Log.i(TAG, msg)
 
+    @org.junit.Before
+    fun initRuntime() = MiniHubRuntime.init(context)
+
     @Test
     fun step0_inventory() {
         MiniHubRuntime.init(context)
@@ -88,19 +91,81 @@ class GmailReliabilityDeviceTest {
         val savedId = prefs.getString(KEY_A_LOCAL, null)
         val savedCount = prefs.getInt(KEY_A_COUNT, -1)
         val a = accountA()
-        log("reconnect: savedId=$savedId currentId=${a.id.localId} state=${a.state} accountsTotal=${gmailAccounts().size}")
+        val b = accountB()
+        val bBeforeId = prefs.getString(KEY_B_LOCAL, null)
+        val bBeforeCount = prefs.getInt(KEY_B_COUNT, -1)
+        log("reconnect: savedId=$savedId currentId=${a.id.localId} state=${a.state} accountsTotal=${gmailAccounts().size} storedBeforeSync=${storedRows(a)}")
         assertEquals("Reconnect reused the same local account", savedId, a.id.localId)
         assertEquals("Still exactly two Gmail accounts", 2, gmailAccounts().size)
         assertNotNull("A has a new credential", tokens.get(a.id))
         assertEquals("History preserved through disconnect/reconnect", savedCount, count(a))
+        assertEquals("Stored rows match before sync", savedCount, storedRows(a))
 
         val first = connector.sync(a, SyncCheckpoint(), System.currentTimeMillis())
         val afterFirst = count(a)
         val second = connector.sync(a, SyncCheckpoint(), System.currentTimeMillis())
-        log("reconnect sync: fetched=${first.fetched} inserted1=${first.inserted} inserted2=${second.inserted} before=$savedCount after=${count(a)}")
+        val mismatches = countMismatches(a)
+        log("reconnect sync: fetched=${first.fetched} inserted1=${first.inserted} inserted2=${second.inserted} before=$savedCount afterFirst=$afterFirst afterSecond=${count(a)} storedRows=${storedRows(a)} conversations=${conversations(a).size} countMismatches=$mismatches")
         assertEquals("Re-syncing the same page adds nothing", 0, second.inserted)
         assertEquals(afterFirst, count(a))
+        assertEquals("Every conversation count equals its stored rows", 0, mismatches)
+        assertEquals("Summed counts equal stored rows", storedRows(a), count(a))
         assertEquals(ConnectionState.Healthy, accounts.get(a.id)?.state)
+
+        // B must be untouched by A's disconnect/reconnect.
+        val bNow = accounts.get(b.id)
+        log("B check: sameId=${bBeforeId == b.id.localId} state=${bNow?.state} hasToken=${tokens.get(b.id) != null} countBefore=$bBeforeCount countNow=${count(b)} bMismatches=${countMismatches(b)} bRowsUnderA=${rowsOwnedElsewhere(b, a)}")
+        assertEquals(bBeforeId, b.id.localId)
+        assertTrue(bNow?.state == ConnectionState.Healthy || bNow?.state == ConnectionState.Authorized)
+        assertNotNull(tokens.get(b.id))
+        assertTrue("B history not reduced", count(b) >= bBeforeCount)
+        assertEquals(0, countMismatches(b))
+        assertEquals("No B conversation stored under A", 0, rowsOwnedElsewhere(b, a))
+    }
+
+    /** Records B's baseline before A is reconnected or revoked. */
+    @Test
+    fun step1b_recordB() {
+        val b = accountB()
+        prefs.edit().putString(KEY_B_LOCAL, b.id.localId).putInt(KEY_B_COUNT, count(b)).commit()
+        log("B baseline: account=${b.id.localId} state=${b.state} count=${count(b)} storedRows=${storedRows(b)} mismatches=${countMismatches(b)}")
+    }
+
+    /** Masked identity hint so the user can tell which mailbox is A and which is B. */
+    @Test
+    fun step0b_identityHint() {
+        gmailAccounts().forEach { acct ->
+            val label = if (acct.id.localId == accountA().id.localId) "A" else "B"
+            log("identity $label account=${acct.id.localId} hint=${mask(acct.providerAccountId)}")
+        }
+    }
+
+    /** After the user re-authorizes A following a revoke: same record, Healthy, history kept. */
+    @Test
+    fun step3b_reauthorizedAfterRevoke() {
+        val savedId = prefs.getString(KEY_A_LOCAL, null)
+        val a = accountA()
+        val before = count(a)
+        val report = connector.sync(a, SyncCheckpoint(), System.currentTimeMillis())
+        log("reauth: sameId=${savedId == a.id.localId} state=${report.state} fetched=${report.fetched} inserted=${report.inserted} before=$before after=${count(a)} mismatches=${countMismatches(a)} accountsTotal=${gmailAccounts().size}")
+        assertEquals(savedId, a.id.localId)
+        assertEquals(2, gmailAccounts().size)
+        assertEquals(ConnectionState.Healthy, report.state)
+        assertNull(accounts.get(a.id)?.userActionRequired)
+        assertEquals(0, countMismatches(a))
+    }
+
+    private fun conversations(a: ConnectedAccount) = MiniHubRuntime.observationStore.getConversationSummaries(a.id)
+    private fun storedRows(a: ConnectedAccount) =
+        conversations(a).sumOf { MiniHubRuntime.observationStore.getObservationsForConversation(it.conversationId, 10_000).size }
+    private fun countMismatches(a: ConnectedAccount) = conversations(a).count {
+        it.observationCount != MiniHubRuntime.observationStore.getObservationsForConversation(it.conversationId, 10_000).size
+    }
+    private fun rowsOwnedElsewhere(owner: ConnectedAccount, other: ConnectedAccount) =
+        conversations(other).count { it.accountId == owner.id } + conversations(owner).count { it.accountId != owner.id }
+    private fun mask(address: String): String {
+        val at = address.indexOf('@')
+        return if (at <= 1) "***" else address.take(2) + "***" + address.substring(at)
     }
 
     /** After the user revokes A at Google: A shows Revoked with a clear action, B unaffected. */
@@ -141,16 +206,40 @@ class GmailReliabilityDeviceTest {
         assertTrue(after.value != stored.value)
     }
 
-    /** LIVE expiry: run more than an hour after the last token issue. Nothing is rewritten. */
+    /**
+     * LIVE (natural) expiry: nothing is rewritten. If B's stored access token has passed the
+     * expiry Google issued, first prove Google itself rejects it (HTTP 401), then sync and expect a
+     * silent refresh. If it has not expired yet, report minutes remaining and fail without changes.
+     */
     @Test
     fun step5_liveExpiry_observeOnly() {
+        val b = accountB()
         val now = System.currentTimeMillis()
-        gmailAccounts().filter { it.state != ConnectionState.Disconnected }.forEach { acct ->
-            val t = tokens.get(acct.id)
-            val expiredNaturally = t?.expiresAtMillis?.let { it <= now } ?: false
-            val report = connector.sync(acct, SyncCheckpoint(), now)
-            log("live expiry: account=${acct.id.localId} expiredNaturallyBeforeSync=$expiredNaturally refreshed=${report.refreshed} state=${report.state}")
-            prefs.edit().putBoolean("live_expiry_${acct.id.localId}", expiredNaturally && report.refreshed && report.state == ConnectionState.Healthy).commit()
+        val t = tokens.get(b.id) ?: error("B has no credential")
+        val expiresAt = t.expiresAtMillis ?: error("B token has no expiry")
+        if (expiresAt > now) {
+            log("live expiry: account=${b.id.localId} notExpiredYet minutesRemaining=${(expiresAt - now) / 60_000}")
+            org.junit.Assert.fail("B token not naturally expired yet; rerun later")
+        }
+        val googleStatus = try {
+            app.mini.hub.connector.GmailApiConnector()
+                .discoverAccount(t, app.mini.hub.android.connector.AndroidProviderHttpTransport())
+            200
+        } catch (e: app.mini.hub.connector.ConnectorHttpException) { e.statusCode }
+        val report = connector.sync(b, SyncCheckpoint(), now)
+        log("live expiry: account=${b.id.localId} expiredMinutesAgo=${(now - expiresAt) / 60_000} googleStatusWithExpiredToken=$googleStatus refreshed=${report.refreshed} state=${report.state} fetched=${report.fetched}")
+        assertEquals("Google rejected the naturally expired token", 401, googleStatus)
+        assertTrue(report.refreshed)
+        assertEquals(ConnectionState.Healthy, report.state)
+    }
+
+    /** Reports minutes until each account's access token naturally expires. Read-only. */
+    @Test
+    fun step5a_expiryClock() {
+        val now = System.currentTimeMillis()
+        gmailAccounts().forEach { acct ->
+            val e = tokens.get(acct.id)?.expiresAtMillis
+            log("expiry clock: account=${acct.id.localId} minutesUntilExpiry=${e?.let { (it - now) / 60_000 }}")
         }
     }
 
@@ -164,19 +253,27 @@ class GmailReliabilityDeviceTest {
         prefs.edit().putLong(KEY_BG_START, System.currentTimeMillis()).commit()
     }
 
-    /** Reads results only; does not sync. Proves the background job, not this test, stored the mail. */
+    /**
+     * Reads results only; does not sync. Proves the background job, not this test, stored the mail.
+     * Matches the synthetic message by exact subject (passed as -e subject) without logging it.
+     */
     @Test
     fun step7_backgroundResult_readOnly() {
         val start = prefs.getLong(KEY_BG_START, 0L)
-        var anyNew = false
+        val subject = args.getString("subject") ?: error("pass -e subject")
+        var found = false
         gmailAccounts().forEach { acct ->
             val before = prefs.getInt("bg_${acct.id.localId}", -1)
             val now = count(acct)
             val lastSync = accounts.get(acct.id)?.lastSuccessfulSyncMillis ?: 0L
-            log("bg result account=${acct.id.localId} before=$before after=$now lastSyncAfterBaseline=${lastSync > start}")
-            if (now > before && lastSync > start) anyNew = true
+            val match = conversations(acct)
+                .flatMap { MiniHubRuntime.observationStore.getObservationsForConversation(it.conversationId, 10_000) }
+                .firstOrNull { it.title == subject }
+            val delaySec = match?.let { (it.observedAt.epochMillis - it.postTime.epochMillis) / 1000 }
+            log("bg result account=${acct.id.localId} before=$before after=$now lastSyncAfterBaseline=${lastSync > start} subjectFound=${match != null} gmailReceivedToMiniStoredSec=$delaySec")
+            if (match != null && match.observedAt.epochMillis > start) found = true
         }
-        assertTrue("At least one account stored new mail via background sync", anyNew)
+        assertTrue("Synthetic message stored by background sync after baseline", found)
     }
 
     private fun sha256() = DigestProvider { payload ->
@@ -190,6 +287,8 @@ class GmailReliabilityDeviceTest {
         const val KEY_A_LOCAL = "account_a_local_before_disconnect"
         const val KEY_A_COUNT = "account_a_count_before_disconnect"
         const val KEY_BG_START = "bg_start"
+        const val KEY_B_LOCAL = "account_b_local"
+        const val KEY_B_COUNT = "account_b_count"
         @Suppress("unused") private val keepJobRef = GmailSyncJobService::class
     }
 }
