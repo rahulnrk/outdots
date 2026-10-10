@@ -15,6 +15,7 @@ import app.mini.hub.android.ui.AndroidNativeHandoffLauncher
 import app.mini.hub.android.ui.InboxScreen
 import app.mini.hub.android.ui.InboxViewModel
 import app.mini.hub.domain.Provider
+import app.mini.hub.style.StyleContext
 
 /**
  * Main Android host Activity rendering the private communication hub.
@@ -25,6 +26,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var handoffLauncher: AndroidNativeHandoffLauncher
     private val connectionStatus = mutableStateOf<String?>(null)
     private val accountsVersion = mutableStateOf(0)
+    private val styleLearningEnabled = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,6 +34,7 @@ class MainActivity : ComponentActivity() {
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
 
         MiniHubRuntime.init(applicationContext)
+        styleLearningEnabled.value = MiniHubRuntime.styleEngine.getConsent().isEnabled
         // One background job syncs every connected account (Gmail and the other API routes).
         GmailSyncJobService.schedulePeriodic(applicationContext)
         val registry = MiniHubRuntime.connectors
@@ -51,6 +54,15 @@ class MainActivity : ComponentActivity() {
             accountStore = accountStore,
             gateway = registry.gateway,
             apiReplyAllowed = registry::canReplyViaApi,
+            onLearnFromApprovedText = { summary, body, recipient, authorship ->
+                val category = StyleContext.forMessage(summary.accountId.provider, summary.title, body)
+                val recipientId = "${summary.accountId.key}|${recipient.ifBlank { summary.senderHint }}"
+                val sampleId = "approved:${summary.conversationId.key}:${body.hashCode()}"
+                if (MiniHubRuntime.styleEngine.learnFromText(body, authorship, category, recipientId, MiniHubRuntime.clock.now(), sampleId)) {
+                    MiniHubRuntime.styleEngine.learnFromText(body, authorship, category, null, MiniHubRuntime.clock.now(), "cat:$sampleId")
+                    MiniHubRuntime.styleStore.save(MiniHubRuntime.styleEngine)
+                }
+            },
             conversationLoader = { summary ->
                 accountStore.get(summary.accountId)?.let { registry.loadConversation(it, summary.conversationId) }
             },
@@ -84,6 +96,13 @@ class MainActivity : ComponentActivity() {
                         accountsVersion.value++
                     },
                     onSyncNow = { syncNow() },
+                    styleLearningEnabled = styleLearningEnabled.value,
+                    onStyleLearningChanged = { enabled ->
+                        val consent = MiniHubRuntime.styleEngine.getConsent()
+                        MiniHubRuntime.styleEngine.updateConsent(consent.copy(isEnabled = enabled))
+                        MiniHubRuntime.styleStore.save(MiniHubRuntime.styleEngine)
+                        styleLearningEnabled.value = enabled
+                    },
                     accountsVersion = accountsVersion.value,
                     onSourceSelectionChanged = { refreshInbox() },
                 )

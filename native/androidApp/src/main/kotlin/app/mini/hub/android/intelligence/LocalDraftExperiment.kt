@@ -15,6 +15,7 @@ import app.mini.hub.intelligence.SubmitResult
 import app.mini.hub.intelligence.SupervisorState
 import app.mini.hub.intelligence.UnloadOutcome
 import app.mini.hub.observation.ObservedNotification
+import app.mini.hub.style.CompactStyleProfile
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorService
@@ -33,6 +34,10 @@ data class LocalDraftRequest(
     val observations: List<ObservedNotification>,
     val coverageWarning: String,
     val userIntent: String,
+    /** Compact style only, never raw profile history. */
+    val styleProfile: CompactStyleProfile? = null,
+    /** Local understanding explanation, never treated as a commitment. */
+    val understandingNote: String? = null,
 )
 
 sealed class LocalDraftResult {
@@ -428,6 +433,12 @@ class LocalDraftExperiment internal constructor(
         appendLine("Keep the reply under 60 words.")
         appendLine("Conversation: ${request.conversationLabel}")
         appendLine("Sender: ${request.sender}")
+        request.styleProfile?.let { profile ->
+            app.mini.hub.style.StyleAwareDraftComposer.promptLines(profile).forEach { appendLine(it) }
+        }
+        request.understandingNote?.takeIf { it.isNotBlank() }?.let {
+            appendLine("Local understanding (not a commitment): $it")
+        }
         appendLine("Context warning: ${request.coverageWarning.ifBlank { "none" }}")
         appendLine("Evidence (oldest first; the last line is the most recent):")
         // Raw epoch timestamps were copied into drafts by the small model on device, so the

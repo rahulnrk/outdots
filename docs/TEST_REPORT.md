@@ -2,6 +2,18 @@
 
 Only commands actually executed are recorded here. Results were independently rerun by the coordinator.
 
+## 2026-10-10, local intelligence checkpoint (fixture)
+
+Run from `C:\Users\nande\Downloads\Mini\native` on Windows. No adb device was attached.
+
+| Command | Result |
+|---|---|
+| `gradlew.bat :shared:jvmTest --no-daemon --max-workers=1` | Pass: 139 JVM tests, 0 failures, including `StyleContextTest` (history bootstrap, same-recipient professional vs casual, persistence, personalization) and `MessageUnderstandingTest` (deadline change, waiting override, no invented deadline) |
+| `gradlew.bat :androidApp:testDebugUnitTest --no-daemon --max-workers=1` | Pass: 37 Android unit tests, 0 failures, including `LocalStyleDraftTest` (professional vs casual drafts differ) and `InboxViewModelTest` (inbox understanding + approved user-authored learning) |
+| `adb devices` via `C:\Users\nande\AppData\Local\Android\Sdk\platform-tools\adb.exe` | No devices attached. Device checks were not run. |
+
+These results are fixture/unit evidence only. They do not prove live Gmail history learning, Keystore restore across an app restart on a phone, or MediaPipe draft personalization on device.
+
 ## 2026-10-09, delivery accounting and evidence integrity checkpoint
 
 Run from `C:\Users\nande\Downloads\Mini` on Windows, JDK 17, Node, Android SDK 34/35.

@@ -12,6 +12,7 @@ import app.mini.hub.connector.ConnectionState
 import app.mini.hub.connector.GmailApiConnector
 import app.mini.hub.connector.ProviderHttpResponse
 import app.mini.hub.connector.ProviderHttpTransport
+import app.mini.hub.connector.ProviderMessage
 import app.mini.hub.connector.StoredAccessToken
 import app.mini.hub.connector.SyncCheckpoint
 import app.mini.hub.domain.IdGenerator
@@ -79,6 +80,7 @@ class AndroidGmailConnector(
     private val digest: DigestProvider,
     private val refresher: GoogleTokenRefresher = GoogleTokenRefresher(),
     private val transport: ProviderHttpTransport = AndroidProviderHttpTransport(),
+    private val onMessagesFetched: (ConnectedAccount, List<ProviderMessage>) -> Unit = { _, _ -> },
 ) {
     private val accounts = AndroidConnectedAccountStore(context)
     private val tokens = AndroidKeystoreAccessTokenStore(context)
@@ -164,6 +166,7 @@ class AndroidGmailConnector(
         )
         val persisted = observationStore.persistAtomicBatch(removals, newObs, listOf(cursor))
         check(persisted.isFullySuccessful) { "Gmail sync was not committed: ${persisted.errors.joinToString()}" }
+        onMessagesFetched(current, incResult.messages)
         val userNotice = if (incResult.gap) ConnectorSyncEngine.GAP_NOTICE else null
         accounts.upsert(
             (accounts.get(current.id) ?: current).copy(

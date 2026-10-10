@@ -65,9 +65,11 @@ class AdaptiveStyleEngine(
 ) {
     private val lock = Any()
     private val profiles = LinkedHashMap<String, CompactStyleProfile>()
+    private val learnedSampleIds = LinkedHashSet<String>()
 
     companion object {
         const val MIN_RECIPIENT_CONFIDENCE: Double = 0.40
+        const val MAX_LEARNED_SAMPLE_IDS: Int = 500
     }
 
     fun getConsent(): StyleConsent = synchronized(lock) { consent }
@@ -76,6 +78,7 @@ class AdaptiveStyleEngine(
         consent = newConsent
         if (!newConsent.isEnabled) {
             profiles.clear()
+            learnedSampleIds.clear()
         }
     }
 
@@ -89,6 +92,7 @@ class AdaptiveStyleEngine(
         category: ContextCategory,
         recipientId: String?,
         now: UtcInstant,
+        sampleId: String? = null,
     ): Boolean = synchronized(lock) {
         if (!consent.isEnabled) return false
         if (category !in consent.grantedCategories) return false
@@ -96,6 +100,7 @@ class AdaptiveStyleEngine(
             return false // Inbound messages and unedited AI drafts NEVER teach style!
         }
         if (text.isBlank()) return false
+        if (!sampleId.isNullOrBlank() && sampleId in learnedSampleIds) return false
 
         // Redact potential secrets/sensitive numeric sequences
         val sanitized = redactSensitiveData(text)
@@ -107,15 +112,24 @@ class AdaptiveStyleEngine(
         val emojiCount = countEmojis(sanitized)
         val wordCount = sanitized.trim().split(Regex("\\s+")).size
         val hasEmoji = emojiCount > 0
+        val lower = sanitized.lowercase()
 
         val newEmojiFreq = if (hasEmoji) 0.8 else 0.0
         val newBrevity = if (wordCount <= 15) 0.9 else if (wordCount <= 50) 0.5 else 0.2
-        val newFormality = when (category) {
+        val categoryFormality = when (category) {
             ContextCategory.Professional -> 0.8
             ContextCategory.Family, ContextCategory.Friends -> 0.2
             ContextCategory.Marketing -> 0.6
             else -> 0.5
         }
+        val newFormality = (categoryFormality + formalityDelta(lower, hasEmoji)).coerceIn(0.0, 1.0)
+        val newWarmth = when {
+            hasEmoji || sanitized.contains('!') || lower.contains("thanks") || lower.contains("hope you") -> 0.8
+            category == ContextCategory.Family || category == ContextCategory.Friends -> 0.75
+            else -> 0.45
+        }
+        val intro = introStyle(lower)
+        val signoff = signoffStyle(sanitized)
 
         val updatedCount = (existing?.observationCount ?: 0) + 1
         val updatedConfidence = (updatedCount.toDouble() / (updatedCount + 3.0)).coerceIn(0.1, 0.95)
@@ -124,18 +138,20 @@ class AdaptiveStyleEngine(
             StyleTraits(
                 formality = (existing.traits.formality * 0.7 + newFormality * 0.3).coerceIn(0.0, 1.0),
                 brevity = (existing.traits.brevity * 0.7 + newBrevity * 0.3).coerceIn(0.0, 1.0),
-                warmth = existing.traits.warmth,
+                warmth = (existing.traits.warmth * 0.7 + newWarmth * 0.3).coerceIn(0.0, 1.0),
                 emojiFrequency = (existing.traits.emojiFrequency * 0.7 + newEmojiFreq * 0.3).coerceIn(0.0, 1.0),
-                introStyle = existing.traits.introStyle,
-                signoffStyle = existing.traits.signoffStyle,
+                introStyle = intro,
+                signoffStyle = signoff,
                 codeSwitchPreference = existing.traits.codeSwitchPreference,
             )
         } else {
             StyleTraits(
                 formality = newFormality,
                 brevity = newBrevity,
-                warmth = if (category == ContextCategory.Family || category == ContextCategory.Friends) 0.8 else 0.5,
+                warmth = newWarmth,
                 emojiFrequency = newEmojiFreq,
+                introStyle = intro,
+                signoffStyle = signoff,
             )
         }
 
@@ -157,6 +173,12 @@ class AdaptiveStyleEngine(
         )
 
         profiles[profileKey] = updatedProfile
+        if (!sampleId.isNullOrBlank()) {
+            learnedSampleIds.add(sampleId)
+            while (learnedSampleIds.size > MAX_LEARNED_SAMPLE_IDS) {
+                learnedSampleIds.remove(learnedSampleIds.first())
+            }
+        }
         return true
     }
 
@@ -194,6 +216,104 @@ class AdaptiveStyleEngine(
 
     fun clearAllStyleData() = synchronized(lock) {
         profiles.clear()
+        learnedSampleIds.clear()
+    }
+
+    fun hasLearnedSample(sampleId: String): Boolean = synchronized(lock) { sampleId in learnedSampleIds }
+
+    /**
+     * Serializes only the compact local profile state. The Android host encrypts this blob with an
+     * Android Keystore key before persistence. Keeping the codec here makes restore deterministic
+     * and reusable by non-Android hosts without exposing raw message history.
+     */
+    fun exportState(): String = synchronized(lock) {
+        buildString {
+            append("v2|${if (consent.isEnabled) 1 else 0}|${consent.consentVersion}|")
+            append(consent.grantedCategories.joinToString(",") { it.name })
+            append("|${if (consent.allowCodeSwitchLearning) 1 else 0}\n")
+            append("ids|")
+            append(learnedSampleIds.joinToString(",") { StyleStateCodec.encode(it) })
+            append('\n')
+            profiles.values.forEach { profile ->
+                append("p|")
+                append(StyleStateCodec.encode(profile.id)).append('|')
+                append(profile.category.name).append('|')
+                append(StyleStateCodec.encode(profile.recipientId.orEmpty())).append('|')
+                append(profile.traits.formality).append('|')
+                append(profile.traits.brevity).append('|')
+                append(profile.traits.warmth).append('|')
+                append(profile.traits.emojiFrequency).append('|')
+                append(StyleStateCodec.encode(profile.traits.introStyle)).append('|')
+                append(StyleStateCodec.encode(profile.traits.signoffStyle)).append('|')
+                append(StyleStateCodec.encode(profile.traits.codeSwitchPreference)).append('|')
+                append(profile.exampleSnippets.joinToString(",") { StyleStateCodec.encode(it) }).append('|')
+                append(profile.observationCount).append('|')
+                append(profile.confidence).append('|')
+                append(profile.consentVersion).append('|')
+                append(profile.updatedAt.epochMillis).append('\n')
+            }
+        }
+    }
+
+    /** Restores compact profiles from trusted encrypted host storage. Invalid state is rejected. */
+    fun importState(serialized: String): Boolean = synchronized(lock) {
+        val lines = serialized.lineSequence().filter { it.isNotBlank() }.toList()
+        val header = lines.firstOrNull()?.split('|') ?: return false
+        if (header.size < 5 || header[0] !in setOf("v1", "v2")) return false
+        val restoredConsent = runCatching {
+            StyleConsent(
+                isEnabled = header[1] == "1",
+                consentVersion = header[2].toInt(),
+                grantedCategories = header[3].split(',').filter { it.isNotBlank() }.map { ContextCategory.valueOf(it) }.toSet(),
+                allowCodeSwitchLearning = header[4] == "1",
+            )
+        }.getOrNull() ?: return false
+        val restoredProfiles = linkedMapOf<String, CompactStyleProfile>()
+        val restoredIds = LinkedHashSet<String>()
+        for (line in lines.drop(1)) {
+            val parts = line.split('|')
+            when (parts[0]) {
+                "ids" -> {
+                    parts.getOrNull(1).orEmpty().split(',').filter { it.isNotBlank() }.forEach { encoded ->
+                        restoredIds.add(StyleStateCodec.decode(encoded))
+                    }
+                }
+                "p" -> {
+                    if (parts.size < 16) return false
+                    val profile = runCatching {
+                        CompactStyleProfile(
+                            id = StyleStateCodec.decode(parts[1]),
+                            category = ContextCategory.valueOf(parts[2]),
+                            recipientId = StyleStateCodec.decode(parts[3]).ifBlank { null },
+                            traits = StyleTraits(
+                                formality = parts[4].toDouble(),
+                                brevity = parts[5].toDouble(),
+                                warmth = parts[6].toDouble(),
+                                emojiFrequency = parts[7].toDouble(),
+                                introStyle = StyleStateCodec.decode(parts[8]),
+                                signoffStyle = StyleStateCodec.decode(parts[9]),
+                                codeSwitchPreference = StyleStateCodec.decode(parts[10]),
+                            ),
+                            exampleSnippets = parts[11].split(',').filter { it.isNotBlank() }.map(StyleStateCodec::decode).take(3),
+                            observationCount = parts[12].toInt(),
+                            confidence = parts[13].toDouble(),
+                            consentVersion = parts[14].toInt(),
+                            updatedAt = UtcInstant(parts[15].toLong()),
+                        )
+                    }.getOrNull() ?: return false
+                    restoredProfiles[profile.id] = profile
+                }
+                else -> return false
+            }
+        }
+        consent = restoredConsent
+        profiles.clear()
+        learnedSampleIds.clear()
+        if (consent.isEnabled) {
+            profiles.putAll(restoredProfiles)
+            learnedSampleIds.addAll(restoredIds)
+        }
+        true
     }
 
     private fun defaultNeutralProfile(category: ContextCategory, recipientId: String?, now: UtcInstant): CompactStyleProfile {
@@ -232,6 +352,30 @@ class AdaptiveStyleEngine(
             lower.contains("change system prompt")
     }
 
+    private fun formalityDelta(lower: String, hasEmoji: Boolean): Double {
+        var delta = 0.0
+        if (lower.contains("dear ") || lower.contains("regards") || lower.contains("please find") || lower.contains("kindly")) delta += 0.15
+        if (lower.contains("hey") || lower.contains("lol") || lower.contains("gonna") || lower.contains("wanna") || lower.contains("thx")) delta -= 0.2
+        if (hasEmoji) delta -= 0.1
+        return delta
+    }
+
+    private fun introStyle(lower: String): String = when {
+        lower.startsWith("dear ") -> "Formal greeting"
+        lower.startsWith("hi ") || lower.startsWith("hello ") -> "Brief greeting"
+        lower.startsWith("hey") -> "Casual greeting"
+        else -> "Neutral greeting"
+    }
+
+    private fun signoffStyle(text: String): String {
+        val last = text.lineSequence().map { it.trim() }.lastOrNull { it.isNotBlank() }?.lowercase().orEmpty()
+        return when {
+            last.startsWith("best") || last.startsWith("regards") || last.startsWith("sincerely") -> "Formal signoff"
+            last.startsWith("thanks") || last.startsWith("cheers") -> "Warm signoff"
+            else -> "Omit on short replies"
+        }
+    }
+
     private fun countEmojis(text: String): Int {
         var count = 0
         for (ch in text) {
@@ -241,5 +385,15 @@ class AdaptiveStyleEngine(
             }
         }
         return count
+    }
+}
+
+private object StyleStateCodec {
+    fun encode(value: String): String = value.encodeToByteArray().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
+    fun decode(value: String): String {
+        if (value.isEmpty()) return ""
+        require(value.length % 2 == 0)
+        return value.chunked(2).map { it.toInt(16).toByte() }.toByteArray().decodeToString()
     }
 }

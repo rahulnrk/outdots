@@ -35,7 +35,9 @@ import app.mini.hub.persistence.ObservationStore
 import app.mini.hub.retrieval.ScopedRetrievalEngine
 import app.mini.hub.retrieval.ScopedRetrievalQuery
 import app.mini.hub.style.AdaptiveStyleEngine
-import app.mini.hub.style.ContextCategory
+import app.mini.hub.style.StyleContext
+import app.mini.hub.understanding.MessageUnderstanding
+import app.mini.hub.understanding.MessageUnderstandingEngine
 
 /**
  * Coordinates UI state between persisted observations, scoped retrieval,
@@ -55,6 +57,11 @@ class InboxViewModel(
     private val gateway: app.mini.hub.action.ProviderGateway? = null,
     /** True only when the account may reply via API right now (scopes granted, gates cleared). */
     private val apiReplyAllowed: (app.mini.hub.connector.ConnectedAccount) -> Boolean = { false },
+    /**
+     * Called after the user reviews and approves text they authored or edited inside MINI.
+     * Unedited AI drafts are not passed here.
+     */
+    private val onLearnFromApprovedText: ((ConversationObservationSummary, String, String, app.mini.hub.style.TextAuthorship) -> Unit)? = null,
     /**
      * Fetches the full provider conversation, persists it, and returns the refreshed timeline.
      * Network I/O: always invoked off the main thread. Null when the provider has no reader.
@@ -131,6 +138,14 @@ class InboxViewModel(
             AttentionEntry(it, records[it.conversationId.key] ?: AttentionRules.default(it.conversationId, clock.now()))
         }
         val view = AttentionView.build(entries)
+        val understanding = summaries.associate { summary ->
+            val record = records[summary.conversationId.key] ?: AttentionRules.default(summary.conversationId, clock.now())
+            summary.conversationId.key to MessageUnderstandingEngine.analyze(
+                summary,
+                observationStore.getObservationsForConversation(summary.conversationId),
+                record,
+            )
+        }
 
         val selected = _state.value.selectedConversation?.takeIf { current ->
             summaries.any { it.conversationId == current.conversationId }
@@ -140,6 +155,7 @@ class InboxViewModel(
             isListenerConnected = isListenerConnected,
             conversations = summaries,
             attentionRecords = records,
+            understanding = understanding,
             attentionView = view,
             storageFailure = failure,
             selectedConversation = selected,
@@ -173,9 +189,10 @@ class InboxViewModel(
             ),
         )
 
+        val styleCategory = StyleContext.forMessage(summary.accountId.provider, summary.title, summary.latestSnippet)
         val style = styleEngine.resolveProfile(
-            category = ContextCategory.Professional,
-            recipientId = summary.senderHint,
+            category = styleCategory,
+            recipientId = styleRecipient(summary),
             now = clock.now(),
         )
 
@@ -188,6 +205,7 @@ class InboxViewModel(
             activeReviewPayload = null,
             outboxStatusMessage = null,
             localDraftText = "",
+            originalGeneratedDraft = null,
             localDraftWarning = null,
             localDraftStatus = null,
             localDraftFeedback = null,
@@ -219,6 +237,12 @@ class InboxViewModel(
                     timeline == null -> _state.value.copy(conversationLoadStatus = null)
                     else -> _state.value.copy(
                         selectedTimeline = timeline,
+                        understanding = _state.value.understanding + (summary.conversationId.key to MessageUnderstandingEngine.analyze(
+                            summary,
+                            timeline,
+                            _state.value.attentionRecords[summary.conversationId.key]
+                                ?: AttentionRules.default(summary.conversationId, clock.now()),
+                        )),
                         retrievedContext = retrievalEngine.retrieve(
                             ScopedRetrievalQuery(
                                 conversationId = summary.conversationId,
@@ -244,6 +268,7 @@ class InboxViewModel(
             activeReviewPayload = null,
             outboxStatusMessage = null,
             localDraftText = "",
+            originalGeneratedDraft = null,
             localDraftWarning = null,
             localDraftStatus = null,
             localDraftFeedback = null,
@@ -281,6 +306,8 @@ class InboxViewModel(
                 observations = retrieved.retrievedObservations,
                 coverageWarning = retrieved.coverageWarning,
                 userIntent = userIntent,
+                styleProfile = _state.value.activeStyleProfile,
+                understandingNote = _state.value.understanding[selected.conversationId.key]?.explanation,
             ),
         ) { result ->
             val applyResult = applyResult@{
@@ -288,6 +315,7 @@ class InboxViewModel(
                 when (result) {
                     is LocalDraftResult.Success -> _state.value = _state.value.copy(
                         localDraftText = result.proposal.text,
+                        originalGeneratedDraft = result.proposal.text,
                         localDraftWarning = result.warning.ifBlank { null },
                         localDraftStatus = "Local draft ready (${result.latencyMs} ms). Review it before use.",
                         isLocalDraftInProgress = false,
@@ -504,6 +532,17 @@ class InboxViewModel(
                 else -> "Action state: ${finalCommand?.state?.name}"
             }
 
+            if (finalCommand?.state == OutboxState.AcceptedByProvider || finalCommand?.state == OutboxState.HandoffOpened) {
+                authorshipForApprovedBody(payload.body)?.let { authorship ->
+                    onLearnFromApprovedText?.invoke(
+                        selectedConversationForLearning(),
+                        payload.body,
+                        payload.recipients.firstOrNull().orEmpty(),
+                        authorship,
+                    )
+                }
+            }
+
             _state.value = _state.value.copy(
                 activeReviewPayload = null,
                 reviewContext = null,
@@ -511,6 +550,21 @@ class InboxViewModel(
             )
         }
     }
+
+    private fun selectedConversationForLearning(): ConversationObservationSummary =
+        requireNotNull(_state.value.selectedConversation)
+
+    private fun authorshipForApprovedBody(body: String): app.mini.hub.style.TextAuthorship? {
+        val original = _state.value.originalGeneratedDraft
+        return when {
+            original == null -> app.mini.hub.style.TextAuthorship.UserAuthoredSentMessage
+            original == body -> null
+            else -> app.mini.hub.style.TextAuthorship.LocallyEditedDraft
+        }
+    }
+
+    private fun styleRecipient(summary: ConversationObservationSummary): String =
+        "${summary.accountId.key}|${summary.senderHint}"
 
     companion object {
         private val USABLE_STATES = setOf(

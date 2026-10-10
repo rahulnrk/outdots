@@ -32,6 +32,9 @@ import app.mini.hub.persistence.SqlCipherActionStore
 import app.mini.hub.persistence.SqlCipherObservationStore
 import app.mini.hub.retrieval.ScopedRetrievalEngine
 import app.mini.hub.style.AdaptiveStyleEngine
+import app.mini.hub.style.ContextCategory
+import app.mini.hub.style.StyleConsent
+import app.mini.hub.style.StyleContext
 import java.security.MessageDigest
 import java.util.concurrent.Executors
 
@@ -57,6 +60,8 @@ object MiniHubRuntime {
     lateinit var retrievalEngine: ScopedRetrievalEngine
         private set
     lateinit var styleEngine: AdaptiveStyleEngine
+        private set
+    lateinit var styleStore: app.mini.hub.android.intelligence.EncryptedStyleProfileStore
         private set
     lateinit var actionController: ActionController
         private set
@@ -129,7 +134,14 @@ object MiniHubRuntime {
             )
 
             retrievalEngine = ScopedRetrievalEngine(observationStore)
-            styleEngine = AdaptiveStyleEngine()
+            styleEngine = AdaptiveStyleEngine(
+                StyleConsent(
+                    isEnabled = true,
+                    grantedCategories = setOf(ContextCategory.Professional, ContextCategory.Friends, ContextCategory.Family),
+                ),
+            )
+            styleStore = app.mini.hub.android.intelligence.EncryptedStyleProfileStore(context.applicationContext)
+            styleStore.restoreInto(styleEngine)
             actionController = ActionController(
                 clock = clock,
                 digest = digest,
@@ -141,6 +153,10 @@ object MiniHubRuntime {
             // never by defaults, so an unconfigured or unqualified route stays visibly blocked.
             connectors = app.mini.hub.android.connector.AndroidConnectorRegistry(
                 context.applicationContext, observationStore, digest, httpTransport,
+                onMessagesFetched = { account, messages ->
+                    val learned = StyleContext.learn(styleEngine, account, messages, clock.now())
+                    if (learned > 0) styleStore.save(styleEngine)
+                },
             )
 
             val app = context.applicationContext as Application
@@ -179,6 +195,7 @@ object MiniHubRuntime {
             })
 
             isInitialized = true
+            backgroundExecutor.execute { bootstrapStyleFromStoredHistory() }
         }
     }
 
@@ -191,6 +208,27 @@ object MiniHubRuntime {
         block()
         val micros = (SystemClock.elapsedRealtimeNanos() - start) / 1_000
         LocalAiTrace.log("MAIN_CALLBACK name=$name mainThread=${onAndroidMainThread()} durationUs=$micros")
+    }
+
+    /**
+     * Learns compact style from already stored provider history without requiring a conversation
+     * to be opened. Notification-only rows are ignored.
+     */
+    fun bootstrapStyleFromStoredHistory() {
+        if (!isInitialized || !styleEngine.getConsent().isEnabled) return
+        var learned = 0
+        val now = clock.now()
+        connectors.listAccounts().forEach { account ->
+            observationStore.getConversationSummaries(account.id).forEach { summary ->
+                learned += StyleContext.learnFromObservations(
+                    styleEngine,
+                    account,
+                    observationStore.getObservationsForConversation(summary.conversationId),
+                    now,
+                )
+            }
+        }
+        if (learned > 0) styleStore.save(styleEngine)
     }
 
     /**

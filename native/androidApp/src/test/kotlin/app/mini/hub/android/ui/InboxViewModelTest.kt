@@ -220,4 +220,87 @@ class InboxViewModelTest {
         assertEquals("Disk full", vm.state.value.storageFailure)
         assertEquals(1, attentionStore.writeCount)
     }
+
+    @Test
+    fun refreshSurfacesUnderstandingAndPreservesDoneOverride() {
+        val obsStore = InMemoryObservationStore()
+        val attentionStore = InMemoryAttentionStore()
+        val vm = InboxViewModel(obsStore, ScopedRetrievalEngine(obsStore), AdaptiveStyleEngine(), ActionController(clock, digest, DomainActionIdGenerator(idGen)), InMemoryActionStore(), clock, attentionStore)
+        obsStore.persistObservation(
+            ObservedNotification(
+                id = ScopedId(account, ScopedId.Kind.OBSERVATION, "obs_deadline"),
+                accountId = account,
+                conversationId = convId,
+                packageId = "com.whatsapp",
+                notificationKey = "notif_deadline",
+                notificationId = 9,
+                tag = null,
+                senderHint = "Alice",
+                title = "Alice",
+                textFragments = listOf("Please send the signed proposal by Friday"),
+                rawTextDigest = "digest_deadline",
+                observedAt = clock.now(),
+                postTime = clock.now(),
+                revision = 1L,
+                isRemoved = false,
+                isGroupSummary = false,
+                truncationState = TruncationState.Complete,
+                correlationConfidence = CorrelationConfidence.High,
+                provenance = ObservationProvenance.AndroidNotificationListener,
+            ),
+        )
+        vm.refresh(true, true)
+        val understood = vm.state.value.understanding[convId.key]
+        assertEquals("by Friday", understood?.deadline)
+        assertTrue(understood?.unansweredRequest == true)
+
+        vm.applyAttentionAction(convId, AttentionAction.MarkDone)
+        val done = vm.state.value.understanding[convId.key]
+        assertTrue(done?.unansweredRequest == false)
+        assertEquals("by Friday", done?.deadline)
+    }
+
+    @Test
+    fun userEditedApprovedTextIsLearnedAndUneditedGeneratedTextIsNot() {
+        val obsStore = InMemoryObservationStore()
+        val learned = mutableListOf<Pair<String, app.mini.hub.style.TextAuthorship>>()
+        val obs = ObservedNotification(
+            id = ScopedId(account, ScopedId.Kind.OBSERVATION, "obs_learn"),
+            accountId = account,
+            conversationId = convId,
+            packageId = "com.whatsapp",
+            notificationKey = "notif_learn",
+            notificationId = 11,
+            tag = null,
+            senderHint = "Alice",
+            title = "Alice",
+            textFragments = listOf("Please send the signed proposal by Friday"),
+            rawTextDigest = "digest_learn",
+            observedAt = clock.now(),
+            postTime = clock.now(),
+            revision = 1L,
+            isRemoved = false,
+            isGroupSummary = false,
+            truncationState = TruncationState.Complete,
+            correlationConfidence = CorrelationConfidence.High,
+            provenance = ObservationProvenance.AndroidNotificationListener,
+        )
+        obsStore.persistObservation(obs)
+        val vm = InboxViewModel(
+            observationStore = obsStore,
+            retrievalEngine = ScopedRetrievalEngine(obsStore),
+            styleEngine = AdaptiveStyleEngine(),
+            actionController = ActionController(clock, digest, DomainActionIdGenerator(idGen)),
+            actionStore = InMemoryActionStore(),
+            clock = clock,
+            attentionStore = InMemoryAttentionStore(),
+            onLearnFromApprovedText = { _, body, _, authorship -> learned += body to authorship },
+        )
+        vm.refresh(true, true)
+        vm.selectConversation(vm.state.value.conversations.first())
+        vm.updateLocalDraftText("Thanks, I will review the proposal.")
+        vm.prepareDraft("Thanks, I will review the proposal.", "Alice")
+        vm.approveAndDispatch(HandoffLauncher { _, _ -> true })
+        assertEquals(listOf("Thanks, I will review the proposal." to app.mini.hub.style.TextAuthorship.UserAuthoredSentMessage), learned)
+    }
 }

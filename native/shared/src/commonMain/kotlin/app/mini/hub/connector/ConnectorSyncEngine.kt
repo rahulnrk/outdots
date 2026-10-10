@@ -51,6 +51,7 @@ class ConnectorSyncEngine(
     private val transport: ProviderHttpTransport,
     private val pageSize: Int = 50,
     private val expirySkewMillis: Long = 60_000L,
+    private val onMessagesFetched: (ConnectedAccount, List<ProviderMessage>) -> Unit = { _, _ -> },
 ) {
     fun syncAll(nowMillis: Long): List<AccountSyncReport> =
         accounts.list().filter { it.id.provider in connectors }.map { account ->
@@ -124,6 +125,9 @@ class ConnectorSyncEngine(
         )
         val persisted = store.persistBatchWithCursors(toWrite, listOf(cursor))
         check(persisted.isFullySuccessful) { "Sync not committed for $key: ${persisted.errors.size} errors" }
+        // Learning is fed only authoritative provider messages after the transaction commits. The
+        // callback is local and must not perform network I/O.
+        onMessagesFetched(current, result.messages)
         accounts.upsert(
             (accounts.get(current.id) ?: current).copy(
                 state = ConnectionState.Healthy,

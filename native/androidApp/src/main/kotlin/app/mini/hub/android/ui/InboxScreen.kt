@@ -58,6 +58,7 @@ import app.mini.hub.domain.UtcInstant
 import app.mini.hub.observation.ConversationObservationSummary
 import app.mini.hub.observation.CommunicationSource
 import app.mini.hub.observation.ObservedNotification
+import app.mini.hub.understanding.MessageUnderstanding
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,10 +78,13 @@ fun InboxScreen(
     onDisconnectAccount: (ConnectedAccount) -> Unit = {},
     onSyncNow: () -> Unit = {},
     accountsVersion: Int = 0,
+    styleLearningEnabled: Boolean = true,
+    onStyleLearningChanged: (Boolean) -> Unit = {},
 ) {
     val state by viewModel.state
     var showSourceSettings by remember { mutableStateOf(false) }
     var showAccountSettings by remember { mutableStateOf(false) }
+    var showLearningSettings by remember { mutableStateOf(false) }
     // Returning from Google recreates the screen. Reopen Accounts so the connection result is visible.
     androidx.compose.runtime.LaunchedEffect(connectionStatus) {
         if (connectionStatus != null) showAccountSettings = true
@@ -99,6 +103,9 @@ fun InboxScreen(
                     }
                     TextButton(onClick = { showAccountSettings = true }) {
                         Text("Accounts")
+                    }
+                    TextButton(onClick = { showLearningSettings = true }) {
+                        Text("Learning")
                     }
                     val statusText = if (state.isListenerConnected) "Listener Active" else "Listener Idle"
                     val statusColor = if (state.isListenerConnected) Color(0xFF2E7D32) else Color(0xFFC62828)
@@ -187,6 +194,8 @@ fun InboxScreen(
                     ?: app.mini.hub.attention.AttentionRules.default(state.selectedConversation!!.conversationId, app.mini.hub.domain.UtcInstant(System.currentTimeMillis()))
                 ConversationDetailView(
                     summary = state.selectedConversation!!,
+                    understanding = state.understanding[state.selectedConversation!!.conversationId.key],
+                    styleProfile = state.activeStyleProfile,
                     attention = record,
                     timeline = state.selectedTimeline,
                     localDraftText = state.localDraftText,
@@ -208,9 +217,14 @@ fun InboxScreen(
                 )
             } else {
                 // Inbox List View
+                LocalUnderstandingDashboard(
+                    conversations = state.conversations,
+                    understanding = state.understanding,
+                )
                 ConversationListView(
                     conversations = state.conversations,
                     view = state.attentionView,
+                    understanding = state.understanding,
                     onSelect = { viewModel.selectConversation(it) },
                 )
             }
@@ -240,6 +254,31 @@ fun InboxScreen(
         )
     }
 
+    if (showLearningSettings) {
+        AlertDialog(
+            onDismissRequest = { showLearningSettings = false },
+            title = { Text("Local writing learning") },
+            text = {
+                Column {
+                    Text(
+                        "When enabled, MINI learns compact professional, casual, and recipient-specific writing preferences from authorized provider messages authored by you and from text you approve. Received messages and unaccepted drafts are never used as your style.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = styleLearningEnabled,
+                            onCheckedChange = onStyleLearningChanged,
+                        )
+                        Text(if (styleLearningEnabled) "Learning is enabled on this device" else "Learning is paused and profiles are cleared")
+                    }
+                    Text("Stored profiles are encrypted with Android Keystore. This setting does not send anything.", style = MaterialTheme.typography.labelSmall)
+                }
+            },
+            confirmButton = { TextButton(onClick = { showLearningSettings = false }) { Text("Done") } },
+        )
+    }
+
     // Exact Action Review Dialog
     state.activeReviewPayload?.let { payload ->
         ExactActionReviewDialog(
@@ -248,6 +287,34 @@ fun InboxScreen(
             onConfirm = { viewModel.approveAndDispatch(handoffLauncher) },
             onDismiss = { viewModel.clearDraftReview() },
         )
+    }
+}
+
+@Composable
+private fun LocalUnderstandingDashboard(
+    conversations: List<ConversationObservationSummary>,
+    understanding: Map<String, MessageUnderstanding>,
+) {
+    val signals = conversations.mapNotNull { understanding[it.conversationId.key]?.takeIf { signal -> signal.hasSignal } }
+    if (signals.isEmpty()) return
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text("Local understanding dashboard", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text("${signals.size} conversation(s) have timing or action signals. These are suggestions, not commitments.", style = MaterialTheme.typography.bodySmall)
+            val unanswered = signals.count { it.unansweredRequest }
+            val waiting = signals.count { it.waiting }
+            val deadlines = signals.count { it.deadline != null }
+            Text(
+                "Unanswered requests: $unanswered · Waiting: $waiting · Deadline mentions: $deadlines",
+                style = MaterialTheme.typography.labelSmall,
+            )
+            signals.take(2).forEach { signal ->
+                Text("• ${signal.purpose} · ${signal.urgency}: ${signal.explanation}", style = MaterialTheme.typography.labelSmall, maxLines = 2)
+            }
+        }
     }
 }
 
@@ -508,6 +575,7 @@ private fun accountStateLabel(state: app.mini.hub.connector.ConnectionState): St
 fun ConversationListView(
     conversations: List<ConversationObservationSummary>,
     view: AttentionView?,
+    understanding: Map<String, MessageUnderstanding> = emptyMap(),
     onSelect: (ConversationObservationSummary) -> Unit,
 ) {
     if (conversations.isEmpty()) {
@@ -521,7 +589,7 @@ fun ConversationListView(
     } else if (view == null || view.isEmpty) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(conversations, key = { it.conversationId.key }) { conv ->
-                ConversationItemCard(conversation = conv, attention = null, onClick = { onSelect(conv) })
+                ConversationItemCard(conversation = conv, attention = null, understanding = understanding[conv.conversationId.key], onClick = { onSelect(conv) })
             }
         }
     } else {
@@ -529,19 +597,19 @@ fun ConversationListView(
             if (view.needsAttention.isNotEmpty()) {
                 item { SectionHeader("Needs Attention") }
                 items(view.needsAttention, key = { it.summary.conversationId.key }) { e ->
-                    ConversationItemCard(conversation = e.summary, attention = e.attention, onClick = { onSelect(e.summary) })
+                    ConversationItemCard(conversation = e.summary, attention = e.attention, understanding = understanding[e.summary.conversationId.key], onClick = { onSelect(e.summary) })
                 }
             }
             if (view.snoozed.isNotEmpty()) {
                 item { SectionHeader("Snoozed") }
                 items(view.snoozed, key = { it.summary.conversationId.key }) { e ->
-                    ConversationItemCard(conversation = e.summary, attention = e.attention, onClick = { onSelect(e.summary) })
+                    ConversationItemCard(conversation = e.summary, attention = e.attention, understanding = understanding[e.summary.conversationId.key], onClick = { onSelect(e.summary) })
                 }
             }
             if (view.waiting.isNotEmpty()) {
                 item { SectionHeader("Waiting on them") }
                 items(view.waiting, key = { it.summary.conversationId.key }) { e ->
-                    ConversationItemCard(conversation = e.summary, attention = e.attention, onClick = { onSelect(e.summary) })
+                    ConversationItemCard(conversation = e.summary, attention = e.attention, understanding = understanding[e.summary.conversationId.key], onClick = { onSelect(e.summary) })
                 }
             }
         }
@@ -562,6 +630,7 @@ fun SectionHeader(title: String) {
 fun ConversationItemCard(
     conversation: ConversationObservationSummary,
     attention: ConversationAttention?,
+    understanding: MessageUnderstanding? = null,
     onClick: () -> Unit,
 ) {
     Card(
@@ -609,6 +678,21 @@ fun ConversationItemCard(
                         BadgeLabel("New Activity", MaterialTheme.colorScheme.primaryContainer)
                     }
                 }
+            }
+
+            understanding?.takeIf { it.hasSignal }?.let { signal ->
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    BadgeLabel(signal.urgency, if (signal.urgency == "High") MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.tertiaryContainer)
+                    BadgeLabel(signal.purpose, MaterialTheme.colorScheme.secondaryContainer)
+                    signal.deadline?.let { BadgeLabel(it, MaterialTheme.colorScheme.errorContainer) }
+                }
+                Text(
+                    text = signal.explanation,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                )
             }
 
             Spacer(modifier = Modifier.height(6.dp))
@@ -666,6 +750,8 @@ fun BadgeLabel(text: String, color: Color) {
 @Composable
 fun ConversationDetailView(
     summary: ConversationObservationSummary,
+    understanding: MessageUnderstanding? = null,
+    styleProfile: app.mini.hub.style.CompactStyleProfile? = null,
     attention: ConversationAttention,
     timeline: List<ObservedNotification>,
     localDraftText: String,
@@ -715,6 +801,41 @@ fun ConversationDetailView(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(8.dp),
             )
+        }
+
+        understanding?.let { signal ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text("Local understanding", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Text("${signal.purpose} · ${signal.urgency}", style = MaterialTheme.typography.bodySmall)
+                    signal.deadline?.let { Text("Deadline signal: $it", style = MaterialTheme.typography.bodySmall) }
+                    signal.requiredAction?.let { Text("Suggested action: $it", style = MaterialTheme.typography.bodySmall) }
+                    Text("Why: ${signal.explanation}", style = MaterialTheme.typography.labelSmall)
+                    Text("Evidence: ${signal.evidenceText}", style = MaterialTheme.typography.labelSmall, maxLines = 2)
+                }
+            }
+        }
+
+        styleProfile?.takeIf { it.observationCount > 0 }?.let { profile ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text("Learned writing style", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        "${profile.category.name} · confidence ${"%.0f".format(profile.confidence * 100)}% from ${profile.observationCount} user-authored sample(s)",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "formality ${"%.2f".format(profile.traits.formality)} · brevity ${"%.2f".format(profile.traits.brevity)} · ${profile.traits.introStyle}",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
         }
 
         // Attention Controls

@@ -59,6 +59,44 @@ class ConnectorEngineAndGatewayTest {
     }
 
     @Test
+    fun syncEngineNotifiesAfterCommitSoStyleCanLearnWithoutSelectingAConversation() {
+        val accounts = InMemoryConnectedAccountStore()
+        val tokens = InMemoryAccessTokenStore()
+        val store = InMemoryObservationStore()
+        val account = ConnectedAccount(
+            AccountId(Provider.OUTLOOK, "out_learn"), "usr_1", "User", AccountType.MicrosoftPersonal,
+            ConnectorRoute.OfficialProviderApi, ConnectionState.Authorized, setOf("Mail.Read"),
+        )
+        accounts.upsert(account)
+        tokens.put(account.id, StoredAccessToken("t1", null))
+        var received = 0
+        val engine = ConnectorSyncEngine(
+            accounts = accounts,
+            tokens = tokens,
+            store = store,
+            digest = digest,
+            connectors = mapOf(Provider.OUTLOOK to OutlookGraphConnector("https://graph.microsoft.com/v1.0")),
+            refreshers = emptyMap(),
+            transport = ProviderHttpTransport.of { req ->
+                when {
+                    req.url.contains("/delta") -> ProviderHttpResponse(
+                        200,
+                        "{\"@odata.deltaLink\":\"https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta?deltatoken=d2\",\"value\":[{\"id\":\"m2\",\"conversationId\":\"c2\",\"bodyPreview\":\"please find the invoice\",\"receivedDateTime\":\"2026-10-10T12:00:00Z\",\"from\":{\"emailAddress\":{\"address\":\"me@ex.com\"}}}]}",
+                    )
+                    else -> error("Unexpected URL: ${req.url}")
+                }
+            },
+            onMessagesFetched = { fetchedAccount, messages ->
+                assertEquals(account.id, fetchedAccount.id)
+                received += messages.size
+            },
+        )
+        engine.syncAll(1_700_000_000_000L)
+        assertEquals(1, received)
+        assertEquals("please find the invoice", store.getObservationByNotificationKey("provider:${account.id.key}:m2")?.textFragments?.single())
+    }
+
+    @Test
     fun gatewayRejectsDispatchWhenCapabilityOrScopeIsMissing() {
         val accounts = InMemoryConnectedAccountStore()
         val tokens = InMemoryAccessTokenStore()

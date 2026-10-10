@@ -182,4 +182,50 @@ class AdaptiveStyleEngineTest {
         assertEquals(0.0, resolved.confidence)
         assertTrue(resolved.id.startsWith("neutral:"))
     }
+
+    @Test
+    fun compactProfilesRoundTripThroughRestartState() {
+        val original = AdaptiveStyleEngine(
+            consent = StyleConsent(
+                isEnabled = true,
+                consentVersion = 3,
+                grantedCategories = setOf(ContextCategory.Professional, ContextCategory.Friends),
+            ),
+        )
+        original.learnFromText("Good morning, I will send the reviewed proposal by Friday.", TextAuthorship.UserAuthoredSentMessage, ContextCategory.Professional, "acct|person", now, "prof-1")
+        original.learnFromText("Hey, sounds good 😊", TextAuthorship.UserAuthoredSentMessage, ContextCategory.Friends, "acct|person", now, "casual-1")
+
+        val restored = AdaptiveStyleEngine()
+        assertTrue(restored.importState(original.exportState()))
+        assertEquals(3, restored.getConsent().consentVersion)
+        assertEquals(
+            original.resolveProfile(ContextCategory.Professional, "acct|person", now),
+            restored.resolveProfile(ContextCategory.Professional, "acct|person", now),
+        )
+        assertEquals(
+            original.resolveProfile(ContextCategory.Friends, "acct|person", now),
+            restored.resolveProfile(ContextCategory.Friends, "acct|person", now),
+        )
+        assertTrue(restored.hasLearnedSample("prof-1"))
+        assertTrue(restored.hasLearnedSample("casual-1"))
+    }
+
+    @Test
+    fun sampleIdsPreventDoubleCountingAndV1StateStillImports() {
+        val engine = AdaptiveStyleEngine(
+            consent = StyleConsent(isEnabled = true, grantedCategories = setOf(ContextCategory.Professional)),
+        )
+        assertTrue(engine.learnFromText("Thanks for sending this over.", TextAuthorship.UserAuthoredSentMessage, ContextCategory.Professional, "r1", now, "sample-a"))
+        assertFalse(engine.learnFromText("Thanks for sending this over.", TextAuthorship.UserAuthoredSentMessage, ContextCategory.Professional, "r1", now, "sample-a"))
+        assertEquals(1, engine.getRecipientProfile(ContextCategory.Professional, "r1")?.observationCount)
+
+        val v1 = AdaptiveStyleEngine(
+            consent = StyleConsent(isEnabled = true, grantedCategories = setOf(ContextCategory.Professional)),
+        )
+        v1.learnFromText("Follow up on invoice.", TextAuthorship.UserAuthoredSentMessage, ContextCategory.Professional, "r2", now)
+        val exported = v1.exportState().replaceFirst("v2|", "v1|").lineSequence().filterNot { it.startsWith("ids|") }.joinToString("\n")
+        val imported = AdaptiveStyleEngine()
+        assertTrue(imported.importState(exported))
+        assertEquals(1, imported.getRecipientProfile(ContextCategory.Professional, "r2")?.observationCount)
+    }
 }

@@ -57,6 +57,7 @@ class AndroidConnectorRegistry(
     private val store: ObservationStore,
     private val digest: DigestProvider,
     private val transport: ProviderHttpTransport,
+    private val onMessagesFetched: (ConnectedAccount, List<ProviderMessage>) -> Unit = { _, _ -> },
 ) {
     private val appContext = context.applicationContext
     private val accounts = AndroidConnectedAccountStore(appContext)
@@ -65,7 +66,7 @@ class AndroidConnectorRegistry(
 
     val gmailOAuth = GmailOAuthClient(appContext)
     val outlookOAuth = OutlookOAuthClient(appContext)
-    private val gmail = AndroidGmailConnector(appContext, store, digest, transport = transport)
+    private val gmail = AndroidGmailConnector(appContext, store, digest, transport = transport, onMessagesFetched = onMessagesFetched)
 
     private val outlookConnector = OutlookGraphConnector()
     private val teamsConnector = TeamsChatConnector()
@@ -141,6 +142,7 @@ class AndroidConnectorRegistry(
             // Telegram bot tokens do not expire; no refresher.
         ),
         transport = transport,
+        onMessagesFetched = onMessagesFetched,
     )
 
     private fun configuredClients(): Set<Provider> = buildSet {
@@ -265,6 +267,8 @@ class AndroidConnectorRegistry(
         }
     }
 
+    fun listAccounts(): List<ConnectedAccount> = accounts.list()
+
     data class SyncSummary(val accounts: Int, val inserted: Int, val updated: Int, val needsAttention: Int)
 
     private val observationFactory = app.mini.hub.connector.ConnectorObservationFactory(digest)
@@ -281,6 +285,7 @@ class AndroidConnectorRegistry(
         val rows = messages.map { observationFactory.fromMessage(account.id, it, now) }
             .filter { it.conversationId == conversationId }
         if (rows.isNotEmpty()) store.persistBatch(rows)
+        onMessagesFetched(account, messages)
         Log.i(LOG_TAG, "account=${account.id.localId} conversation loaded messages=${rows.size}")
         return store.getObservationsForConversation(conversationId)
     }

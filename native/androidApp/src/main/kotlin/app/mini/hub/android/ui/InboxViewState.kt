@@ -9,6 +9,7 @@ import app.mini.hub.observation.ConversationObservationSummary
 import app.mini.hub.observation.ObservedNotification
 import app.mini.hub.retrieval.ScopedRetrievalResult
 import app.mini.hub.style.CompactStyleProfile
+import app.mini.hub.understanding.MessageUnderstanding
 
 enum class DraftUsefulnessFeedback { Useful, NeedsEditing, NotUseful }
 
@@ -18,6 +19,7 @@ data class InboxViewState(
     val conversations: List<ConversationObservationSummary> = emptyList(),
     val attentionView: AttentionView? = null,
     val attentionRecords: Map<String, ConversationAttention> = emptyMap(),
+    val understanding: Map<String, MessageUnderstanding> = emptyMap(),
     val storageFailure: String? = null,
     val selectedConversation: ConversationObservationSummary? = null,
     val selectedTimeline: List<ObservedNotification> = emptyList(),
@@ -27,6 +29,7 @@ data class InboxViewState(
     val outboxStatusMessage: String? = null,
     val isLoading: Boolean = false,
     val localDraftText: String = "",
+    val originalGeneratedDraft: String? = null,
     val localDraftWarning: String? = null,
     val localDraftStatus: String? = null,
     val localDraftFeedback: DraftUsefulnessFeedback? = null,
