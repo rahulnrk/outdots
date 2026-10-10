@@ -27,6 +27,14 @@
                     android:path="/oauth2redirect/google"
                     android:scheme="${gmailRedirectScheme}" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:path="/oauth2redirect/outlook"
+                    android:scheme="app.mini.hub" />
+            </intent-filter>
         </activity>
 
         <service

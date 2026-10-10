@@ -70,6 +70,9 @@ fun InboxScreen(
     connectionStatus: String?,
     onConnectGmail: () -> Unit,
     onSourceSelectionChanged: () -> Unit,
+    outlookCanConnect: Boolean = false,
+    outlookSetupStatus: String = "",
+    onConnectOutlook: () -> Unit = {},
     onDisconnectAccount: (ConnectedAccount) -> Unit = {},
     onSyncNow: () -> Unit = {},
     accountsVersion: Int = 0,
@@ -223,8 +226,11 @@ fun InboxScreen(
             accounts = remember(accountsVersion, connectionStatus) { accountStore.list() },
             gmailCanConnect = gmailCanConnect,
             gmailSetupStatus = gmailSetupStatus,
+            outlookCanConnect = outlookCanConnect,
+            outlookSetupStatus = outlookSetupStatus,
             connectionStatus = connectionStatus,
             onConnectGmail = onConnectGmail,
+            onConnectOutlook = onConnectOutlook,
             onDisconnect = onDisconnectAccount,
             onSyncNow = onSyncNow,
             onDismiss = { showAccountSettings = false },
@@ -287,8 +293,11 @@ private fun ConnectedAccountSettingsDialog(
     accounts: List<ConnectedAccount>,
     gmailCanConnect: Boolean,
     gmailSetupStatus: String,
+    outlookCanConnect: Boolean,
+    outlookSetupStatus: String,
     connectionStatus: String?,
     onConnectGmail: () -> Unit,
+    onConnectOutlook: () -> Unit,
     onDisconnect: (ConnectedAccount) -> Unit,
     onSyncNow: () -> Unit,
     onDismiss: () -> Unit,
@@ -297,10 +306,10 @@ private fun ConnectedAccountSettingsDialog(
     pendingDisconnect?.let { target ->
         AlertDialog(
             onDismissRequest = { pendingDisconnect = null },
-            title = { Text("Disconnect this Gmail account?") },
+            title = { Text("Disconnect this account?") },
             text = {
                 Text(
-                    "MINI stops syncing ${target.displayName ?: "this account"} and deletes its stored access. " +
+                    "MINI stops syncing ${target.displayName ?: target.providerAccountId} and deletes its stored access. " +
                         "Messages already in MINI are kept. Other accounts are not affected.",
                 )
             },
@@ -329,7 +338,7 @@ private fun ConnectedAccountSettingsDialog(
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
-                            "Official provider route · ${account.accountType.name}",
+                            "${account.id.provider.wire.uppercase()} · ${account.accountType.name}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -341,14 +350,21 @@ private fun ConnectedAccountSettingsDialog(
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                     }
-                    TextButton(onClick = onSyncNow) { Text("Sync Gmail now") }
+                    TextButton(onClick = onSyncNow) { Text("Sync connected accounts now") }
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
                 Text("Gmail", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 Text(gmailSetupStatus, style = MaterialTheme.typography.bodySmall)
                 Spacer(modifier = Modifier.height(6.dp))
                 Button(onClick = onConnectGmail, enabled = gmailCanConnect) {
-                    Text(if (gmailCanConnect) "Connect Gmail (read-only)" else "Gmail setup required")
+                    Text(if (gmailCanConnect) "Connect Gmail" else "Gmail setup required")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Outlook", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(outlookSetupStatus, style = MaterialTheme.typography.bodySmall)
+                Spacer(modifier = Modifier.height(6.dp))
+                Button(onClick = onConnectOutlook, enabled = outlookCanConnect) {
+                    Text(if (outlookCanConnect) "Connect Outlook Mail (personal or work)" else "Outlook setup required")
                 }
                 connectionStatus?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
@@ -801,18 +817,26 @@ fun ExactActionReviewDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val isApi = payload.route == app.mini.hub.action.ActionRoute.Api
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Exact Action Review (No Unintended Send)") },
         text = {
             Column {
                 Text(
-                    text = "Review the exact message and destination before proceeding. This action will open WhatsApp / email with this pre-filled draft.",
+                    text = if (isApi) {
+                        "Review the exact message, subject and destination before dispatching. This action will send directly via official provider API."
+                    } else {
+                        "Review the exact message and destination before proceeding. This action will open WhatsApp / email with this pre-filled draft."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Text("Route: Native Handoff", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                Text("Route: ${if (isApi) "Official Provider API (${payload.accountId})" else "Native Handoff"}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                payload.subject?.let {
+                    Text("Subject: $it", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                }
                 Text("Recipient: ${payload.recipients.joinToString().ifBlank { "Original Thread" }}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                 Spacer(modifier = Modifier.height(4.dp))
 
@@ -837,7 +861,7 @@ fun ExactActionReviewDialog(
         },
         confirmButton = {
             Button(onClick = onConfirm) {
-                Text("Approve & Open App")
+                Text(if (isApi) "Approve & Send via API" else "Approve & Open App")
             }
         },
         dismissButton = {

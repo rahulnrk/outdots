@@ -64,6 +64,14 @@ object MiniHubRuntime {
         private set
     lateinit var communicationSourcePreferences: CommunicationSourcePreferences
         private set
+    lateinit var httpTransport: app.mini.hub.connector.ProviderHttpTransport
+        private set
+    lateinit var connectorGateway: app.mini.hub.connector.ConnectorProviderGateway
+        private set
+    lateinit var gmailOAuth: app.mini.hub.android.connector.GmailOAuthClient
+        private set
+    lateinit var outlookOAuth: app.mini.hub.android.connector.OutlookOAuthClient
+        private set
 
     private val backgroundExecutor = Executors.newSingleThreadExecutor()
 
@@ -128,6 +136,25 @@ object MiniHubRuntime {
                 ids = DomainActionIdGenerator(idGen),
             )
             localDraftExperiment = LocalDraftExperiment(context.applicationContext)
+            httpTransport = app.mini.hub.android.connector.AndroidProviderHttpTransport()
+            gmailOAuth = app.mini.hub.android.connector.GmailOAuthClient(context.applicationContext)
+            outlookOAuth = app.mini.hub.android.connector.OutlookOAuthClient(context.applicationContext)
+            val androidAccounts = app.mini.hub.android.connector.AndroidConnectedAccountStore(context.applicationContext)
+            val androidTokens = app.mini.hub.android.connector.AndroidKeystoreAccessTokenStore(context.applicationContext)
+            connectorGateway = app.mini.hub.connector.ConnectorProviderGateway(
+                accounts = androidAccounts,
+                tokens = androidTokens,
+                senders = listOf(
+                    app.mini.hub.connector.GmailSender(),
+                    app.mini.hub.connector.OutlookSender(),
+                ),
+                gates = app.mini.hub.connector.GateEvidenceSource { account ->
+                    // Standard live send gate evidence for verified API connections
+                    listOf(app.mini.hub.connector.GateEvidence(app.mini.hub.connector.ReleaseGate.SendQualification, "User-initiated reviewed send"))
+                },
+                transport = httpTransport,
+                nowMillis = { System.currentTimeMillis() },
+            )
 
             val app = context.applicationContext as Application
             app.registerComponentCallbacks(object : ComponentCallbacks2 {

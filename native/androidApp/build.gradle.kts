@@ -17,6 +17,8 @@ android {
         ?.let { "com.googleusercontent.apps.$it" }
         ?: "app.mini.hub"
 
+    val microsoftOAuthClientId = providers.gradleProperty("mini.outlookOAuthClientId").orNull.orEmpty()
+
     defaultConfig {
         applicationId = "app.mini.hub"
         minSdk = 26
@@ -34,9 +36,11 @@ android {
     buildTypes {
         getByName("debug") {
             buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", "\"${googleOAuthClientId.replace("\"", "\\\"")}\"")
+            buildConfigField("String", "MICROSOFT_OAUTH_CLIENT_ID", "\"${microsoftOAuthClientId.replace("\"", "\\\"")}\"")
         }
         getByName("release") {
             buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", "\"${googleOAuthClientId.replace("\"", "\\\"")}\"")
+            buildConfigField("String", "MICROSOFT_OAUTH_CLIENT_ID", "\"${microsoftOAuthClientId.replace("\"", "\\\"")}\"")
         }
     }
     composeOptions {

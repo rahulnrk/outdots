@@ -30,9 +30,10 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
         val selectedCaseId = intent.getStringExtra(EXTRA_CASE_ID)
         val forcedTimeoutMillis = intent.getLongExtra(EXTRA_TIMEOUT_MILLIS, 0L)
         val verifyTimeoutRecovery = intent.getBooleanExtra(EXTRA_VERIFY_TIMEOUT_RECOVERY, false)
+        val englishOnly = intent.getBooleanExtra(EXTRA_ENGLISH_ONLY, false)
         val pending = goAsync()
         Thread {
-            runEvaluation(context.applicationContext, selectedCaseId, forcedTimeoutMillis, verifyTimeoutRecovery)
+            runEvaluation(context.applicationContext, selectedCaseId, forcedTimeoutMillis, verifyTimeoutRecovery, englishOnly)
         }.start()
         // This is a debug-only long-running harness. Release the broadcast token immediately
         // so Android does not classify model evaluation as a receiver ANR. The notification
@@ -40,17 +41,19 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
         pending.finish()
     }
 
-    private fun runEvaluation(context: Context, selectedCaseId: String?, forcedTimeoutMillis: Long, verifyTimeoutRecovery: Boolean) {
+    private fun runEvaluation(context: Context, selectedCaseId: String?, forcedTimeoutMillis: Long, verifyTimeoutRecovery: Boolean, englishOnly: Boolean) {
         MiniHubRuntime.init(context)
         val experiment = MiniHubRuntime.localDraftExperiment
-        val selectedCases = syntheticCases().filter { selectedCaseId == null || it.id == selectedCaseId }
+        val selectedCases = syntheticCases().filter {
+            (selectedCaseId == null || it.id == selectedCaseId) && (!englishOnly || !it.isExploratoryLanguage)
+        }
         if (selectedCases.isEmpty()) {
             Log.w("MiniDraftEval", "No matching synthetic case; evaluation skipped.")
             return
         }
         val recoveryRun = verifyTimeoutRecovery && selectedCases.size == 1 && forcedTimeoutMillis in 1L..60_000L
         val cases = if (recoveryRun) selectedCases + selectedCases.single().copy(id = "$selectedCaseId-after-timeout") else selectedCases
-        val artifactId = if (recoveryRun) "$selectedCaseId-timeout-recovery" else selectedCaseId
+        val artifactId = if (recoveryRun) "$selectedCaseId-timeout-recovery" else selectedCaseId ?: if (englishOnly) "english-mvp" else null
         val artifactFile = reviewArtifactFile(context, artifactId)
         val artifactCases = JSONArray()
         val artifact = JSONObject()
@@ -61,6 +64,9 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
             .put("inferenceOwner", "MiniHubRuntime")
             .put("forcedTimeoutMillis", forcedTimeoutMillis)
             .put("verifyTimeoutRecovery", recoveryRun)
+            .put("englishOnly", englishOnly)
+            .put("mvpLanguage", "english")
+            .put("exploratoryLanguagesBlockMvp", false)
             .put("modelId", MediaPipeInferenceEngine.MODEL_ID)
             .put("cases", artifactCases)
             .put("memoryBeforeLoadPssKb", readPssKb(context))
@@ -105,6 +111,7 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
                 JSONObject()
                     .put("id", testCase.id)
                     .put("category", testCase.category)
+                    .put("evaluationScope", if (testCase.isExploratoryLanguage) "POST_MVP_EXPLORATORY" else "ENGLISH_MVP")
                     .put("evidence", evidenceJson(testCase.request))
                     .put("userIntent", testCase.request.userIntent)
                     .put("generatedDraft", generatedDraft)
@@ -116,7 +123,7 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
                     .put("humanReviewRequired", true)
                     .put(
                         "humanReviewReason",
-                        if (testCase.category == "hindi" || testCase.category == "telugu") {
+                        if (testCase.isExploratoryLanguage) {
                             "Requested-language naturalness and subjective usefulness require human review."
                         } else {
                             "Subjective usefulness requires human review."
@@ -212,6 +219,23 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
                     .put("naturalness", "HUMAN_REVIEW_REQUIRED")
             }
         }
+        if (testCase.category.endsWith("romanized")) {
+            checks
+                .put("latinLettersPresent", draft.any { it in 'a'..'z' || it in 'A'..'Z' })
+                .put("noUnrequestedNativeScript", draft.none { it in DEVANAGARI || it in TELUGU })
+                .put("noByteLevelTokenArtifacts", !containsByteTokenArtifacts(draft))
+                .put("meaningAndIntentFollowed", "HUMAN_REVIEW_REQUIRED")
+                .put("naturalness", "HUMAN_REVIEW_REQUIRED")
+            if (testCase.id == "14-hindi-mixed-price" || testCase.id == "15-telugu-mixed-price") {
+                checks.put("exactPricePreserved", draft.contains("500"))
+            }
+            if (testCase.id == "16-hindi-spelling-correction" || testCase.id == "17-telugu-spelling-correction") {
+                checks.put(
+                    "latestCorrectedFactUsed",
+                    draft.contains("Thursday", ignoreCase = true) && !draft.contains("Tuesday", ignoreCase = true),
+                )
+            }
+        }
         if (result is LocalDraftResult.Success) {
             val incoming = testCase.request.observations.map { it.textFragments.joinToString(" ").trim().lowercase() }
             checks.put("notEchoOfIncoming", draft.trim().lowercase() !in incoming)
@@ -243,7 +267,10 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
         val id: String,
         val category: String,
         val request: LocalDraftRequest,
-    )
+    ) {
+        val isExploratoryLanguage: Boolean
+            get() = category == "hindi" || category == "telugu" || category.endsWith("romanized")
+    }
 
     private fun syntheticCases(): List<SyntheticCase> {
         val compartment = CompartmentId("whatsapp|synthetic-draft-eval")
@@ -322,6 +349,36 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
                 ),
                 "Confirm we want to proceed at the quoted total and say I will share the address.",
             ),
+            request(
+                "12-hindi-romanized", "hindi-romanized",
+                listOf("Kal baat kar sakte hain?"),
+                "Reply in Hindi written in English letters. Ask what time they prefer; do not choose a time.",
+            ),
+            request(
+                "13-telugu-romanized", "telugu-romanized",
+                listOf("Repu matladagalama?"),
+                "Reply in Telugu written in English letters. Ask what time they prefer; do not choose a time.",
+            ),
+            request(
+                "14-hindi-mixed-price", "hindi-mixed-romanized",
+                listOf("Delivery ke saath total Rs 500 hai. Order proceed karein?"),
+                "Reply in Hindi mixed with English, using English letters. Repeat Rs 500 and ask them to share payment details. Do not claim payment was made.",
+            ),
+            request(
+                "15-telugu-mixed-price", "telugu-mixed-romanized",
+                listOf("Delivery tho kalipi total Rs 500. Order proceed cheyyala?"),
+                "Reply in Telugu mixed with English, using English letters. Repeat Rs 500 and ask them to share payment details. Do not claim payment was made.",
+            ),
+            request(
+                "16-hindi-spelling-correction", "hindi-romanized",
+                listOf("Meeting Tuesday ko h, aa paoge?", "Sry, meeting Thursday ko h, Tuesday nhi."),
+                "Reply in Hindi written in English letters. Acknowledge that the meeting moved to Thursday. Keep the weekday in English; do not add a time or promise attendance.",
+            ),
+            request(
+                "17-telugu-spelling-correction", "telugu-romanized",
+                listOf("Meeting Tuesday undi, vastava?", "Sry meeting Thursday ki marindi, Tuesday kaadu."),
+                "Reply in Telugu written in English letters. Acknowledge that the meeting moved to Thursday. Keep the weekday in English; do not add a time or promise attendance.",
+            ),
         )
     }
 
@@ -339,5 +396,6 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
         const val EXTRA_CASE_ID = "case_id"
         const val EXTRA_TIMEOUT_MILLIS = "timeout_ms"
         const val EXTRA_VERIFY_TIMEOUT_RECOVERY = "verify_timeout_recovery"
+        const val EXTRA_ENGLISH_ONLY = "english_only"
     }
 }

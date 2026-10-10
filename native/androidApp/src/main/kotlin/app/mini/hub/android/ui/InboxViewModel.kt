@@ -51,6 +51,8 @@ class InboxViewModel(
     private val attentionStore: AttentionStore,
     private val localDraftExperiment: LocalDraftExperiment? = null,
     private val selectedSources: () -> Set<CommunicationSource> = { CommunicationSource.defaultSelection },
+    private val accountStore: app.mini.hub.connector.ConnectedAccountStore? = null,
+    private val gateway: app.mini.hub.action.ProviderGateway? = null,
 ) {
     // Monotonic token so a late callback from a cancelled or superseded request cannot overwrite
     // the cancellation state or a newer draft.
@@ -347,18 +349,30 @@ class InboxViewModel(
 
     fun prepareDraft(body: String, recipient: String) {
         val selected = _state.value.selectedConversation ?: return
+        val connectedAccount = accountStore?.get(selected.accountId)
+        val isOfficialApiAccount = connectedAccount != null &&
+            connectedAccount.route == app.mini.hub.connector.ConnectorRoute.OfficialProviderApi &&
+            connectedAccount.state in setOf(app.mini.hub.connector.ConnectionState.Authorized, app.mini.hub.connector.ConnectionState.Healthy)
+
+        val targetRecipient = recipient.ifBlank { selected.senderHint }
+        val replyTargetMsg = _state.value.selectedTimeline.lastOrNull { !it.isRemoved }
+        val replyTargetId = replyTargetMsg?.notificationKey?.substringAfter("provider:${selected.accountId.key}:")
+            ?.takeIf { it != replyTargetMsg.notificationKey }
+
+        val route = if (isOfficialApiAccount && targetRecipient.isNotBlank()) ActionRoute.Api else ActionRoute.NativeHandoff
 
         val payload = ExactActionPayload(
             accountId = selected.accountId.key,
             conversationId = selected.conversationId.key,
-            route = ActionRoute.NativeHandoff,
-            recipients = if (recipient.isNotBlank()) listOf(recipient) else emptyList(),
-            subject = null,
+            route = route,
+            recipients = if (targetRecipient.isNotBlank()) listOf(targetRecipient) else emptyList(),
+            subject = selected.title.takeIf { it.isNotBlank() },
             body = body,
             attachments = emptyList(),
             sourceVersions = emptyList(),
-            grantVersion = "grant-v1-user-initiated",
-            policyVersion = "policy-v1-notification-handoff",
+            grantVersion = if (route == ActionRoute.Api) "grant-v1-api-send" else "grant-v1-user-initiated",
+            policyVersion = if (route == ActionRoute.Api) "policy-v1-api-review" else "policy-v1-notification-handoff",
+            replyTarget = if (route == ActionRoute.Api) replyTargetId else null,
         )
 
         _state.value = _state.value.copy(activeReviewPayload = payload)
@@ -385,7 +399,7 @@ class InboxViewModel(
                     state = currentActionState,
                     commandId = cmdId,
                     payload = payload,
-                    gateway = null,
+                    gateway = gateway,
                     handoff = handoffLauncher,
                 )
             }
@@ -393,8 +407,9 @@ class InboxViewModel(
             val finalCommand = finalActionState.outbox.find { it.id == cmdId }
             val statusMessage = when (finalCommand?.state) {
                 OutboxState.HandoffOpened -> "Draft opened in native app. Pending your manual send."
-                OutboxState.AcceptedByProvider -> "Message accepted by provider."
+                OutboxState.AcceptedByProvider -> "Message accepted by provider (receipt: ${finalCommand.receipt ?: "accepted"})."
                 OutboxState.Rejected -> "Action rejected: ${finalCommand.failureReason}"
+                OutboxState.OutcomeUnknown -> "Provider dispatch status unknown: ${finalCommand.failureReason ?: "timeout/network failure"}"
                 else -> "Action state: ${finalCommand?.state?.name}"
             }
 

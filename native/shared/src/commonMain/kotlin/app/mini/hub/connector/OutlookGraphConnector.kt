@@ -78,7 +78,7 @@ class OutlookGraphConnector(
                 auth(accessToken) + PREFER,
             ),
         )
-        return page["value"]?.objects.orEmpty().mapNotNull { parse(it, null) }.sortedBy { it.occurredAtMillis }
+        return page["value"]?.objects.orEmpty().mapNotNull { parse(it) }.sortedBy { it.occurredAtMillis }
     }
 
     private fun initialDelta() = "$graphBase/me/mailFolders/inbox/messages/delta?\$select=$SELECT"
