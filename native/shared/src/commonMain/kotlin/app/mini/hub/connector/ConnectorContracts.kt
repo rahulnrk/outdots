@@ -149,7 +149,7 @@ data class ProviderHttpResponse(
     fun header(name: String): String? = headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
 }
 
-enum class HttpMethod { GET, POST, PATCH, DELETE }
+enum class HttpMethod { GET, POST, PATCH, DELETE, PUT }
 
 data class ProviderHttpRequest(
     val method: HttpMethod,

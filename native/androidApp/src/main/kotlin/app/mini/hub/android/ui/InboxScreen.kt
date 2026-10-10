@@ -73,6 +73,7 @@ fun InboxScreen(
     onSourceSelectionChanged: () -> Unit,
     capabilities: (ConnectedAccount) -> app.mini.hub.connector.CapabilitySnapshot? = { null },
     onConnectTelegram: (String) -> Unit = {},
+    onConnectMatrix: (app.mini.hub.domain.Provider, String, String) -> Unit = { _, _, _ -> },
     onDisconnectAccount: (ConnectedAccount) -> Unit = {},
     onSyncNow: () -> Unit = {},
     accountsVersion: Int = 0,
@@ -232,6 +233,7 @@ fun InboxScreen(
             connectionStatus = connectionStatus,
             onConnect = onConnect,
             onConnectTelegram = onConnectTelegram,
+            onConnectMatrix = onConnectMatrix,
             onDisconnect = onDisconnectAccount,
             onSyncNow = onSyncNow,
             onDismiss = { showAccountSettings = false },
@@ -298,16 +300,25 @@ private fun ConnectedAccountSettingsDialog(
     connectionStatus: String?,
     onConnect: (app.mini.hub.domain.Provider) -> Unit,
     onConnectTelegram: (String) -> Unit,
+    onConnectMatrix: (app.mini.hub.domain.Provider, String, String) -> Unit,
     onDisconnect: (ConnectedAccount) -> Unit,
     onSyncNow: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var pendingDisconnect by remember { mutableStateOf<ConnectedAccount?>(null) }
     var showTelegramEntry by remember { mutableStateOf(false) }
+    var matrixEntryProvider by remember { mutableStateOf<app.mini.hub.domain.Provider?>(null) }
+    
     if (showTelegramEntry) {
         TelegramTokenDialog(
             onSubmit = { onConnectTelegram(it); showTelegramEntry = false },
             onDismiss = { showTelegramEntry = false },
+        )
+    }
+    matrixEntryProvider?.let { provider ->
+        MatrixBridgeDialog(
+            onSubmit = { url, token -> onConnectMatrix(provider, url, token); matrixEntryProvider = null },
+            onDismiss = { matrixEntryProvider = null },
         )
     }
     pendingDisconnect?.let { target ->
@@ -380,7 +391,11 @@ private fun ConnectedAccountSettingsDialog(
                         style = MaterialTheme.typography.bodySmall,
                     )
                     OutlinedButton(
-                        onClick = { if (route.usesTokenEntry) showTelegramEntry = true else onConnect(route.provider) },
+                        onClick = { 
+                            if (route.usesMatrixEntry) matrixEntryProvider = route.provider 
+                            else if (route.usesTokenEntry) showTelegramEntry = true 
+                            else onConnect(route.provider) 
+                        },
                         enabled = route.configured,
                     ) {
                         Text(if (route.configured) "Connect ${route.title}" else "${route.title}: not set up in this build")
@@ -433,6 +448,46 @@ private fun TelegramTokenDialog(onSubmit: (String) -> Unit, onDismiss: () -> Uni
         },
         confirmButton = {
             TextButton(onClick = { onSubmit(token) }, enabled = token.contains(':')) { Text("Connect") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun MatrixBridgeDialog(onSubmit: (String, String) -> Unit, onDismiss: () -> Unit) {
+    var url by remember { mutableStateOf("") }
+    var token by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Connect Matrix Bridge") },
+        text = {
+            Column {
+                Text(
+                    "Provide the URL of your Matrix homeserver (e.g. https://matrix.example.com) and an access token.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it.trim() },
+                    label = { Text("Homeserver URL") },
+                    singleLine = true,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = token,
+                    onValueChange = { token = it.trim() },
+                    label = { Text("Access Token") },
+                    singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSubmit(url, token) }, 
+                enabled = url.startsWith("http") && token.isNotBlank()
+            ) { Text("Connect") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

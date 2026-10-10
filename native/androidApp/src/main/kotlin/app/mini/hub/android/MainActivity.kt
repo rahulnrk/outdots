@@ -73,6 +73,7 @@ class MainActivity : ComponentActivity() {
                     connectionStatus = connectionStatus.value,
                     onConnect = { provider -> connect(provider) },
                     onConnectTelegram = { token -> connectTelegram(token) },
+                    onConnectMatrix = { provider, url, token -> connectMatrix(provider, url, token) },
                     onDisconnectAccount = { account ->
                         val manager = app.mini.hub.connector.AccountConnectionManager(
                             accountStore, AndroidKeystoreAccessTokenStore(applicationContext), app.mini.hub.domain.IdGenerator { "unused-$it" },
@@ -111,6 +112,21 @@ class MainActivity : ComponentActivity() {
                 accountsVersion.value++
             }
         }, "mini-telegram-connect").start()
+    }
+
+    private fun connectMatrix(provider: Provider, url: String, token: String) {
+        connectionStatus.value = "Connecting to Matrix homeserver..."
+        Thread({
+            val message = when (val outcome = MiniHubRuntime.connectors.connectMatrixBridge(provider, url, token)) {
+                is ConnectOutcome.Connected -> "Matrix bridge connected: ${outcome.account.displayName ?: outcome.account.providerAccountId}."
+                is ConnectOutcome.Blocked -> outcome.reason
+                is ConnectOutcome.Started -> "Connection in progress."
+            }
+            runOnUiThread {
+                connectionStatus.value = message
+                accountsVersion.value++
+            }
+        }, "mini-matrix-connect").start()
     }
 
     private fun syncNow() {

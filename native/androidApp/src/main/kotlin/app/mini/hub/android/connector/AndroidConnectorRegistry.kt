@@ -44,6 +44,8 @@ data class ConnectRouteInfo(
     val status: String,
     /** Telegram uses a pasted bot token instead of a browser sign-in. */
     val usesTokenEntry: Boolean = false,
+    /** Matrix bridge uses Homeserver URL + Token instead of a browser sign-in. */
+    val usesMatrixEntry: Boolean = false,
 )
 
 /**
@@ -70,6 +72,10 @@ class AndroidConnectorRegistry(
     private val slackConnector = SlackConnector()
     private val chatConnector = GoogleChatConnector()
     private val telegramConnector = TelegramBotConnector()
+    private val whatsappConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.WHATSAPP)
+    private val whatsappBusinessConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.WHATSAPP_BUSINESS)
+    private val instagramConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.INSTAGRAM)
+    private val linkedinConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.LINKEDIN)
     private val xConnector = XDirectMessageConnector()
 
     private val googleClientId = BuildConfig.GOOGLE_OAUTH_CLIENT_ID.trim().takeIf { it.endsWith(".apps.googleusercontent.com") }.orEmpty()
@@ -97,7 +103,13 @@ class AndroidConnectorRegistry(
         googleClientId, chatConnector, transport,
         "uses the Gmail Google client: enable the Google Chat API, configure a Chat app in the same Cloud project, and add the Chat scopes to the consent screen.",
     )
-    val telegram = TelegramBotAccountConnector(appContext, telegramConnector, transport)
+        val telegram = TelegramBotAccountConnector(appContext, telegramConnector, transport)
+    private val matrixBridges = mapOf(
+        Provider.WHATSAPP to MatrixBridgeAccountConnector(appContext, whatsappConnector, transport),
+        Provider.WHATSAPP_BUSINESS to MatrixBridgeAccountConnector(appContext, whatsappBusinessConnector, transport),
+        Provider.INSTAGRAM to MatrixBridgeAccountConnector(appContext, instagramConnector, transport),
+        Provider.LINKEDIN to MatrixBridgeAccountConnector(appContext, linkedinConnector, transport),
+    )
 
     private val pkceRoutes get() = listOf(slack, x, teams, googleChat)
 
@@ -115,6 +127,10 @@ class AndroidConnectorRegistry(
             Provider.GOOGLE_CHAT to chatConnector,
             Provider.TELEGRAM to telegramConnector,
             Provider.TWITTER to xConnector,
+            Provider.WHATSAPP to whatsappConnector,
+            Provider.WHATSAPP_BUSINESS to whatsappBusinessConnector,
+            Provider.INSTAGRAM to instagramConnector,
+            Provider.LINKEDIN to linkedinConnector,
         ),
         refreshers = mapOf(
             Provider.OUTLOOK to outlookRefresher,
@@ -133,6 +149,11 @@ class AndroidConnectorRegistry(
         if (slack.isConfigured) add(Provider.SLACK)
         if (googleChat.isConfigured) add(Provider.GOOGLE_CHAT)
         if (x.isConfigured) add(Provider.TWITTER)
+        // Matrix bridges don't need app-level build configuration variables
+        add(Provider.WHATSAPP)
+        add(Provider.WHATSAPP_BUSINESS)
+        add(Provider.INSTAGRAM)
+        add(Provider.LINKEDIN)
     }
 
     val gatePolicy = GatePolicy(configuredClients(), gateEvidence::evidenceFor)
@@ -143,6 +164,7 @@ class AndroidConnectorRegistry(
         senders = listOf(
             GmailSender(), OutlookSender(), TeamsChatSender(), SlackSender(),
             GoogleChatSender(), TelegramBotSender(), XDirectMessageSender(),
+            whatsappConnector, whatsappBusinessConnector, instagramConnector, linkedinConnector,
         ),
         gates = gatePolicy,
         transport = transport,
@@ -160,6 +182,22 @@ class AndroidConnectorRegistry(
             Provider.TELEGRAM, "Telegram bot", "A bot you own; not your personal chats", true,
             "Paste a BotFather token. MINI sees only chats the bot is in. Telegram AI drafting stays off until its content-use terms are qualified.",
             usesTokenEntry = true,
+        ),
+        ConnectRouteInfo(
+            Provider.WHATSAPP, "WhatsApp (Personal)", "Connected via Matrix bridge", true,
+            "Provide your Matrix Homeserver URL and Access Token.", usesMatrixEntry = true
+        ),
+        ConnectRouteInfo(
+            Provider.WHATSAPP_BUSINESS, "WhatsApp Business App", "Connected via Matrix bridge", true,
+            "Provide your Matrix Homeserver URL and Access Token.", usesMatrixEntry = true
+        ),
+        ConnectRouteInfo(
+            Provider.INSTAGRAM, "Instagram", "Connected via Matrix bridge", true,
+            "Provide your Matrix Homeserver URL and Access Token.", usesMatrixEntry = true
+        ),
+        ConnectRouteInfo(
+            Provider.LINKEDIN, "LinkedIn", "Connected via Matrix bridge", true,
+            "Provide your Matrix Homeserver URL and Access Token.", usesMatrixEntry = true
         ),
     )
 
@@ -249,6 +287,12 @@ class AndroidConnectorRegistry(
 
     /** Pasted BotFather token; validated with getMe. Network I/O, call off the main thread. */
     fun connectTelegram(botToken: String): ConnectOutcome = telegram.connect(botToken)
+
+    fun connectMatrixBridge(provider: Provider, homeserverUrl: String, token: String): ConnectOutcome {
+        val hsUrlClean = homeserverUrl.trim().removeSuffix("/")
+        val matrixBridge = matrixBridges[provider] ?: return ConnectOutcome.Blocked("Bridge not supported")
+        return matrixBridge.connect("$hsUrlClean|${token.trim()}")
+    }
 
     /**
      * What this account can do right now and why anything is off (missing permission, uncleared

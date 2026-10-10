@@ -206,3 +206,48 @@ class TelegramBotAccountConnector(
         }
     }
 }
+
+class MatrixBridgeAccountConnector(
+    context: Context,
+    private val connector: app.mini.hub.connector.MatrixBridgeConnector,
+    private val transport: ProviderHttpTransport,
+) {
+    private val accounts = AndroidConnectedAccountStore(context.applicationContext)
+    private val tokens = AndroidKeystoreAccessTokenStore(context.applicationContext)
+
+    /** Network I/O. Call off the main thread. Expected token format: "homeserver_url|matrix_token" */
+    fun connect(bridgeToken: String): ConnectOutcome {
+        val parts = bridgeToken.split('|', limit = 2)
+        if (parts.size != 2 || !parts[0].startsWith("http")) {
+            return ConnectOutcome.Blocked("Invalid bridge credential format. Must be 'url|token'.")
+        }
+        
+        return try {
+            val credential = StoredAccessToken(bridgeToken, expiresAtMillis = null)
+            val identity = connector.discoverAccount(credential, transport)
+            val provider = connector.provider
+            val existing = accounts.list().firstOrNull { it.id.provider == provider && it.providerAccountId == identity.providerAccountId }
+            val account = (existing ?: ConnectedAccount(
+                id = AccountId(provider, "${provider.wire}-${UUID.randomUUID()}"),
+                providerAccountId = identity.providerAccountId,
+                displayName = identity.displayName,
+                accountType = AccountType.Unknown,
+                route = ConnectorRoute.ThirdPartyBridge,
+                state = ConnectionState.Authorized,
+            )).copy(
+                displayName = identity.displayName,
+                state = ConnectionState.Authorized,
+                grantedScopes = setOf("matrix_token"),
+                userActionRequired = null,
+            )
+            tokens.put(account.id, credential)
+            accounts.upsert(account)
+            Log.i(PkceAccountConnector.LOG_TAG, "${provider.wire} matrix bridge connected account=${account.id.localId} new=${existing == null}")
+            ConnectOutcome.Connected(account)
+        } catch (e: app.mini.hub.connector.ConnectorHttpException) {
+            ConnectOutcome.Blocked("Matrix homeserver rejected the token (${e.statusCode}).")
+        } catch (e: Exception) {
+            ConnectOutcome.Blocked("Matrix homeserver could not be reached (${e.javaClass.simpleName}).")
+        }
+    }
+}

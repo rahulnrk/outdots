@@ -17,7 +17,11 @@ A fully native cross-platform app with live Gmail, Outlook, Teams, WhatsApp, Mes
 
 The better approach is to build the product around a small, tested shared domain core first, then add native adapters one by one. This prevents UI screens and connector demos from becoming the real source of truth.
 
-## Architecture chosen for this repository
+## Connector Strategy
+
+1. **Official Provider APIs:** Used for Gmail, Outlook, Teams, Slack, Google Chat, Telegram Bots, and X Direct Messages. These support standard OAuth/token authentication.
+2. **Matrix/User-Session Bridges:** Used for WhatsApp Personal, WhatsApp Business mobile app, Instagram, and LinkedIn. These run as user-session bridges (like Beeper/mautrix) on a Matrix homeserver. The bridge processes sessions and stores content unencrypted on the server, while MINI connects securely as a standard Matrix client.
+3. **Notification-Only Fallbacks:** Used for Google Messages, Discord, LINE, Signal, and Facebook Messenger. For privacy/policy reasons or lack of endpoints, MINI only reads local Android notifications and redirects outbound replies via system share intents.
 
 - `packages/domain`: pure product logic and safety gates. No UI, no network, no credentials.
 - `apps/hub`: React implementation of the hub experience using seeded local evidence. This is the first end-to-end slice and a fast product-quality reference for native UI.

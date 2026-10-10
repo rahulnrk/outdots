@@ -265,6 +265,23 @@ object ConnectorCatalog {
         ),
     )
 
+    private fun matrixBridge(provider: Provider, name: String, kind: RouteAccountKind, note: String) = ConnectorDescriptor(
+        provider = provider, routeName = name, accountKind = kind, route = ConnectorRoute.ThirdPartyBridge,
+        status = ImplementationStatus.AdapterImplemented,
+        grants = listOf(
+            CapabilityGrant(Capability.ListHistory, listOf(setOf("matrix_token"))),
+            CapabilityGrant(Capability.ReadBody, listOf(setOf("matrix_token"))),
+            CapabilityGrant(Capability.IncrementalSync, listOf(setOf("matrix_token"))),
+            CapabilityGrant(Capability.Reply, listOf(setOf("matrix_token"))),
+            CapabilityGrant(Capability.SendNew, listOf(setOf("matrix_token"))),
+            CapabilityGrant(Capability.LocalAiDrafting, listOf(setOf("matrix_token"))),
+        ),
+        gates = mapOf(Capability.Reply to sendGates, Capability.SendNew to sendGates),
+        routeGates = emptySet(),
+        coverageNote = note,
+        officialDocs = listOf("https://spec.matrix.org/v1.10/client-server-api/"),
+    )
+
     private fun notificationOnly(provider: Provider, name: String, note: String, docs: List<String> = emptyList()) = ConnectorDescriptor(
         provider = provider, routeName = "$name notifications + open in app", accountKind = RouteAccountKind.NotificationObserver,
         route = ConnectorRoute.NotificationOnly, status = ImplementationStatus.NotificationFallbackOnly,
@@ -281,15 +298,36 @@ object ConnectorCatalog {
 
     private const val PERSONAL_NOTE = "No official personal-inbox API. Notifications only: may hide text, combine chats, and never include sent history. Replies open the app."
 
+    val whatsappPersonalBridge = matrixBridge(
+        Provider.WHATSAPP, "WhatsApp Personal Bridge (mautrix)", RouteAccountKind.PersonalInbox,
+        "Connected via Matrix companion device bridge. Messages processed and stored unencrypted on the user-configured Matrix homeserver."
+    )
+
+    val whatsappBusinessBridge = matrixBridge(
+        Provider.WHATSAPP_BUSINESS, "WhatsApp Business App Bridge (mautrix)", RouteAccountKind.BusinessAccount,
+        "Connected via Matrix companion device bridge mapping to the WhatsApp Business mobile app. Processed on the user-configured Matrix homeserver."
+    )
+
+    val instagramBridge = matrixBridge(
+        Provider.INSTAGRAM, "Instagram Bridge (mautrix)", RouteAccountKind.PersonalInbox,
+        "Connected via Matrix bridge imitating an Instagram web/mobile session. Processed on the user-configured Matrix homeserver."
+    )
+
+    val linkedinBridge = matrixBridge(
+        Provider.LINKEDIN, "LinkedIn Bridge", RouteAccountKind.PersonalInbox,
+        "Connected via Matrix bridge imitating a LinkedIn web session. Processed on the user-configured Matrix homeserver."
+    )
+
     val personalFallbacks = listOf(
-        notificationOnly(Provider.WHATSAPP, "WhatsApp", PERSONAL_NOTE),
-        notificationOnly(Provider.INSTAGRAM, "Instagram", PERSONAL_NOTE),
         notificationOnly(Provider.FACEBOOK, "Messenger", PERSONAL_NOTE),
         notificationOnly(Provider.LINE, "LINE", PERSONAL_NOTE),
-        notificationOnly(Provider.LINKEDIN, "LinkedIn", "LinkedIn sign-in does not grant messaging. $PERSONAL_NOTE"),
         notificationOnly(Provider.SIGNAL, "Signal", "No sanctioned third-party Signal API. Redacted notifications stay redacted; disappearing content is not kept."),
         notificationOnly(Provider.DISCORD, "Discord", "User-token automation is forbidden. Bot route deferred. $PERSONAL_NOTE"),
         notificationOnly(Provider.GOOGLE_MESSAGES, "Google Messages", "No public personal RCS API. SMS role is a separate product decision."),
+        // Kept as fallback for users who haven't set up bridges
+        notificationOnly(Provider.WHATSAPP, "WhatsApp (Notification fallback)", PERSONAL_NOTE),
+        notificationOnly(Provider.INSTAGRAM, "Instagram (Notification fallback)", PERSONAL_NOTE),
+        notificationOnly(Provider.LINKEDIN, "LinkedIn (Notification fallback)", "LinkedIn sign-in does not grant messaging. $PERSONAL_NOTE"),
     )
 
     val businessRoutes = listOf(
@@ -316,7 +354,10 @@ object ConnectorCatalog {
             listOf("https://core.telegram.org/tdlib")),
     )
 
-    val apiRoutes = listOf(gmail, outlook, teams, slack, googleChat, telegramBot, xDirectMessages)
+    val apiRoutes = listOf(
+        gmail, outlook, teams, slack, googleChat, telegramBot, xDirectMessages,
+        whatsappPersonalBridge, whatsappBusinessBridge, instagramBridge, linkedinBridge
+    )
     val all: List<ConnectorDescriptor> = apiRoutes + personalFallbacks + businessRoutes
 
     fun routesFor(provider: Provider): List<ConnectorDescriptor> = all.filter { it.provider == provider }

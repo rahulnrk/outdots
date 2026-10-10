@@ -18,6 +18,9 @@ class ProviderApiClient(
     fun postJson(url: String, body: Any?, extraHeaders: Map<String, String> = emptyMap()): JsonValue =
         call(ProviderHttpRequest(HttpMethod.POST, url, auth() + extraHeaders + ("Content-Type" to JSON), JsonWriter.write(body), JSON))
 
+    fun putJson(url: String, body: Any?): JsonValue =
+        call(ProviderHttpRequest(HttpMethod.PUT, url, auth() + ("Content-Type" to JSON), JsonWriter.write(body), JSON))
+
     fun postForm(url: String, form: Map<String, String>): JsonValue =
         call(ProviderHttpRequest(HttpMethod.POST, url, auth() + ("Content-Type" to FORM), formEncode(form), FORM))
 

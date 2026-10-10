@@ -5,7 +5,7 @@ package app.mini.hub.domain
  * A raw provider id such as a Gmail message id is never used as a global key.
  */
 enum class Provider(val wire: String) {
-    GMAIL("gmail"), OUTLOOK("outlook"), TEAMS("teams"), WHATSAPP("whatsapp"),
+    GMAIL("gmail"), OUTLOOK("outlook"), TEAMS("teams"), WHATSAPP("whatsapp"), WHATSAPP_BUSINESS("whatsapp_business"),
     /**
      * Facebook Messenger. The wire value stays "facebook" so existing account keys, scoped IDs and
      * stored observations keep resolving. Explicit migration decision: no rename, no key merge.
