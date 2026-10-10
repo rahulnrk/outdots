@@ -1,6 +1,6 @@
 # Gmail and Outlook Workflow Validation & Status
 
-Date: **10 October 2026**. Repository baseline: commit `625be4e` + Android Gmail & Outlook workflow completion.
+Date: **10 October 2026**. This is a historical evidence record. The current connector registry and product decision record supersede its implementation summary where they differ.
 
 ---
 
@@ -25,7 +25,7 @@ Date: **10 October 2026**. Repository baseline: commit `625be4e` + Android Gmail
   - `OutlookOAuthClient` implements MSAL / PKCE S256 authorization code exchange against Microsoft Entra v2.0 endpoints (`https://login.microsoftonline.com/common/oauth2/v2.0/authorize` and `/token`).
   - Passes `prompt=select_account` allowing the user to select either a personal Microsoft account (`@outlook.com`, `@hotmail.com`, etc.) or a work/school account.
   - Handles custom scheme redirect (`app.mini.hub://oauth2redirect/outlook` and `msauth`).
-  - `MicrosoftTokenRefresher` handles silent token refresh via `grant_type=refresh_token`.
+  - The current `PkceAccountConnector` handles token refresh via `grant_type=refresh_token`.
 - **Incremental Android Gmail Connector:** `AndroidGmailConnector` is updated to run incremental history sync and support full thread body reads via `fetchThread`.
 - **Runtime Gateway & Outbox Dispatch:** `MiniHubRuntime` initializes `ConnectorProviderGateway` with `GmailSender` and `OutlookSender`. `InboxViewModel` automatically routes drafts for connected official API accounts to `ActionRoute.Api` with exact approval review and status message feedback upon provider acceptance.
 - **Accounts & Inbox UI:** Updated `InboxScreen` and `ConnectedAccountSettingsDialog` to support connecting, syncing, and disconnecting both Gmail and Outlook accounts alongside notification-only sources.
@@ -34,12 +34,13 @@ Date: **10 October 2026**. Repository baseline: commit `625be4e` + Android Gmail
 
 ## 2. Test Verification Summary
 
-- **Shared JVM Suite (`:shared:jvmTest`):** 108 passed tests covering JSON parsing, catalog capability resolution, Gmail incremental history resync, Outlook delta query tracking, Slack/Telegram chat sync & send, sync engine atomic commits, and gated gateway dispatch.
+- **Shared JVM Suite (`:shared:jvmTest`):** Passed, covering JSON parsing, catalog capability resolution, OAuth/routing contracts, Gmail incremental history resync, Outlook delta query tracking, Slack/Telegram chat sync & send, bridge boundary checks, sync engine atomic commits, and gated gateway dispatch.
 - **Android Unit Tests (`:androidApp:testDebugUnitTest`):** All 34 passed (robolectric attempt reverted).
 - **Android App Compilation:** `:androidApp:assembleDebug` built with 0 errors.
-- **Device Installation & Live Background Sync:**
-  - Build installed on connected Pixel 10 Pro (`56270DLCH000KZ`), preserving previously stored data.
-  - Live logcat verification at 16:08 IST: The missing Google client ID was supplied via `local.properties`. Account A (`gmail-13a6451f-2cfa-45d8-bbc7-bb4b2404bb0d`) cleanly recovered from 400 invalidArgument by dropping an invalid history cursor and catching up the page token (`fetched=50 inserted=0 refreshed=false`). Account B synced 0 new and remained `Healthy`. Zero message duplication observed.
+- **Historical device evidence:**
+  - Earlier work installed a debug build on Pixel 10 Pro (`56270DLCH000KZ`) while preserving stored data. This record does not claim that the current uncommitted registry was installed or that the full connect-to-send flow was live-qualified.
+  - The latest documented Gmail state was **Temporarily unavailable** because the build lacked `mini.googleOAuthClientId`; no live send or live Outlook sign-in was performed. The earlier `refreshed=true` wording is intentionally not treated as verified here.
+  - At the time of the current verification pass, `adb devices` reported no connected device, so no new device check was performed.
 
 ---
 

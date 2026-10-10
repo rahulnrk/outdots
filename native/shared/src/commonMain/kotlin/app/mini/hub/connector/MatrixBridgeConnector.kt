@@ -16,13 +16,16 @@ import kotlin.random.Random
  */
 class MatrixBridgeConnector(
     override val provider: Provider,
+    private val networkFilter: String,
 ) : AccountConnector, ProviderSender {
     override val route: ConnectorRoute = ConnectorRoute.ThirdPartyBridge
 
     private fun extractHomeserver(accessToken: StoredAccessToken): String {
         val tokenParts = accessToken.value.split('|', limit = 2)
         require(tokenParts.size == 2) { "Matrix bridge token must be 'homeserver|token'" }
-        return tokenParts[0]
+        val homeserver = tokenParts[0].trim().removeSuffix("/")
+        require(homeserver.startsWith("https://", ignoreCase = true)) { "Matrix homeserver must use HTTPS" }
+        return homeserver
     }
     
     private fun extractToken(accessToken: StoredAccessToken): StoredAccessToken {
@@ -54,8 +57,8 @@ class MatrixBridgeConnector(
         val matrixToken = extractToken(accessToken)
         val api = ProviderApiClient("Matrix", transport, matrixToken)
         
-        // Use a filter to only get m.room.message events and limit the timeline
-        val filter = """{"room":{"timeline":{"types":["m.room.message"],"limit":$maxMessages}}}"""
+        // Use a filter to only get m.room.message events and limit the timeline, plus E2E E2E E2E state E2E events for bridge verification.
+        val filter = """{"room":{"timeline":{"types":["m.room.message"],"limit":$maxMessages},"state":{"types":["m.bridge","m.room.bridge"]}}}"""
         val url = buildString {
             append("$hsUrl/_matrix/client/v3/sync?timeout=0")
             append("&filter=").append(urlEncode(filter))
@@ -70,23 +73,37 @@ class MatrixBridgeConnector(
         
         val rooms = (syncRes.path("rooms", "join") as? app.mini.hub.connector.JsonValue.Obj)?.fields ?: emptyMap()
         for ((roomId, roomObj) in rooms) {
+            // Verify room belongs to this provider bridge
+            val stateEvents = roomObj.path("state", "events")?.array ?: emptyList()
+            var matchesNetwork = false
+            for (stateEv in stateEvents) {
+                if (stateEv.str("type") == "m.bridge" || stateEv.str("type") == "m.room.bridge") {
+                    val network = stateEv.path("content", "network")?.string ?: stateEv.path("content", "protocol")?.string
+                    if (network?.contains(networkFilter, ignoreCase = true) == true) {
+                        matchesNetwork = true
+                        break
+                    }
+                }
+            }
+            if (!matchesNetwork) continue
+
             val events = roomObj.path("timeline", "events")?.array ?: emptyList()
             for (event in events) {
                 if (event.str("type") != "m.room.message") continue
                 val eventId = event.str("event_id") ?: continue
                 val sender = event.str("sender") ?: "unknown"
                 val content = event["content"] ?: continue
-                
+
                 val body = content.str("body") ?: ""
                 val originServerTs = event.str("origin_server_ts")?.toLongOrNull() ?: 0L
                 val msgType = content.str("msgtype")
-                if (msgType != "m.text" && msgType != "m.image" && msgType != "m.video" && msgType != "m.audio") continue
+
+                val isDeleted = (content as? app.mini.hub.connector.JsonValue.Obj)?.fields?.isEmpty() == true // m.room.redaction replaces content with empty
+                if (!isDeleted && msgType != "m.text" && msgType != "m.image" && msgType != "m.video" && msgType != "m.audio") continue
 
                 // Check for replies in m.relates_to
                 val relatesTo = content["m.relates_to"]
                 val replyTo = relatesTo?.path("m.in_reply_to", "event_id")?.string
-
-                val isDeleted = (content as? app.mini.hub.connector.JsonValue.Obj)?.fields?.isEmpty() == true // m.room.redaction replaces content with empty
 
                 messages.add(
                     ProviderMessage(
@@ -126,8 +143,8 @@ class MatrixBridgeConnector(
         val api = ProviderApiClient("Matrix", transport, matrixToken)
         val roomId = payload.conversationId
         
-        // Generate a random transaction ID based on the client request ID
-        val txnId = urlEncode(clientRequestId + Random.nextInt().toString())
+        // Generate a transaction ID based on the client request ID for idempotency
+        val txnId = urlEncode(clientRequestId)
         val endpoint = "$hsUrl/_matrix/client/v3/rooms/${urlEncode(roomId)}/send/m.room.message/$txnId"
         
         val content = mutableMapOf<String, Any>(

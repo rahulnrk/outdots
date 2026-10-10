@@ -132,7 +132,7 @@ class MainActivity : ComponentActivity() {
     private fun syncNow() {
         connectionStatus.value = "Syncing connected accounts..."
         Thread({
-            val summary = GmailSyncJobService.runAll(applicationContext, "manual")
+            val summary = MiniHubRuntime.connectors.syncAll("manual")
             runOnUiThread {
                 connectionStatus.value = buildString {
                     append("Sync finished: ${summary.inserted} new, ${summary.updated} updated across ${summary.accounts} account(s).")

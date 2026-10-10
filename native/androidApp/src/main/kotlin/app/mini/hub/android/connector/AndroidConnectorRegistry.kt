@@ -72,10 +72,10 @@ class AndroidConnectorRegistry(
     private val slackConnector = SlackConnector()
     private val chatConnector = GoogleChatConnector()
     private val telegramConnector = TelegramBotConnector()
-    private val whatsappConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.WHATSAPP)
-    private val whatsappBusinessConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.WHATSAPP_BUSINESS)
-    private val instagramConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.INSTAGRAM)
-    private val linkedinConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.LINKEDIN)
+    private val whatsappConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.WHATSAPP, "whatsapp")
+    private val whatsappBusinessConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.WHATSAPP_BUSINESS, "whatsapp")
+    private val instagramConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.INSTAGRAM, "instagram")
+    private val linkedinConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.LINKEDIN, "linkedin")
     private val xConnector = XDirectMessageConnector()
 
     private val googleClientId = BuildConfig.GOOGLE_OAUTH_CLIENT_ID.trim().takeIf { it.endsWith(".apps.googleusercontent.com") }.orEmpty()
@@ -184,20 +184,20 @@ class AndroidConnectorRegistry(
             usesTokenEntry = true,
         ),
         ConnectRouteInfo(
-            Provider.WHATSAPP, "WhatsApp (Personal)", "Connected via Matrix bridge", true,
-            "Provide your Matrix Homeserver URL and Access Token.", usesMatrixEntry = true
+            Provider.WHATSAPP, "WhatsApp (Personal)", "Advanced Matrix bridge; not phone-local", true,
+            "Advanced mode only: provide a user-controlled Matrix homeserver URL and access token. The bridge host can process plaintext; this is not a personal WhatsApp API connection.", usesMatrixEntry = true
         ),
         ConnectRouteInfo(
-            Provider.WHATSAPP_BUSINESS, "WhatsApp Business App", "Connected via Matrix bridge", true,
-            "Provide your Matrix Homeserver URL and Access Token.", usesMatrixEntry = true
+            Provider.WHATSAPP_BUSINESS, "WhatsApp Business App", "Advanced Matrix bridge; not Business API", true,
+            "Advanced mode only: provide a user-controlled Matrix homeserver URL and access token. This is not WhatsApp Business Cloud API access.", usesMatrixEntry = true
         ),
         ConnectRouteInfo(
-            Provider.INSTAGRAM, "Instagram", "Connected via Matrix bridge", true,
-            "Provide your Matrix Homeserver URL and Access Token.", usesMatrixEntry = true
+            Provider.INSTAGRAM, "Instagram", "Advanced Matrix bridge; hosting not qualified", true,
+            "Advanced mode only: provide a user-controlled Matrix homeserver URL and access token. Review the bridge host's plaintext processing before use.", usesMatrixEntry = true
         ),
         ConnectRouteInfo(
-            Provider.LINKEDIN, "LinkedIn", "Connected via Matrix bridge", true,
-            "Provide your Matrix Homeserver URL and Access Token.", usesMatrixEntry = true
+            Provider.LINKEDIN, "LinkedIn", "Advanced Matrix bridge; hosting not qualified", true,
+            "Advanced mode only: provide a user-controlled Matrix homeserver URL and access token. This does not prove LinkedIn inbox authorization.", usesMatrixEntry = true
         ),
     )
 

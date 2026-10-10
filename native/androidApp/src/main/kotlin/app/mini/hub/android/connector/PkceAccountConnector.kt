@@ -218,8 +218,9 @@ class MatrixBridgeAccountConnector(
     /** Network I/O. Call off the main thread. Expected token format: "homeserver_url|matrix_token" */
     fun connect(bridgeToken: String): ConnectOutcome {
         val parts = bridgeToken.split('|', limit = 2)
-        if (parts.size != 2 || !parts[0].startsWith("http")) {
-            return ConnectOutcome.Blocked("Invalid bridge credential format. Must be 'url|token'.")
+        val homeserver = parts.firstOrNull()?.trim().orEmpty()
+        if (parts.size != 2 || !homeserver.startsWith("https://", ignoreCase = true)) {
+            return ConnectOutcome.Blocked("Invalid bridge credential format. Use an HTTPS homeserver as 'https://host|token'.")
         }
         
         return try {

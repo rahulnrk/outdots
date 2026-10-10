@@ -1,5 +1,9 @@
 # Product convenience priorities
 
+The 10 October 2026 inbox/dashboard, local intelligence, memory and connector
+decisions are recorded in [the current product decision record](PRODUCT_DECISIONS_2026-10-10.md).
+Bridge hosting and platform launch order remain open for discussion.
+
 Product-owner direction, 2026-10-09: learn from Beeper's strengths and weaknesses
 and make MINI a convenient daily communication tool, not merely a list of integrations.
 

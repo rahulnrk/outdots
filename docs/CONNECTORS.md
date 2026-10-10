@@ -10,7 +10,7 @@ This document is MINI's authoritative connector specification and release status
 
 MINI is a private, phone-local communication hub.
 - **Account isolation:** Every account has a provider-scoped `AccountId` (`provider|localId`). Two accounts (or two contacts with the same name across accounts) never merge.
-- **Route truthfulness:** Every connector declares its exact route (`OfficialProviderApi`, `NotificationOnly`, `ThirdPartyBridge`, `UserImport`, `NativeHandoff`). A notification fallback is never presented as an official provider API. Private scraping and unofficial session bridges are forbidden.
+- **Route truthfulness:** Every connector declares its exact route (`OfficialProviderApi`, `NotificationOnly`, `ThirdPartyBridge`, `UserImport`, `NativeHandoff`). A notification fallback is never presented as an official provider API. The selected bridge direction is represented as an advanced, explicitly disclosed `ThirdPartyBridge`, not as personal-provider API access. Remote bridge hosting is not the phone-local default until the privacy boundary is decided.
 - **Capability-first defaults:** All capabilities (`ListHistory`, `ReadBody`, `IncrementalSync`, `Search`, `ReadAttachments`, `SendNew`, `Reply`, `EditOwn`, `DeleteOwn`, `MarkRead`, `React`, `Archive`, `LocalAiDrafting`) default to **disabled**. A capability turns on only when:
   1. The connector adapter implements it.
   2. The account granted the required OAuth/API scopes.
@@ -31,11 +31,12 @@ MINI is a private, phone-local communication hub.
 | **Google Chat** | Google Chat API (`chat.messages.readonly`, `chat.messages.create`) | Work / Workspace | `AdapterImplemented` | History, Body, Reply*, LocalAI | GoogleChatAppConfiguration, SendQualification |
 | **Telegram** | Telegram Bot API | Bot account | `AdapterImplemented` | History, Body, Incremental, Reply*, LocalAI** | TelegramBotToken, SendQualification, TelegramContentUseTerms** |
 | **X (Twitter)** | X API v2 Direct Messages (`dm.read`, `dm.write`) | Personal / Creator | `AdapterImplemented` | History (30d), Body, Reply*, LocalAI | XApiEntitlementAndBudget, SendQualification |
-| **WhatsApp** | Notifications + Native Handoff | Personal Observer | `NotificationFallbackOnly` | Notification observation, Open in App | NotificationListenerAccess |
-| **Instagram** | Notifications + Native Handoff | Personal Observer | `NotificationFallbackOnly` | Notification observation, Open in App | NotificationListenerAccess |
+| **WhatsApp Personal** | User-controlled Matrix bridge foundation | Personal account, provider identity not independently proven | `ThirdPartyBridge` foundation only | Provider-labelled room sync, read/send contract pending qualification | Bridge hosting decision, room/account binding, encrypted-room support, provider forwarding evidence |
+| **WhatsApp Business mobile app** | User-controlled Matrix bridge foundation | Business mobile app, not Cloud API | `ThirdPartyBridge` foundation only | Provider-labelled room sync, read/send contract pending qualification | Same bridge gates; do not present as Business Platform access |
+| **Instagram** | User-controlled Matrix bridge foundation | Personal account, provider identity not independently proven | `ThirdPartyBridge` foundation only | Provider-labelled room sync, read/send contract pending qualification | Bridge hosting decision, room/account binding, encrypted-room support, provider forwarding evidence |
 | **FB Messenger** | Notifications + Native Handoff | Personal Observer | `NotificationFallbackOnly` | Notification observation, Open in App | NotificationListenerAccess |
 | **LINE** | Notifications + Native Handoff | Personal Observer | `NotificationFallbackOnly` | Notification observation, Open in App | NotificationListenerAccess |
-| **LinkedIn** | Notifications + Native Handoff | Personal Observer | `NotificationFallbackOnly` | Notification observation, Open in App | NotificationListenerAccess |
+| **LinkedIn** | User-controlled Matrix bridge foundation | Personal account, provider identity not independently proven | `ThirdPartyBridge` foundation only | Provider-labelled room sync, read/send contract pending qualification | Bridge hosting decision, room/account binding, encrypted-room support, provider forwarding evidence |
 | **Signal** | Notifications + Native Handoff | Personal Observer | `NotificationFallbackOnly` | Notification observation, Open in App | NotificationListenerAccess |
 | **Discord** | Notifications + Native Handoff | Personal Observer | `NotificationFallbackOnly` | Notification observation, Open in App | NotificationListenerAccess |
 | **Google Messages** | Notifications + Native Handoff | Personal Observer | `NotificationFallbackOnly` | Notification observation, Open in App | NotificationListenerAccess |
