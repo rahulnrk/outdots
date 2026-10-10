@@ -26,6 +26,12 @@ data class ExactActionPayload(
     val sourceVersions: List<SourceVersion>,
     val grantVersion: String,
     val policyVersion: String,
+    /**
+     * Provider message being replied to (Gmail message id, Outlook message id, Slack ts, Chat
+     * thread name, Telegram message id). Part of the approved digest: changing the reply target
+     * invalidates approval. Null for a new message in [conversationId].
+     */
+    val replyTarget: String? = null,
 ) {
     init {
         require(accountId.isNotBlank() && conversationId.isNotBlank())
@@ -41,6 +47,8 @@ data class ExactActionPayload(
         attachments.sortedBy { it.id }.forEach { append("a:").append(it.id).append(':').append(it.name).append(':').append(it.sha256).append(':').append(it.sizeBytes).append('|') }
         sourceVersions.sortedBy { it.id }.forEach { append("s:").append(it.id).append(':').append(it.revision).append('|') }
         append("grant:").append(grantVersion).append('|').append("policy:").append(policyVersion)
+        // Appended only when present so digests of earlier payloads stay unchanged.
+        replyTarget?.let { append('|').append("reply:").append(it) }
     }
 }
 

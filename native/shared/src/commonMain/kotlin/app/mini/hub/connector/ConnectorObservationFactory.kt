@@ -15,7 +15,8 @@ class ConnectorObservationFactory(
 ) {
     fun fromMessage(account: AccountId, message: ProviderMessage, observedAtMillis: Long): ObservedNotification {
         val conversation = ScopedId(account, ScopedId.Kind.CONVERSATION, message.conversationId)
-        val text = message.snippet
+        // Prefer the full body when the adapter fetched one; the snippet is a provider preview.
+        val text = message.bodyText?.takeIf { it.isNotBlank() } ?: message.snippet
         return ObservedNotification(
             id = ScopedId(
                 account,
@@ -24,10 +25,7 @@ class ConnectorObservationFactory(
             ),
             accountId = account,
             conversationId = conversation,
-            packageId = when (account.provider) {
-                app.mini.hub.domain.Provider.GMAIL -> "com.google.android.gm"
-                else -> "provider.${account.provider.wire}"
-            },
+            packageId = packageFor(account.provider),
             notificationKey = "provider:${account.key}:${message.providerMessageId}",
             notificationId = message.providerMessageId.hashCode(),
             tag = null,
@@ -37,13 +35,25 @@ class ConnectorObservationFactory(
             rawTextDigest = digest.sha256(text),
             observedAt = UtcInstant(observedAtMillis),
             postTime = UtcInstant(message.occurredAtMillis),
-            revision = 1L,
-            isRemoved = false,
+            revision = message.revision,
+            isRemoved = message.isDeleted,
             isGroupSummary = false,
             isOngoing = false,
-            truncationState = TruncationState.Unknown,
+            truncationState = if (message.bodyText != null) TruncationState.Complete else TruncationState.Unknown,
             correlationConfidence = CorrelationConfidence.High,
             provenance = ObservationProvenance.OfficialProviderApi,
         )
+    }
+
+    companion object {
+        /**
+         * Display package for API-sourced rows. Gmail keeps the Gmail app package for continuity
+         * with existing stored history; other providers use a non-installable `provider.` prefix so
+         * an API row is never confused with a notification from that app.
+         */
+        fun packageFor(provider: app.mini.hub.domain.Provider): String = when (provider) {
+            app.mini.hub.domain.Provider.GMAIL -> "com.google.android.gm"
+            else -> "provider.${provider.wire}"
+        }
     }
 }

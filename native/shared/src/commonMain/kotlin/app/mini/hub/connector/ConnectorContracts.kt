@@ -106,6 +106,8 @@ data class SyncCheckpoint(
     val gapCount: Long = 0,
 )
 
+enum class MessageDirection { Inbound, Outbound, Unknown }
+
 data class ProviderMessage(
     val providerMessageId: String,
     val conversationId: String,
@@ -113,6 +115,16 @@ data class ProviderMessage(
     val subject: String?,
     val snippet: String,
     val occurredAtMillis: Long,
+    /** Full plain-text body when the adapter fetched it; null means only [snippet] is known. */
+    val bodyText: String? = null,
+    val direction: MessageDirection = MessageDirection.Unknown,
+    /** Provider tombstone: the message was deleted or unsent at the provider. */
+    val isDeleted: Boolean = false,
+    /** Monotonic per-message revision when the provider reports edits; 1 for the first version. */
+    val revision: Long = 1L,
+    /** Provider-native reply anchor (RFC 822 Message-ID, Slack ts, Chat thread name). Never shown as content. */
+    val replyAnchor: String? = null,
+    val recipients: List<String> = emptyList(),
 ) {
     init {
         require(providerMessageId.isNotBlank())
@@ -133,10 +145,49 @@ data class ProviderHttpResponse(
     val statusCode: Int,
     val body: String,
     val headers: Map<String, String> = emptyMap(),
-)
+) {
+    fun header(name: String): String? = headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
+}
 
+enum class HttpMethod { GET, POST, PATCH, DELETE }
+
+data class ProviderHttpRequest(
+    val method: HttpMethod,
+    val url: String,
+    val headers: Map<String, String> = emptyMap(),
+    val body: String? = null,
+    val contentType: String? = null,
+) {
+    init {
+        require(url.startsWith("https://")) {
+            "Provider requests must use HTTPS"
+        }
+        require(method != HttpMethod.GET || body == null) { "GET requests cannot carry a body" }
+    }
+
+    /** Diagnostic form that never contains headers, bodies or query strings (which can hold tokens). */
+    fun redacted(): String = "$method ${url.substringBefore('?').replace(Regex("/bot[^/]+/"), "/bot<redacted>/")}"
+}
+
+/**
+ * Platform HTTP edge. [get] is kept for the original read-only adapters. Writes go through
+ * [execute]; a transport that only implements [get] refuses writes instead of silently dropping them.
+ */
 fun interface ProviderHttpTransport {
     fun get(url: String, headers: Map<String, String>): ProviderHttpResponse
+
+    fun execute(request: ProviderHttpRequest): ProviderHttpResponse {
+        if (request.method == HttpMethod.GET) return get(request.url, request.headers)
+        throw UnsupportedOperationException("This transport is read-only")
+    }
+
+    companion object {
+        /** Builds a transport that supports every method (used by Android and by fixtures). */
+        fun of(handler: (ProviderHttpRequest) -> ProviderHttpResponse): ProviderHttpTransport = object : ProviderHttpTransport {
+            override fun get(url: String, headers: Map<String, String>) = handler(ProviderHttpRequest(HttpMethod.GET, url, headers))
+            override fun execute(request: ProviderHttpRequest) = handler(request)
+        }
+    }
 }
 
 interface AccountConnector {
@@ -152,9 +203,44 @@ interface AccountConnector {
     ): SyncResult
 }
 
+/** Recovery class for a provider failure. Drives account health and outbox outcome, never retries by itself. */
+enum class ProviderErrorKind {
+    /** Credential expired or revoked: refresh once, then ask the user to reconnect. */
+    Unauthorized,
+    /** A grant/scope/entitlement is missing: reconnect with the right permission or admin approval. */
+    PermissionMissing,
+    /** Quota or rate limit: wait at least [ConnectorHttpException.retryAfterSeconds]. */
+    RateLimited,
+    /** Provider outage, timeout or 5xx. Safe to retry reads later; sends become OutcomeUnknown. */
+    Transient,
+    /** Incremental cursor is no longer valid: run a bounded resync and record a visible gap. */
+    CursorInvalid,
+    /** Target conversation/message no longer exists or is not visible. */
+    NotFound,
+    /** The provider definitively rejected the request (validation, policy, window, recipient). */
+    Rejected,
+}
+
 class ConnectorHttpException(
     val statusCode: Int,
     message: String,
     /** Provider reason code (for example insufficientPermissions). Never contains message content. */
     val reason: String? = null,
-) : RuntimeException(message)
+    val kind: ProviderErrorKind = defaultKind(statusCode),
+    val retryAfterSeconds: Long? = null,
+) : RuntimeException(message) {
+    companion object {
+        fun defaultKind(status: Int): ProviderErrorKind = when {
+            status == 401 -> ProviderErrorKind.Unauthorized
+            status == 403 -> ProviderErrorKind.PermissionMissing
+            status == 404 -> ProviderErrorKind.NotFound
+            status == 410 -> ProviderErrorKind.CursorInvalid
+            status == 429 -> ProviderErrorKind.RateLimited
+            status >= 500 || status == 408 || status == 0 -> ProviderErrorKind.Transient
+            else -> ProviderErrorKind.Rejected
+        }
+
+        /** Parses Retry-After seconds. HTTP-date values are treated as unknown rather than guessed. */
+        fun retryAfter(response: ProviderHttpResponse): Long? = response.header("Retry-After")?.trim()?.toLongOrNull()
+    }
+}

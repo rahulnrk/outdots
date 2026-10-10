@@ -1,0 +1,142 @@
+package app.mini.hub.connector
+
+import app.mini.hub.action.ActionController
+import app.mini.hub.action.ActionIdGenerator
+import app.mini.hub.action.ActionRoute
+import app.mini.hub.action.DigestProvider
+import app.mini.hub.action.ExactActionPayload
+import app.mini.hub.action.GatewayResult
+import app.mini.hub.domain.AccountId
+import app.mini.hub.domain.Clock
+import app.mini.hub.domain.Provider
+import app.mini.hub.domain.UtcInstant
+import app.mini.hub.persistence.InMemoryObservationStore
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+class ConnectorEngineAndGatewayTest {
+    private val digest = DigestProvider { "dig-$it" }
+
+    @Test
+    fun syncEnginePersistsObservationsAndCursorAtomically() {
+        val accounts = InMemoryConnectedAccountStore()
+        val tokens = InMemoryAccessTokenStore()
+        val store = InMemoryObservationStore()
+        val account = ConnectedAccount(
+            AccountId(Provider.OUTLOOK, "out_1"), "usr_1", "User", AccountType.MicrosoftPersonal,
+            ConnectorRoute.OfficialProviderApi, ConnectionState.Authorized, setOf("Mail.Read"),
+        )
+        accounts.upsert(account)
+        tokens.put(account.id, StoredAccessToken("t1", null))
+
+        val transport = ProviderHttpTransport.of { req ->
+            when {
+                req.url.contains("/delta") -> ProviderHttpResponse(
+                    200,
+                    "{\"@odata.deltaLink\":\"https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta?deltatoken=d1\",\"value\":[{\"id\":\"m1\",\"conversationId\":\"c1\",\"bodyPreview\":\"s1\",\"receivedDateTime\":\"2026-10-10T12:00:00Z\",\"from\":{\"emailAddress\":{\"address\":\"s@ex.com\"}}}]}",
+                )
+                else -> error("Unexpected URL: ${req.url}")
+            }
+        }
+        val engine = ConnectorSyncEngine(
+            accounts = accounts,
+            tokens = tokens,
+            store = store,
+            digest = digest,
+            connectors = mapOf(Provider.OUTLOOK to OutlookGraphConnector("https://graph.microsoft.com/v1.0")),
+            refreshers = emptyMap(),
+            transport = transport,
+        )
+        val reports = engine.syncAll(1_700_000_000_000L)
+        assertEquals(1, reports.size)
+        assertEquals(1, reports.single().inserted)
+        assertEquals(ConnectionState.Healthy, accounts.get(account.id)?.state)
+        val storedCursor = store.getCursor(ConnectorSyncEngine.cursorSource(account))
+        assertTrue(storedCursor?.lastProcessedKey?.contains("deltatoken=d1") == true)
+        val obs = store.getObservationByNotificationKey("provider:${account.id.key}:m1")
+        assertEquals("s1", obs?.textFragments?.single())
+    }
+
+    @Test
+    fun gatewayRejectsDispatchWhenCapabilityOrScopeIsMissing() {
+        val accounts = InMemoryConnectedAccountStore()
+        val tokens = InMemoryAccessTokenStore()
+        val account = ConnectedAccount(
+            AccountId(Provider.GMAIL, "g_1"), "user@gmail.com", "User", AccountType.GoogleConsumer,
+            ConnectorRoute.OfficialProviderApi, ConnectionState.Healthy,
+            grantedScopes = setOf(GmailApiConnector.SCOPE_READONLY), // missing send scope
+        )
+        accounts.upsert(account)
+        tokens.put(account.id, StoredAccessToken("t1", null))
+
+        val gateway = ConnectorProviderGateway(
+            accounts = accounts,
+            tokens = tokens,
+            senders = listOf(GmailSender("https://gmail.googleapis.com/gmail/v1/users/me")),
+            gates = GateEvidenceSource { emptyList() },
+            transport = ProviderHttpTransport.of { ProviderHttpResponse(200, "") },
+            nowMillis = { 1_700_000_000_000L },
+        )
+        val payload = ExactActionPayload(
+            accountId = account.id.key, conversationId = "t1", route = ActionRoute.Api,
+            recipients = listOf("to@example.com"), subject = "Sub", body = "Body", attachments = emptyList(),
+            sourceVersions = emptyList(), grantVersion = "v1", policyVersion = "v1",
+        )
+        var nextId = 0
+        val controller = ActionController(
+            clock = Clock { UtcInstant(1_700_000_000_000L) },
+            digest = digest,
+            ids = ActionIdGenerator { "id-${++nextId}" },
+        )
+        val (state, command) = controller.approve(app.mini.hub.action.ActionState(), payload)
+        val resultState = controller.dispatch(state, command.id, payload, gateway, null)
+        val outbox = resultState.outbox.single()
+        assertEquals(app.mini.hub.action.OutboxState.Rejected, outbox.state)
+        assertTrue(outbox.failureReason?.contains("capability_disabled") == true)
+    }
+
+    @Test
+    fun gatewayDispatchesWhenScopesAndGatesAreCleared() {
+        val accounts = InMemoryConnectedAccountStore()
+        val tokens = InMemoryAccessTokenStore()
+        val account = ConnectedAccount(
+            AccountId(Provider.GMAIL, "g_1"), "user@gmail.com", "User", AccountType.GoogleConsumer,
+            ConnectorRoute.OfficialProviderApi, ConnectionState.Healthy,
+            grantedScopes = setOf(GmailApiConnector.SCOPE_READONLY, GmailApiConnector.SCOPE_SEND),
+        )
+        accounts.upsert(account)
+        tokens.put(account.id, StoredAccessToken("t1", null))
+
+        var sentRaw: String? = null
+        val transport = ProviderHttpTransport.of { req ->
+            sentRaw = req.body
+            ProviderHttpResponse(200, "{\"id\":\"m_sent_1\"}")
+        }
+        val gateway = ConnectorProviderGateway(
+            accounts = accounts,
+            tokens = tokens,
+            senders = listOf(GmailSender("https://gmail.googleapis.com/gmail/v1/users/me")),
+            gates = GateEvidenceSource { listOf(GateEvidence(ReleaseGate.SendQualification, "Verified live")) },
+            transport = transport,
+            nowMillis = { 1_700_000_000_000L },
+        )
+        val payload = ExactActionPayload(
+            accountId = account.id.key, conversationId = "t1", route = ActionRoute.Api,
+            recipients = listOf("to@example.com"), subject = "Sub", body = "Body text", attachments = emptyList(),
+            sourceVersions = emptyList(), grantVersion = "v1", policyVersion = "v1",
+        )
+        var nextId = 0
+        val controller = ActionController(
+            clock = Clock { UtcInstant(1_700_000_000_000L) },
+            digest = digest,
+            ids = ActionIdGenerator { "id-${++nextId}" },
+        )
+        val (state, command) = controller.approve(app.mini.hub.action.ActionState(), payload)
+        val resultState = controller.dispatch(state, command.id, payload, gateway, null)
+        val outbox = resultState.outbox.single()
+        assertEquals(app.mini.hub.action.OutboxState.AcceptedByProvider, outbox.state)
+        assertEquals("gmail:m_sent_1", outbox.receipt)
+        assertTrue(sentRaw != null)
+    }
+}

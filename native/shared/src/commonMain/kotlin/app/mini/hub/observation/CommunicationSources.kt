@@ -12,11 +12,25 @@ enum class CommunicationSource(
     FacebookMessenger("Facebook/Messenger", setOf("com.facebook.katana", "com.facebook.orca", "com.facebook.lite")),
     Instagram("Instagram", setOf("com.instagram.android")),
     LinkedIn("LinkedIn", setOf("com.linkedin.android")),
+    Slack("Slack", setOf("com.Slack")),
+    GoogleChat("Google Chat", setOf("com.google.android.apps.dynamite")),
+    GoogleMessages("Google Messages", setOf("com.google.android.apps.messaging")),
+    Discord("Discord", setOf("com.discord")),
+    Line("LINE", setOf("jp.naver.line.android")),
+    Signal("Signal", setOf("org.thoughtcrime.securesms")),
+    Telegram("Telegram", setOf("org.telegram.messenger", "org.telegram.messenger.web", "org.thunderdog.challegram")),
+    X("X", setOf("com.twitter.android")),
     ;
 
     companion object {
         val all: Set<CommunicationSource> = entries.toSet()
-        val defaultSelection: Set<CommunicationSource> = all
+
+        /**
+         * First-run selection. Sources added later are opt-in: a user who never chose sources
+         * keeps the original set, and a stored selection is never widened automatically.
+         */
+        val defaultSelection: Set<CommunicationSource> =
+            setOf(Gmail, Outlook, Teams, WhatsApp, FacebookMessenger, Instagram, LinkedIn)
 
         fun fromId(id: String): CommunicationSource? = entries.firstOrNull { it.name == id }
 

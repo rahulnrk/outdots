@@ -139,6 +139,12 @@ class NotificationNormalizer(
         packageId == "com.twitter.android" || packageId == "com.twitter.android.lite" || packageId.contains("twitter", ignoreCase = true) -> Provider.TWITTER
         packageId == "com.Slack" || packageId == "com.slack" || packageId.contains("slack", ignoreCase = true) -> Provider.SLACK
         packageId == "com.noop.whoop.staging" || packageId == "com.whoop" || packageId.contains("whoop", ignoreCase = true) -> Provider.WHOOP
+        packageId == "com.discord" -> Provider.DISCORD
+        packageId == "com.google.android.apps.dynamite" -> Provider.GOOGLE_CHAT
+        packageId == "com.google.android.apps.messaging" -> Provider.GOOGLE_MESSAGES
+        packageId == "jp.naver.line.android" -> Provider.LINE
+        packageId == "org.thoughtcrime.securesms" -> Provider.SIGNAL
+        packageId.startsWith("org.telegram.messenger") || packageId == "org.thunderdog.challegram" -> Provider.TELEGRAM
         packageId == "android" || packageId.startsWith("com.android.systemui") -> Provider.SYSTEM
         else -> Provider.APP
     }

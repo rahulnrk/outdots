@@ -6,8 +6,15 @@ package app.mini.hub.domain
  */
 enum class Provider(val wire: String) {
     GMAIL("gmail"), OUTLOOK("outlook"), TEAMS("teams"), WHATSAPP("whatsapp"),
+    /**
+     * Facebook Messenger. The wire value stays "facebook" so existing account keys, scoped IDs and
+     * stored observations keep resolving. Explicit migration decision: no rename, no key merge.
+     */
     FACEBOOK("facebook"), INSTAGRAM("instagram"), LINKEDIN("linkedin"),
-    TWITTER("twitter"), SLACK("slack"), WHOOP("whoop"), SYSTEM("system"), APP("app");
+    /** X (formerly Twitter). Wire value stays "twitter" for the same reason as [FACEBOOK]. */
+    TWITTER("twitter"), SLACK("slack"), WHOOP("whoop"), SYSTEM("system"), APP("app"),
+    DISCORD("discord"), GOOGLE_CHAT("google_chat"), GOOGLE_MESSAGES("google_messages"),
+    LINE("line"), SIGNAL("signal"), TELEGRAM("telegram");
 
     companion object {
         fun fromWire(value: String): Provider = entries.firstOrNull { it.wire == value } ?: APP
