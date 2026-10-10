@@ -97,6 +97,11 @@ class AndroidGmailConnector(
             return GmailSyncReport(current.id.localId, checkpoint, 0, 0, current.state, false, "disconnected")
         }
         var token = tokens.get(current.id) ?: run {
+            // A revoked or expired account has no credential by design. Keep its specific status and
+            // instruction instead of downgrading it to a generic "needs permission" message.
+            if (current.state == ConnectionState.Revoked || current.state == ConnectionState.Expired) {
+                return GmailSyncReport(current.id.localId, checkpoint, 0, 0, current.state, false, "no_credential")
+            }
             markState(current, ConnectionState.AuthorizationRequired, RECONNECT_ACTION)
             return GmailSyncReport(current.id.localId, checkpoint, 0, 0, ConnectionState.AuthorizationRequired, false, "no_credential")
         }
