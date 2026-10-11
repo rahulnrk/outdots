@@ -51,6 +51,8 @@ class GmailSyncJobService : JobService() {
 
     override fun onStopJob(params: JobParameters): Boolean = true
 
+    enum class ScheduleDecision { Schedule, KeepExisting, ReplaceWithPersisted }
+
     companion object {
         const val LOG_TAG = "MiniGmailSync"
         const val PERIODIC_JOB_ID = 41_001
@@ -77,19 +79,35 @@ class GmailSyncJobService : JobService() {
             return MiniHubRuntime.connectors.syncAll(trigger)
         }
 
+        /** The periodic job survives reboot. Requires RECEIVE_BOOT_COMPLETED in the manifest. */
+        const val PERIODIC_PERSISTED = true
+
+        /**
+         * Pure decision for the periodic job. [pendingPersisted] is null when no job with
+         * [PERIODIC_JOB_ID] is pending. An older non-persisted job is replaced under the same ID,
+         * so there is never more than one periodic job.
+         */
+        fun periodicDecision(pendingPersisted: Boolean?): ScheduleDecision = when (pendingPersisted) {
+            null -> ScheduleDecision.Schedule
+            true -> ScheduleDecision.KeepExisting
+            false -> ScheduleDecision.ReplaceWithPersisted
+        }
+
         /** Periodic background sync. Android enforces a 15 minute minimum interval. */
         fun schedulePeriodic(context: Context) {
             val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
-            if (scheduler.getPendingJob(PERIODIC_JOB_ID) != null) return
+            val decision = periodicDecision(scheduler.getPendingJob(PERIODIC_JOB_ID)?.isPersisted)
+            if (decision == ScheduleDecision.KeepExisting) return
             val job = JobInfo.Builder(PERIODIC_JOB_ID, ComponentName(context, GmailSyncJobService::class.java))
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                 .setPeriodic(15 * 60 * 1000L)
-                .setPersisted(false)
+                .setPersisted(PERIODIC_PERSISTED)
                 .build()
+            // schedule() with an existing ID replaces that job, so this never double-schedules.
             val result = runCatching { scheduler.schedule(job) }
                 .onFailure { Log.w(LOG_TAG, "periodic job schedule failed: ${it.javaClass.simpleName}") }
                 .getOrNull()
-            Log.i(LOG_TAG, "periodic job scheduled result=$result")
+            Log.i(LOG_TAG, "periodic job scheduled decision=$decision persisted=$PERIODIC_PERSISTED result=$result")
         }
 
         /** Requests a prompt sync, for example when a Gmail notification is observed. */
