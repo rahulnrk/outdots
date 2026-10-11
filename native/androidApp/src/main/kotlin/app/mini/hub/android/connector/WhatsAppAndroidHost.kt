@@ -43,6 +43,8 @@ class WhatsAppAndroidHost(
         val dir = File(appContext.cacheDir, "wa-media").apply { mkdirs() }
         return (nativeClient as? GomobileWhatsAppClient)?.downloadMedia(id, dir.absolutePath)?.let(::File)
     }
+    fun lastMediaError(): String? = (nativeClient as? GomobileWhatsAppClient)?.lastMediaError
+    fun searchContacts(q: String): List<Pair<String, String>> = (nativeClient as? GomobileWhatsAppClient)?.searchContacts(q).orEmpty()
 
     fun completeLinked(linked: WhatsAppPairing.Linked): ConnectedAccount {
         val localId = linked.phoneE164.trimStart('+')

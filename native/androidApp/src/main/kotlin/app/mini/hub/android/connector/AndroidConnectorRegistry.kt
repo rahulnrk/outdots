@@ -337,6 +337,40 @@ class AndroidConnectorRegistry(
 
     fun whatsappMediaThumbnail(id: String) = whatsappHost.mediaThumbnail(id)
     fun whatsappDownloadMedia(id: String) = whatsappHost.downloadMedia(id)
+    fun whatsappLastMediaError() = whatsappHost.lastMediaError()
+
+    /** One way to reach a person through a connected account. */
+    data class ContactRoute(val provider: Provider, val accountId: app.mini.hub.domain.AccountId, val address: String, val name: String, val label: String)
+
+    /**
+     * Finds a person by name or number across every connected account. WhatsApp uses the linked
+     * session's contacts; email and chat accounts use people already seen in synced conversations.
+     */
+    fun findContacts(query: String): List<ContactRoute> {
+        val q = query.trim()
+        if (q.length < 2) return emptyList()
+        val out = mutableListOf<ContactRoute>()
+        accounts.list().filter { it.state != app.mini.hub.connector.ConnectionState.Disconnected }.forEach { account ->
+            when {
+                account.id.provider == Provider.WHATSAPP && account.route == app.mini.hub.connector.ConnectorRoute.PhoneLocalBridge ->
+                    whatsappHost.searchContacts(q).forEach { (jid, name) ->
+                        out += ContactRoute(Provider.WHATSAPP, account.id, jid, name, "WhatsApp · " + (if (jid.endsWith("@g.us")) "group" else "+" + jid.substringBefore('@')))
+                    }
+                else -> {
+                    val lq = q.lowercase()
+                    store.getConversationSummaries(account.id)
+                        .filter { it.title.lowercase().contains(lq) || it.senderHint.lowercase().contains(lq) }
+                        .distinctBy { it.senderHint.lowercase() }
+                        .take(8)
+                        .forEach { s ->
+                            val addr = app.mini.hub.connector.EmailAddress.extract(s.senderHint) ?: s.conversationId.value
+                            out += ContactRoute(account.id.provider, account.id, addr, s.senderHint.substringBefore('<').trim().ifBlank { s.title }, "${app.mini.hub.observation.SourceAppNames.forPackage(s.packageId)} · $addr")
+                        }
+                }
+            }
+        }
+        return out.distinctBy { "${it.provider}|${it.address}" }.take(30)
+    }
 
     /** Downloads a Gmail attachment ("msgId/attId|name") into the app media cache. Network I/O. */
     fun gmailDownloadAttachment(ref: String): java.io.File? {

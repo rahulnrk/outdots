@@ -55,6 +55,8 @@ data class InboxViewState(
     val searchSourceFilter: String? = null,
     /** True while a search query is being processed on the worker thread. */
     val isSearching: Boolean = false,
+    /** Set when starting a brand-new email (no thread yet); the send goes to this address. */
+    val composeNewTo: String? = null,
 )
 
 data class ReviewContext(

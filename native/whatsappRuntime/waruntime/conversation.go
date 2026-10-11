@@ -24,6 +24,48 @@ func (r *Runtime) ensureStores() {
 	}
 }
 
+// SearchContactsJSON lists WhatsApp contacts and known chats matching query (name or number).
+func (r *Runtime) SearchContactsJSON(query string) (string, error) {
+	q := strings.ToLower(strings.TrimSpace(query))
+	digits := digitsOnly(q)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	type hit struct {
+		JID  string `json:"jid"`
+		Name string `json:"name"`
+	}
+	seen := map[string]bool{}
+	var out []hit
+	add := func(jid, name string) {
+		if jid == "" || seen[jid] || isHiddenChat(jid) || len(out) >= 20 {
+			return
+		}
+		ln := strings.ToLower(name)
+		if q == "" || strings.Contains(ln, q) || (len(digits) >= 3 && strings.Contains(jid, digits)) {
+			seen[jid] = true
+			out = append(out, hit{jid, name})
+		}
+	}
+	if r.device != nil && r.device.Contacts != nil {
+		if all, err := r.device.Contacts.GetAllContacts(context.Background()); err == nil {
+			for jid, c := range all {
+				if jid.Server != types.DefaultUserServer {
+					continue
+				}
+				add(jid.ToNonAD().String(), firstNonEmpty(c.FullName, c.FirstName, c.BusinessName, c.PushName, "+"+jid.User))
+			}
+		}
+	}
+	for chat := range r.chats {
+		add(chat, r.chatTitleLocked(chat))
+	}
+	if len(digits) >= 8 && !strings.HasPrefix(digits, "0") {
+		add(digits+"@s.whatsapp.net", "+"+digits)
+	}
+	data, err := json.Marshal(out)
+	return string(data), err
+}
+
 // ConversationJSON returns stored messages for one chat, oldest first.
 func (r *Runtime) ConversationJSON(chat string) (string, error) {
 	r.mu.Lock()

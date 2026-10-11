@@ -279,6 +279,54 @@ class InboxViewModel(
         })
     }
 
+    /**
+     * Opens the chat with this person on the chosen account. Uses the existing conversation when
+     * there is one; otherwise starts an empty thread so the user can write the first message.
+     */
+    fun openCompose(accountId: app.mini.hub.domain.AccountId, address: String, name: String) {
+        val all = observationStore.getConversationSummaries(accountId)
+        val existing = all.firstOrNull { it.conversationId.value.equals(address, ignoreCase = true) }
+            ?: all.firstOrNull { it.senderHint.contains(address, ignoreCase = true) }
+        if (existing != null) {
+            clearSearch()
+            selectConversation(existing)
+            return
+        }
+        val isEmail = app.mini.hub.connector.ReplyTargets.usesSubject(accountId.provider)
+        val convValue = if (isEmail) "new:$address" else address
+        val summary = ConversationObservationSummary(
+            conversationId = app.mini.hub.domain.ScopedId(accountId, app.mini.hub.domain.ScopedId.Kind.CONVERSATION, convValue),
+            accountId = accountId,
+            title = name.ifBlank { address },
+            appName = app.mini.hub.observation.SourceAppNames.forPackage(CommunicationSource.API_PACKAGE_PREFIX + accountId.provider.wire),
+            senderHint = if (isEmail) "$name <$address>" else name.ifBlank { address },
+            packageId = if (accountId.provider == app.mini.hub.domain.Provider.GMAIL) "com.google.android.gm" else CommunicationSource.API_PACKAGE_PREFIX + accountId.provider.wire,
+            latestSnippet = "",
+            category = app.mini.hub.observation.NotificationCategory.DirectMessage,
+            coverage = app.mini.hub.observation.ConversationCoverage.PartialApiSync,
+            coverageExplanation = "New conversation",
+            latestEventAt = clock.now(),
+            observationCount = 0,
+            unreadCount = 0,
+            isRemoved = false,
+        )
+        clearSearch()
+        abandonLocalDraft()
+        _state.value = _state.value.copy(
+            selectedConversation = summary,
+            selectedTimeline = emptyList(),
+            retrievedContext = retrievalEngine.retrieve(
+                ScopedRetrievalQuery(conversationId = summary.conversationId, compartment = CompartmentId(accountId.key), tokenBudget = 650),
+            ),
+            activeReviewPayload = null,
+            localDraftText = "",
+            draftVersions = emptyList(),
+            localDraftStatus = null,
+            conversationLoadStatus = null,
+            composeNewTo = if (isEmail) address else null,
+        )
+    }
+
     fun selectConversationFromSearch(result: app.mini.hub.search.SearchResult) {
         val conv = _state.value.conversations.firstOrNull { it.conversationId == result.conversationId }
             ?: observationStore.getConversationSummaries(result.accountId).firstOrNull { it.conversationId == result.conversationId }
@@ -318,6 +366,7 @@ class InboxViewModel(
             localDraftText = "",
             originalGeneratedDraft = null,
             draftVersions = emptyList(),
+            composeNewTo = null,
             localDraftWarning = null,
             localDraftStatus = null,
             localDraftFeedback = null,
@@ -382,6 +431,7 @@ class InboxViewModel(
             localDraftText = "",
             originalGeneratedDraft = null,
             draftVersions = emptyList(),
+            composeNewTo = null,
             localDraftWarning = null,
             localDraftStatus = null,
             localDraftFeedback = null,
@@ -536,8 +586,12 @@ class InboxViewModel(
         localDraftExperiment?.release()
     }
 
-    fun prepareDraft(body: String, recipient: String) {
+    fun prepareDraft(body: String, recipient: String, subjectOverride: String? = null) {
         val selected = _state.value.selectedConversation ?: return
+        _state.value.composeNewTo?.let { to ->
+            prepareNewEmail(selected, to, subjectOverride?.ifBlank { null } ?: "(no subject)", body)
+            return
+        }
         val provider = selected.accountId.provider
         val connectedAccount = accountStore?.get(selected.accountId)
         val isApiAccount = connectedAccount != null &&
@@ -604,6 +658,35 @@ class InboxViewModel(
                 isReply = route == ActionRoute.Api && replyTarget != null,
                 handoffPackage = if (route == ActionRoute.NativeHandoff) handoffPackageFor(selected) else null,
                 note = note,
+            ),
+        )
+    }
+
+    private fun prepareNewEmail(selected: ConversationObservationSummary, to: String, subject: String, body: String) {
+        val account = accountStore?.get(selected.accountId)
+        val apiOk = account != null && account.state in USABLE_STATES && apiReplyAllowed(account)
+        val route = if (apiOk) ActionRoute.Api else ActionRoute.NativeHandoff
+        val enabled = account?.let { capabilitiesFor(it)?.enabled }.orEmpty()
+        val payload = ExactActionPayload(
+            accountId = selected.accountId.key,
+            conversationId = "",
+            route = route,
+            recipients = listOf(to),
+            subject = subject,
+            body = body,
+            attachments = emptyList(),
+            sourceVersions = emptyList(),
+            grantVersion = AuthorizationSnapshot.grantVersion(account?.grantedScopes.orEmpty()),
+            policyVersion = AuthorizationSnapshot.policyVersion(enabled, route),
+            replyTarget = null,
+        )
+        _state.value = _state.value.copy(
+            activeReviewPayload = payload,
+            reviewContext = ReviewContext(
+                providerName = providerLabel(selected.accountId.provider),
+                isReply = false,
+                handoffPackage = if (route == ActionRoute.NativeHandoff) handoffPackageFor(selected) else null,
+                note = if (route == ActionRoute.Api) null else "Sending new email is not enabled for this account; MINI will open the mail app.",
             ),
         )
     }

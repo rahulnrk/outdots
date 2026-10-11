@@ -124,7 +124,16 @@ class GomobileWhatsAppClient private constructor(private val native: Any) : What
     fun mediaThumbnail(id: String): ByteArray? = runCatching { invoke("mediaThumbnail", id) as? ByteArray }.getOrNull()
 
     fun downloadMedia(id: String, dir: String): String? =
-        runCatching { invoke("downloadMedia", id, dir) as? String }.getOrNull()
+        runCatching { invoke("downloadMedia", id, dir) as? String }
+            .onFailure { lastMediaError = it.message ?: it.javaClass.simpleName }
+            .getOrNull()
+
+    @Volatile var lastMediaError: String? = null
+
+    fun searchContacts(query: String): List<Pair<String, String>> = runCatching {
+        val arr = org.json.JSONArray(invoke("searchContactsJSON", query) as? String ?: "[]")
+        (0 until arr.length()).map { arr.getJSONObject(it).let { o -> o.optString("jid") to o.optString("name") } }
+    }.getOrDefault(emptyList())
 
     private fun chatJid(payload: ExactActionPayload): String {
         val raw = payload.conversationId.trim().ifBlank { payload.recipients.firstOrNull().orEmpty() }

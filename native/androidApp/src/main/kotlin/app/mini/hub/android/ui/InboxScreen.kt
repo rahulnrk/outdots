@@ -3,6 +3,7 @@ package app.mini.hub.android.ui
 import android.content.Intent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -209,6 +210,16 @@ fun InboxScreen(
                 val record = state.attentionRecords[state.selectedConversation!!.conversationId.key] 
                     ?: app.mini.hub.attention.AttentionRules.default(state.selectedConversation!!.conversationId, app.mini.hub.domain.UtcInstant(System.currentTimeMillis()))
                 val selectedKey = state.selectedConversation!!.conversationId.key
+                var newSubject by remember(selectedKey) { mutableStateOf("") }
+                if (state.composeNewTo != null) {
+                    OutlinedTextField(
+                        value = newSubject,
+                        onValueChange = { newSubject = it },
+                        label = { Text("Subject (new email to ${state.composeNewTo})") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 ThreadView(
                     summary = state.selectedConversation!!,
                     timeline = state.selectedTimeline,
@@ -231,7 +242,7 @@ fun InboxScreen(
                     onDraft = { instruction, revise -> viewModel.requestLocalDraft(instruction, revise) },
                     onCancelDraft = { viewModel.cancelLocalDraft() },
                     onDraftChanged = { text -> viewModel.updateLocalDraftText(text) },
-                    onApprove = { body -> viewModel.prepareDraft(body, "") },
+                    onApprove = { body -> viewModel.prepareDraft(body, "", newSubject) },
                     onAttention = { a -> viewModel.applyAttentionAction(state.selectedConversation!!.conversationId, a) },
                 )
                 if (false) ConversationDetailView(
@@ -275,6 +286,34 @@ fun InboxScreen(
                 )
 
                 if (state.searchQuery.isNotBlank()) {
+                    // People: reach this person on any connected account
+                    val contactRoutes by androidx.compose.runtime.produceState(emptyList<app.mini.hub.android.connector.AndroidConnectorRegistry.ContactRoute>(), state.searchQuery) {
+                        kotlinx.coroutines.delay(250)
+                        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            runCatching { app.mini.hub.android.MiniHubRuntime.connectors.findContacts(state.searchQuery) }.getOrDefault(emptyList())
+                        }
+                    }
+                    if (contactRoutes.isNotEmpty()) {
+                        Text("People", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 4.dp))
+                        contactRoutes.groupBy { it.name.lowercase() }.entries.take(6).forEach { (_, routes) ->
+                            Card(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text(routes.first().name, fontWeight = FontWeight.SemiBold)
+                                    Row(
+                                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        routes.forEach { r ->
+                                            OutlinedButton(onClick = { viewModel.openCompose(r.accountId, r.address, r.name) }) {
+                                                Text(r.label, maxLines = 1)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Text("Messages", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
+                    }
                     // Search Results View
                     if (state.isSearching) {
                         Text("Searching…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))

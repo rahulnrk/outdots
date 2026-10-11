@@ -171,7 +171,7 @@ private fun ChatRow(conv: ConversationObservationSummary, label: String?, onClic
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    previewText(conv.latestSnippet),
+                    formatChatText(previewText(conv.latestSnippet)).text,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -394,20 +394,7 @@ private fun MessageBubble(obs: ObservedNotification, isGroupish: Boolean) {
 @Composable
 private fun LinkText(text: String) {
     val context = LocalContext.current
-    val annotated = remember(text) {
-        buildAnnotatedString {
-            var last = 0
-            URL.findAll(text).forEach { m ->
-                append(text.substring(last, m.range.first))
-                pushStringAnnotation("url", m.value)
-                pushStyle(SpanStyle(color = androidx.compose.ui.graphics.Color(0xFF1565C0), textDecoration = TextDecoration.Underline))
-                append(m.value)
-                pop(); pop()
-                last = m.range.last + 1
-            }
-            append(text.substring(last))
-        }
-    }
+    val annotated = remember(text) { formatChatText(text) }
     ClickableText(
         text = annotated,
         style = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
@@ -418,6 +405,36 @@ private fun LinkText(text: String) {
             }
         },
     )
+}
+
+private val WA_FORMAT = Regex("(?<![\\w*_~])([*_~])(?=\\S)(.+?)(?<=\\S)\\1(?![\\w*_~])")
+
+/** WhatsApp *bold* _italic_ ~strike~ plus clickable links, without showing the markers. */
+internal fun formatChatText(text: String): androidx.compose.ui.text.AnnotatedString = buildAnnotatedString {
+    var last = 0
+    val tokens = (URL.findAll(text).map { it to "url" } + WA_FORMAT.findAll(text).map { it to "fmt" })
+        .sortedBy { it.first.range.first }
+    for ((m, type) in tokens) {
+        if (m.range.first < last) continue
+        append(text.substring(last, m.range.first))
+        if (type == "url") {
+            pushStringAnnotation("url", m.value)
+            pushStyle(SpanStyle(color = androidx.compose.ui.graphics.Color(0xFF1565C0), textDecoration = TextDecoration.Underline))
+            append(m.value)
+            pop(); pop()
+        } else {
+            val style = when (m.groupValues[1]) {
+                "*" -> SpanStyle(fontWeight = FontWeight.Bold)
+                "_" -> SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                else -> SpanStyle(textDecoration = TextDecoration.LineThrough)
+            }
+            pushStyle(style)
+            append(m.groupValues[2])
+            pop()
+        }
+        last = m.range.last + 1
+    }
+    if (last < text.length) append(text.substring(last))
 }
 
 @Composable
@@ -453,15 +470,22 @@ private fun MediaView(ref: MediaRef) {
             }.getOrNull()
         }
         if (file == null) {
-            status = "Couldn't load this ${ref.kind}."
-        } else if (ref.kind == "image" || ref.kind == "sticker" || (ref.isGmail && ref.kind == "gif")) {
-            full = withContext(Dispatchers.IO) { BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap() }
-            status = if (full == null) "Couldn't show this ${ref.kind}." else null
+            val why = if (ref.isGmail) null else runCatching { MiniHubRuntime.connectors.whatsappLastMediaError() }.getOrNull()
+            status = when {
+                why == null -> "Couldn't load this ${ref.kind}."
+                why.contains("media_unavailable") -> "This ${ref.kind} isn't available on the linked device. Open it in WhatsApp."
+                why.contains("404") || why.contains("410") || why.contains("gone", true) -> "WhatsApp no longer has this ${ref.kind} (too old)."
+                else -> "Couldn't load this ${ref.kind}: $why"
+            }
         } else {
+            full = if (ref.kind == "image" || ref.kind == "sticker" || (ref.isGmail && ref.kind == "gif")) {
+                withContext(Dispatchers.IO) { BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap() }
+            } else null
             status = null
             val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.media", file)
             val mime = when (ref.kind) {
-                "video", "gif" -> "video/*"; "audio" -> "audio/*"
+                "video" -> "video/*"; "gif" -> if (ref.isGmail) "image/gif" else "video/*"; "audio" -> "audio/*"
+                "image" -> "image/*"; "sticker" -> "image/webp"
                 else -> android.webkit.MimeTypeMap.getSingleton()
                     .getMimeTypeFromExtension(file.extension.lowercase()) ?: "*/*"
             }
