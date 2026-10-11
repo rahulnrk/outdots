@@ -18,6 +18,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class StyleContextTest {
@@ -65,10 +66,44 @@ class StyleContextTest {
         val notification = observation("me@example.com", "This looks like me but it is a notification.", ObservationProvenance.AndroidNotificationListener)
         val learned = StyleContext.learnFromObservations(engine, account, listOf(outbound, inbound, notification), now)
         assertEquals(1, learned)
-        assertTrue(engine.hasLearnedSample(StyleContext.sampleId(account.id.key, outbound.notificationKey)))
+        val outboundText = outbound.textFragments.joinToString(" ").trim()
+        val providerId = StyleContext.providerMessageIdFromNotificationKey(account.id.key, outbound.notificationKey)
+        assertNotNull(providerId)
+        assertTrue(engine.hasLearnedSample(StyleContext.sampleId(account.id.key, providerId)))
+        assertTrue(engine.hasLearnedSample(StyleContext.bodySampleId(account.id.key, outbound.conversationId.key, outboundText)))
         val profile = engine.resolveProfile(ContextCategory.Professional, "${account.id.key}|Meeting notes", now)
         assertTrue(profile.observationCount >= 1)
         assertTrue(profile.traits.formality > 0.5)
+    }
+
+    @Test
+    fun approvedSendAndLaterHistoryOfTheSameBodyDoNotDoubleCount() {
+        val engine = consentedEngine()
+        val text = "Dear Alex, please find the attached proposal for review.\nRegards"
+        val conversation = ScopedId(account.id, ScopedId.Kind.CONVERSATION, "t-work")
+        val ids = StyleContext.sampleIds(account.id.key, conversation.key, text)
+        assertTrue(
+            engine.learnFromText(
+                text,
+                TextAuthorship.UserAuthoredSentMessage,
+                ContextCategory.Professional,
+                "${account.id.key}|Alex <alex@example.com>",
+                now,
+                ids.first(),
+                account.id,
+                ids.drop(1),
+            ),
+        )
+        val before = engine.resolveProfile(ContextCategory.Professional, "${account.id.key}|Alex <alex@example.com>", now).observationCount
+        val later = StyleContext.learn(
+            engine,
+            account,
+            listOf(message("provider-msg-99", "t-work", "me@example.com", "Proposal", text, MessageDirection.Outbound, listOf("Alex <alex@example.com>"))),
+            now,
+        )
+        assertEquals(0, later)
+        assertEquals(before, engine.resolveProfile(ContextCategory.Professional, "${account.id.key}|Alex <alex@example.com>", now).observationCount)
+        assertTrue(engine.hasLearnedSample(StyleContext.sampleId(account.id.key, "provider-msg-99")))
     }
 
     @Test

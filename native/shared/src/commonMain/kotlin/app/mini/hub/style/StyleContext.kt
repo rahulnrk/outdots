@@ -4,6 +4,7 @@ import app.mini.hub.connector.ConnectedAccount
 import app.mini.hub.connector.EmailAddress
 import app.mini.hub.connector.MessageDirection
 import app.mini.hub.connector.ProviderMessage
+import app.mini.hub.domain.AccountId
 import app.mini.hub.domain.Provider
 import app.mini.hub.domain.UtcInstant
 import app.mini.hub.observation.ObservationProvenance
@@ -62,6 +63,24 @@ object StyleContext {
 
     fun sampleId(accountKey: String, providerMessageId: String): String = "$accountKey:$providerMessageId"
 
+    fun bodySampleId(accountKey: String, conversationId: String, text: String): String =
+        "$accountKey:body:${nativeConversationId(accountKey, conversationId)}:${fingerprint(text)}"
+
+    fun sampleIds(
+        accountKey: String,
+        conversationId: String,
+        text: String,
+        providerMessageId: String? = null,
+    ): List<String> = buildList {
+        providerMessageId?.takeIf { it.isNotBlank() }?.let { add(sampleId(accountKey, it)) }
+        add(bodySampleId(accountKey, conversationId, text))
+    }.distinct()
+
+    fun providerMessageIdFromNotificationKey(accountKey: String, notificationKey: String): String? {
+        val prefix = "provider:$accountKey:"
+        return notificationKey.removePrefix(prefix).takeIf { notificationKey.startsWith(prefix) && it.isNotBlank() }
+    }
+
     fun learn(
         engine: AdaptiveStyleEngine,
         account: ConnectedAccount,
@@ -75,11 +94,8 @@ object StyleContext {
             if (text.isBlank()) return@forEach
             val category = forMessage(account.id.provider, message.subject, text)
             val recipient = recipientFor(account, message)
-            val id = sampleId(account.id.key, message.providerMessageId)
-            if (engine.learnFromText(text, TextAuthorship.UserAuthoredSentMessage, category, recipient, now, id, account = account.id)) {
-                learned++
-            }
-            engine.learnFromText(text, TextAuthorship.UserAuthoredSentMessage, category, null, now, "cat:$id", account = account.id)
+            val ids = sampleIds(account.id.key, message.conversationId, text, message.providerMessageId)
+            if (learnOnce(engine, text, category, recipient, now, ids, account.id)) learned++
         }
         return learned
     }
@@ -106,11 +122,9 @@ object StyleContext {
                 if (text.isBlank()) return@forEach
                 val category = forMessage(account.id.provider, observation.title, text)
                 val recipient = "${account.id.key}|${counterparty(account, observation)}"
-                val id = sampleId(account.id.key, observation.notificationKey)
-                if (engine.learnFromText(text, TextAuthorship.UserAuthoredSentMessage, category, recipient, now, id, account = account.id)) {
-                    learned++
-                }
-                engine.learnFromText(text, TextAuthorship.UserAuthoredSentMessage, category, null, now, "cat:$id", account = account.id)
+                val providerId = providerMessageIdFromNotificationKey(account.id.key, observation.notificationKey)
+                val ids = sampleIds(account.id.key, observation.conversationId.key, text, providerId)
+                if (learnOnce(engine, text, category, recipient, now, ids, account.id)) learned++
             }
         return learned
     }
@@ -127,6 +141,40 @@ object StyleContext {
         val sender = observation.senderHint.lowercase()
         val senderAddress = EmailAddress.extract(observation.senderHint)?.lowercase()
         return senderAddress == me || sender == me || sender.contains("<$me>")
+    }
+
+    private fun learnOnce(
+        engine: AdaptiveStyleEngine,
+        text: String,
+        category: ContextCategory,
+        recipient: String?,
+        now: UtcInstant,
+        ids: List<String>,
+        account: AccountId,
+    ): Boolean {
+        val primary = ids.first()
+        val extra = ids.drop(1)
+        val learned = engine.learnFromText(
+            text, TextAuthorship.UserAuthoredSentMessage, category, recipient, now, primary, account, extra,
+        )
+        engine.learnFromText(
+            text, TextAuthorship.UserAuthoredSentMessage, category, null, now, "cat:$primary", account, extra.map { "cat:$it" },
+        )
+        return learned
+    }
+
+    private fun nativeConversationId(accountKey: String, conversationId: String): String {
+        val prefix = "$accountKey|conversation|"
+        return if (conversationId.startsWith(prefix)) conversationId.removePrefix(prefix) else conversationId
+    }
+
+    private fun fingerprint(text: String): String {
+        var hash = 0xcbf29ce484222325UL
+        for (ch in text.trim()) {
+            hash = hash xor ch.code.toULong()
+            hash *= 0x100000001b3UL
+        }
+        return hash.toString(16)
     }
 
     private fun counterparty(account: ConnectedAccount, observation: ObservedNotification): String {

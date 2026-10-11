@@ -97,6 +97,7 @@ class AdaptiveStyleEngine(
         now: UtcInstant,
         sampleId: String? = null,
         account: AccountId? = null,
+        extraSampleIds: List<String> = emptyList(),
     ): Boolean = synchronized(lock) {
         if (!consent.isEnabled) return false
         if (category !in consent.grantedCategories) return false
@@ -104,7 +105,11 @@ class AdaptiveStyleEngine(
             return false // Inbound messages and unedited AI drafts NEVER teach style!
         }
         if (text.isBlank()) return false
-        if (!sampleId.isNullOrBlank() && sampleId in learnedSampleIds) return false
+        val sampleIds = (listOfNotNull(sampleId) + extraSampleIds).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (sampleIds.any { it in learnedSampleIds }) {
+            rememberSampleIds(sampleIds)
+            return false
+        }
 
         // Redact potential secrets/sensitive numeric sequences
         val sanitized = redactSensitiveData(text)
@@ -190,12 +195,7 @@ class AdaptiveStyleEngine(
         )
 
         profiles[profileKey] = updatedProfile
-        if (!sampleId.isNullOrBlank()) {
-            learnedSampleIds.add(sampleId)
-            while (learnedSampleIds.size > MAX_LEARNED_SAMPLE_IDS) {
-                learnedSampleIds.remove(learnedSampleIds.first())
-            }
-        }
+        rememberSampleIds(sampleIds)
         return true
     }
 
@@ -370,6 +370,15 @@ class AdaptiveStyleEngine(
         val allowed = consent.grantedCategories
         val unauthorized = profiles.filterValues { it.category !in allowed }.keys
         unauthorized.forEach { profiles.remove(it) }
+    }
+
+    private fun rememberSampleIds(ids: List<String>) {
+        ids.forEach { id ->
+            learnedSampleIds.add(id)
+            while (learnedSampleIds.size > MAX_LEARNED_SAMPLE_IDS) {
+                learnedSampleIds.remove(learnedSampleIds.first())
+            }
+        }
     }
 
     private fun defaultNeutralProfile(category: ContextCategory, recipientId: String?, now: UtcInstant): CompactStyleProfile {
