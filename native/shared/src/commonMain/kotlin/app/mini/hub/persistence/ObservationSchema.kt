@@ -1,0 +1,94 @@
+package app.mini.hub.persistence
+
+/**
+ * Observation database schema shared by the Android SQLCipher store and the JVM sqlite-jdbc store,
+ * so both migrate the same way. Version history:
+ *  - 1: observations, conversations, cursors
+ *  - 2: conversation_summaries.app_name and .category
+ *  - 3: notification_observations.direction, .recipients_json, .reply_anchor (null = unknown)
+ */
+object ObservationSchema {
+    const val VERSION = 3
+
+    /** Observations table as created by versions 1 and 2. Version 3 columns are added by migration. */
+    const val CREATE_OBSERVATIONS_V1 = """
+        CREATE TABLE IF NOT EXISTS notification_observations (
+            id TEXT NOT NULL PRIMARY KEY,
+            account_key TEXT NOT NULL,
+            conversation_key TEXT NOT NULL,
+            package_id TEXT NOT NULL,
+            notification_key TEXT NOT NULL,
+            notification_id INTEGER NOT NULL,
+            tag TEXT,
+            sender_hint TEXT NOT NULL,
+            title TEXT,
+            text_fragments_json TEXT NOT NULL,
+            raw_text_digest TEXT NOT NULL,
+            observed_at INTEGER NOT NULL,
+            post_time INTEGER NOT NULL,
+            revision INTEGER NOT NULL,
+            is_removed INTEGER NOT NULL CHECK (is_removed IN (0, 1)),
+            is_group_summary INTEGER NOT NULL CHECK (is_group_summary IN (0, 1)),
+            truncation_state TEXT NOT NULL,
+            correlation_confidence TEXT NOT NULL,
+            provenance TEXT NOT NULL
+        )
+    """
+
+    /** Conversation summaries in their version 2 shape. */
+    const val CREATE_CONVERSATIONS_V1 = """
+        CREATE TABLE IF NOT EXISTS conversation_summaries (
+            conversation_key TEXT NOT NULL PRIMARY KEY,
+            account_key TEXT NOT NULL,
+            title TEXT NOT NULL,
+            app_name TEXT NOT NULL DEFAULT '',
+            sender_hint TEXT NOT NULL,
+            package_id TEXT NOT NULL,
+            latest_snippet TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'GeneralNotification',
+            coverage TEXT NOT NULL,
+            coverage_explanation TEXT NOT NULL,
+            latest_event_at INTEGER NOT NULL,
+            observation_count INTEGER NOT NULL,
+            unread_count INTEGER NOT NULL,
+            is_removed INTEGER NOT NULL CHECK (is_removed IN (0, 1))
+        )
+    """
+
+    const val CREATE_CURSORS_V1 = """
+        CREATE TABLE IF NOT EXISTS ingest_cursors (
+            source TEXT NOT NULL PRIMARY KEY,
+            last_processed_time_millis INTEGER NOT NULL,
+            last_processed_key TEXT,
+            processed_count INTEGER NOT NULL,
+            gap_count INTEGER NOT NULL
+        )
+    """
+
+    const val INDEX_NOTIFICATION_KEY =
+        "CREATE INDEX IF NOT EXISTS idx_obs_notif_key ON notification_observations (notification_key)"
+
+    /** Timeline order: provider event time, then fetch time, then id (stable for equal timestamps). */
+    const val INDEX_CONVERSATION_EVENT =
+        "CREATE INDEX IF NOT EXISTS idx_obs_conv_event ON notification_observations (conversation_key, post_time DESC, observed_at DESC, id DESC)"
+
+    const val TIMELINE_ORDER = "post_time DESC, observed_at DESC, id DESC"
+
+    /** Statements that bring the observations table to version 3, given its existing columns. */
+    fun version3Statements(existingObservationColumns: Set<String>): List<String> = buildList {
+        if ("direction" !in existingObservationColumns) add("ALTER TABLE notification_observations ADD COLUMN direction TEXT")
+        if ("recipients_json" !in existingObservationColumns) add("ALTER TABLE notification_observations ADD COLUMN recipients_json TEXT")
+        if ("reply_anchor" !in existingObservationColumns) add("ALTER TABLE notification_observations ADD COLUMN reply_anchor TEXT")
+        add(INDEX_CONVERSATION_EVENT)
+    }
+
+    private const val SEP = "\u001F"
+
+    /** Null = unknown. An empty list is stored as unknown as well; providers always name a recipient. */
+    fun encodeRecipients(recipients: List<String>?): String? = recipients?.takeIf { it.isNotEmpty() }?.joinToString(SEP)
+    fun decodeRecipients(value: String?): List<String>? = value?.takeIf { it.isNotEmpty() }?.split(SEP)
+
+    fun encodeDirection(direction: app.mini.hub.connector.MessageDirection?): String? = direction?.name
+    fun decodeDirection(value: String?): app.mini.hub.connector.MessageDirection? =
+        value?.let { v -> app.mini.hub.connector.MessageDirection.entries.firstOrNull { it.name == v } }
+}

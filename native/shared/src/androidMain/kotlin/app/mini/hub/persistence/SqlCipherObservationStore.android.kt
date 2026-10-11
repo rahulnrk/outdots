@@ -44,7 +44,7 @@ class SqlCipherObservationStore(
         private set
 
     companion object {
-        const val DATABASE_VERSION = 2
+        const val DATABASE_VERSION = ObservationSchema.VERSION
 
         const val SCHEMA_OBSERVATIONS = """
             CREATE TABLE IF NOT EXISTS notification_observations (
@@ -128,12 +128,18 @@ class SqlCipherObservationStore(
                 if (currentVersion < 2) {
                     migrateToVersion2(db)
                 }
+                if (currentVersion < 3) {
+                    migrateToVersion3(db)
+                }
                 db.version = DATABASE_VERSION
                 db.setTransactionSuccessful()
             } finally {
                 db.endTransaction()
             }
         }
+
+        // Fresh databases skip the migration block above; make sure v3 columns exist either way.
+        migrateToVersion3(db)
 
         // Probe FTS5 capability safely
         isFts5Supported = try {
@@ -144,6 +150,15 @@ class SqlCipherObservationStore(
             false
         }
         db
+    }
+
+    /** Adds direction, recipients and reply anchor (nullable = unknown); existing rows are kept. */
+    private fun migrateToVersion3(db: SQLiteDatabase) {
+        val columns = mutableSetOf<String>()
+        db.rawQuery("PRAGMA table_info(notification_observations)", null).use { cursor ->
+            while (cursor.moveToNext()) columns.add(cursor.getString(cursor.getColumnIndexOrThrow("name")))
+        }
+        ObservationSchema.version3Statements(columns).forEach { db.execSQL(it) }
     }
 
     private fun migrateToVersion2(db: SQLiteDatabase) {
@@ -375,6 +390,9 @@ class SqlCipherObservationStore(
             put("truncation_state", obs.truncationState.name)
             put("correlation_confidence", obs.correlationConfidence.name)
             put("provenance", obs.provenance.name)
+            put("direction", ObservationSchema.encodeDirection(obs.direction))
+            put("recipients_json", ObservationSchema.encodeRecipients(obs.recipients))
+            put("reply_anchor", obs.replyAnchor)
         }
         db.insertWithOnConflict("notification_observations", null, values, SQLiteDatabase.CONFLICT_REPLACE)
 
@@ -456,7 +474,7 @@ class SqlCipherObservationStore(
             arrayOf(conversationId.key),
             null,
             null,
-            "observed_at DESC",
+            ObservationSchema.TIMELINE_ORDER,
             limit.toString(),
         ).use { cursor ->
             buildList {
@@ -618,6 +636,9 @@ class SqlCipherObservationStore(
             truncationState = TruncationState.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("truncation_state"))),
             correlationConfidence = CorrelationConfidence.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("correlation_confidence"))),
             provenance = ObservationProvenance.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("provenance"))),
+            direction = ObservationSchema.decodeDirection(cursor.getString(cursor.getColumnIndexOrThrow("direction"))),
+            recipients = ObservationSchema.decodeRecipients(cursor.getString(cursor.getColumnIndexOrThrow("recipients_json"))),
+            replyAnchor = cursor.getString(cursor.getColumnIndexOrThrow("reply_anchor")),
         )
     }
 }

@@ -117,6 +117,12 @@ data class ObservedNotification(
     val truncationState: TruncationState,
     val correlationConfidence: CorrelationConfidence,
     val provenance: ObservationProvenance,
+    /** Inbound/outbound from the account owner's view. Null = unknown (notification rows, old rows). */
+    val direction: app.mini.hub.connector.MessageDirection? = null,
+    /** Provider-reported recipients. Null = unknown (notification rows, old rows). */
+    val recipients: List<String>? = null,
+    /** Provider message reference used to thread a reply (e.g. RFC 822 Message-ID). Null = unknown. */
+    val replyAnchor: String? = null,
 ) {
     init {
         require(id.kind == ScopedId.Kind.OBSERVATION) { "ObservedNotification id must be OBSERVATION kind" }

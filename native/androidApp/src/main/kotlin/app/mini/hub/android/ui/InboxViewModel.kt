@@ -182,7 +182,7 @@ class InboxViewModel(
                 val cached = understandingCache[key]?.takeIf { it.first == signature }?.second
                 key to (cached ?: MessageUnderstandingEngine.analyze(
                     summary,
-                    observationStore.getObservationsForConversation(summary.conversationId),
+                    observationStore.getObservationsForConversation(summary.conversationId).filterNot { it.isRemoved },
                     record,
                 ).also { understandingCache[key] = signature to it })
             }
@@ -284,7 +284,7 @@ class InboxViewModel(
                         selectedTimeline = timeline,
                         understanding = _state.value.understanding + (summary.conversationId.key to MessageUnderstandingEngine.analyze(
                             summary,
-                            timeline,
+                            timeline.filterNot { it.isRemoved },
                             _state.value.attentionRecords[summary.conversationId.key]
                                 ?: AttentionRules.default(summary.conversationId, clock.now()),
                         )),

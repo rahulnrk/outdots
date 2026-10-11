@@ -42,6 +42,9 @@ class ConnectorObservationFactory(
             truncationState = if (message.bodyText != null) TruncationState.Complete else TruncationState.Unknown,
             correlationConfidence = CorrelationConfidence.High,
             provenance = ObservationProvenance.OfficialProviderApi,
+            direction = message.direction.takeIf { it != MessageDirection.Unknown },
+            recipients = message.recipients.takeIf { it.isNotEmpty() },
+            replyAnchor = message.replyAnchor,
         )
     }
 

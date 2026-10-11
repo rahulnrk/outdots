@@ -41,7 +41,9 @@ class ScopedRetrievalEngine(
         val conversationKey = query.conversationId.key
 
         // Get observations for this conversation
+        // Removed (deleted/dismissed) messages stay stored but never become model context.
         val observations = observationStore.getObservationsForConversation(query.conversationId, query.maxResults)
+            .filterNot { it.isRemoved }
 
         val selected = mutableListOf<ObservedNotification>()
         val evidenceList = mutableListOf<EvidenceRef>()

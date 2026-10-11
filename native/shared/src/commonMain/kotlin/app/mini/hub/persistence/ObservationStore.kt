@@ -309,8 +309,16 @@ class InMemoryObservationStore : ObservationStore {
     override fun getObservationsForConversation(conversationId: ScopedId, limit: Int): List<ObservedNotification> = synchronized(lock) {
         observations.values
             .filter { it.conversationId == conversationId }
-            .sortedByDescending { it.observedAt.epochMillis }
+            .sortedWith(TIMELINE_ORDER)
             .take(limit)
+    }
+
+    companion object {
+        /** Same order as [ObservationSchema.TIMELINE_ORDER]: event time, fetch time, id; newest first. */
+        val TIMELINE_ORDER: Comparator<ObservedNotification> =
+            compareByDescending<ObservedNotification> { it.postTime.epochMillis }
+                .thenByDescending { it.observedAt.epochMillis }
+                .thenByDescending { it.id.key }
     }
 
     override fun getConversationSummaries(accountId: AccountId?): List<ConversationObservationSummary> = synchronized(lock) {
