@@ -80,6 +80,8 @@ class AdaptiveStyleEngine(
         if (!newConsent.isEnabled) {
             profiles.clear()
             learnedSampleIds.clear()
+        } else {
+            dropUnauthorizedProfiles()
         }
     }
 
@@ -203,7 +205,7 @@ class AdaptiveStyleEngine(
         now: UtcInstant = UtcInstant(0L),
         account: AccountId? = null,
     ): CompactStyleProfile = synchronized(lock) {
-        if (!consent.isEnabled) {
+        if (!consent.isEnabled || category !in consent.grantedCategories) {
             return defaultNeutralProfile(category, recipientId, now)
         }
 
@@ -358,10 +360,16 @@ class AdaptiveStyleEngine(
         profiles.clear()
         learnedSampleIds.clear()
         if (consent.isEnabled) {
-            profiles.putAll(restoredProfiles)
+            restoredProfiles.values.filter { it.category in consent.grantedCategories }.forEach { profiles[it.id] = it }
             learnedSampleIds.addAll(restoredIds)
         }
         true
+    }
+
+    private fun dropUnauthorizedProfiles() {
+        val allowed = consent.grantedCategories
+        val unauthorized = profiles.filterValues { it.category !in allowed }.keys
+        unauthorized.forEach { profiles.remove(it) }
     }
 
     private fun defaultNeutralProfile(category: ContextCategory, recipientId: String?, now: UtcInstant): CompactStyleProfile {

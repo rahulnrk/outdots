@@ -184,6 +184,71 @@ class AdaptiveStyleEngineTest {
     }
 
     @Test
+    fun revokingOneCategoryPurgesItsProfilesAndStopsResolution() {
+        val engine = AdaptiveStyleEngine(
+            consent = StyleConsent(
+                isEnabled = true,
+                grantedCategories = setOf(ContextCategory.Professional, ContextCategory.Friends),
+            ),
+        )
+        assertTrue(
+            engine.learnFromText(
+                "Please find the attached proposal for review.",
+                TextAuthorship.UserAuthoredSentMessage,
+                ContextCategory.Professional,
+                "r-work",
+                now,
+                "prof-keep",
+            ),
+        )
+        assertTrue(
+            engine.learnFromText(
+                "Hey, wanna grab dinner later?",
+                TextAuthorship.UserAuthoredSentMessage,
+                ContextCategory.Friends,
+                "r-friend",
+                now,
+                "friends-drop",
+            ),
+        )
+        engine.learnFromText(
+            "Please find the attached proposal for review.",
+            TextAuthorship.UserAuthoredSentMessage,
+            ContextCategory.Professional,
+            null,
+            now,
+            "cat-prof",
+        )
+        engine.learnFromText(
+            "Hey, wanna grab dinner later?",
+            TextAuthorship.UserAuthoredSentMessage,
+            ContextCategory.Friends,
+            null,
+            now,
+            "cat-friends",
+        )
+
+        engine.updateConsent(
+            StyleConsent(
+                isEnabled = true,
+                grantedCategories = setOf(ContextCategory.Professional),
+            ),
+        )
+
+        assertEquals(null, engine.getRecipientProfile(ContextCategory.Friends, "r-friend"))
+        val friends = engine.resolveProfile(ContextCategory.Friends, "r-friend", now)
+        assertTrue(friends.id.startsWith("neutral:"))
+        assertEquals(0, friends.observationCount)
+        assertTrue(engine.snapshot().none { it.category == ContextCategory.Friends })
+        assertTrue(engine.snapshot().any { it.category == ContextCategory.Professional })
+        assertFalse(engine.learnFromText("Hey again", TextAuthorship.UserAuthoredSentMessage, ContextCategory.Friends, "r-friend", now, "friends-new"))
+        val restored = AdaptiveStyleEngine()
+        assertTrue(restored.importState(engine.exportState()))
+        assertTrue(restored.snapshot().none { it.category == ContextCategory.Friends })
+        assertTrue(restored.resolveProfile(ContextCategory.Friends, "r-friend", now).id.startsWith("neutral:"))
+    }
+
+    @Test
     fun compactProfilesRoundTripThroughRestartState() {
         val original = AdaptiveStyleEngine(
             consent = StyleConsent(
