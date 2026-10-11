@@ -160,6 +160,14 @@ class InboxViewModel(
         val summaries = observationStore.getConversationSummaries()
             .filter { policy.isVisibleInInbox(it.packageId) }
             .filterNot { isHiddenWhatsAppChat(it.conversationId.value) }
+            .let { all ->
+                // When a provider account is linked (WhatsApp, Gmail...), its notification-only copies
+                // are duplicates of the synced chats. Show only the synced ones.
+                val linked = all.filter { it.coverage != app.mini.hub.observation.ConversationCoverage.NotificationOnly }
+                    .map { it.accountId.provider }.toSet()
+                all.filterNot { it.coverage == app.mini.hub.observation.ConversationCoverage.NotificationOnly && it.accountId.provider in linked }
+            }
+            .filterNot { it.latestSnippet.isBlank() && it.observationCount <= 1 }
         val loadResult = attentionStore.loadAll()
 
         var failure: String? = null

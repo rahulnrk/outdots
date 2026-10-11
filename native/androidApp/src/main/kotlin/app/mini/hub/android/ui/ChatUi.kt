@@ -214,7 +214,10 @@ fun ThreadView(
         val live = timeline.filterNot { it.isRemoved }
         // Prefer synced provider rows; drop notification duplicates when the account is connected.
         val synced = live.filter { it.notificationKey.startsWith("provider:") }
-        (if (synced.isNotEmpty()) synced else live).sortedBy { it.postTime.epochMillis }
+        (if (synced.isNotEmpty()) synced else live)
+            .distinctBy { o -> Triple(o.senderHint.lowercase(), o.postTime.epochMillis / 60_000, o.textFragments.joinToString(" ").take(200)) }
+            .filter { o -> o.textFragments.any { it.isNotBlank() } }
+            .sortedBy { it.postTime.epochMillis }
     }
     val isEmail = summary.accountId.provider == app.mini.hub.domain.Provider.GMAIL ||
         summary.accountId.provider == app.mini.hub.domain.Provider.OUTLOOK

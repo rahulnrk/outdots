@@ -48,10 +48,10 @@ func (r *Runtime) ConversationJSON(chat string) (string, error) {
 
 func (r *Runtime) rememberLocked(msg inboundMessage) {
 	r.ensureStores()
-	if msg.ID == "" || msg.Chat == "" || msg.Body == "" || isHiddenChat(msg.Chat) {
+	if msg.ID == "" || msg.Chat == "" || strings.TrimSpace(msg.Body) == "" || isHiddenChat(msg.Chat) {
 		return
 	}
-	msg.Chat = canonicalChat(msg.Chat)
+	msg.Chat = r.preferPhoneChatLocked(canonicalChat(msg.Chat))
 	list := r.chats[msg.Chat]
 	for _, existing := range list {
 		if existing.ID == msg.ID {
@@ -61,7 +61,7 @@ func (r *Runtime) rememberLocked(msg inboundMessage) {
 	if msg.Name == "" {
 		msg.Name = r.labelLocked(msg.Sender)
 	}
-	msg.Title = r.labelLocked(msg.Chat)
+	msg.Title = r.chatTitleLocked(msg.Chat)
 	list = append(list, msg)
 	if len(list) > maxMessagesPerChat {
 		list = list[len(list)-maxMessagesPerChat:]
@@ -69,6 +69,61 @@ func (r *Runtime) rememberLocked(msg inboundMessage) {
 	r.chats[msg.Chat] = list
 	r.inbound = append(r.inbound, msg)
 	r.dirty = true
+}
+
+// preferPhoneChatLocked maps a hidden @lid 1:1 chat to the phone-number chat so one person
+// never appears as two conversations. Existing @lid history is merged in.
+func (r *Runtime) preferPhoneChatLocked(chat string) string {
+	jid, err := types.ParseJID(chat)
+	if err != nil || jid.Server != types.HiddenUserServer || r.device == nil || r.device.LIDs == nil {
+		return chat
+	}
+	pn, err := r.device.LIDs.GetPNForLID(context.Background(), jid)
+	if err != nil || pn.IsEmpty() {
+		return chat
+	}
+	phone := pn.ToNonAD().String()
+	if old := r.chats[chat]; len(old) > 0 {
+		r.chats[phone] = append(r.chats[phone], old...)
+		delete(r.chats, chat)
+	}
+	return phone
+}
+
+// chatTitleLocked names a conversation: group subject for groups, saved contact name otherwise.
+func (r *Runtime) chatTitleLocked(chat string) string {
+	jid, err := types.ParseJID(chat)
+	if err == nil && jid.Server == types.GroupServer {
+		if n := r.names["group:"+chat]; n != "" {
+			return n
+		}
+		if r.client != nil && r.client.IsLoggedIn() {
+			client := r.client
+			go func() {
+				info, err := client.GetGroupInfo(context.Background(), jid)
+				if err == nil && info != nil && info.Name != "" {
+					r.mu.Lock()
+					r.names["group:"+chat] = info.Name
+					r.retitleLocked(chat, info.Name)
+					r.mu.Unlock()
+				}
+			}()
+		}
+		return "WhatsApp group"
+	}
+	return r.labelLocked(chat)
+}
+
+// retitleLocked re-emits the latest message with a corrected title so MINI updates the chat name.
+func (r *Runtime) retitleLocked(chat, title string) {
+	list := r.chats[chat]
+	for i := range list {
+		list[i].Title = title
+	}
+	if n := len(list); n > 0 {
+		r.inbound = append(r.inbound, list[n-1])
+		r.dirty = true
+	}
 }
 
 func (r *Runtime) setNameLocked(jid types.JID, name string) {
@@ -97,6 +152,25 @@ func (r *Runtime) labelLocked(raw string) string {
 		return raw
 	}
 	key := jid.ToNonAD().String()
+	// Saved address-book name wins over push names so one person keeps one name.
+	if r.device != nil {
+		lookup := jid
+		if jid.Server == types.HiddenUserServer && r.device.LIDs != nil {
+			if pn, err := r.device.LIDs.GetPNForLID(context.Background(), jid); err == nil && !pn.IsEmpty() {
+				lookup = pn
+			}
+		}
+		if c, err := r.device.Contacts.GetContact(context.Background(), lookup); err == nil && c.Found {
+			if n := firstNonEmpty(c.FullName, c.FirstName, c.BusinessName, c.PushName); n != "" {
+				return n
+			}
+		}
+		if lookup != jid {
+			if named := r.names[lookup.ToNonAD().String()]; named != "" {
+				return named
+			}
+		}
+	}
 	if named := r.names[key]; named != "" {
 		return named
 	}
@@ -104,12 +178,6 @@ func (r *Runtime) labelLocked(raw string) string {
 		return named
 	}
 	if r.device != nil {
-		if c, err := r.device.Contacts.GetContact(context.Background(), jid); err == nil && c.Found {
-			if n := firstNonEmpty(c.FullName, c.PushName, c.BusinessName, c.FirstName); n != "" {
-				r.names[key] = n
-				return n
-			}
-		}
 		if jid.Server == types.HiddenUserServer && r.device.LIDs != nil {
 			if pn, err := r.device.LIDs.GetPNForLID(context.Background(), jid); err == nil && !pn.IsEmpty() {
 				if n := r.labelLocked(pn.ToNonAD().String()); n != "" && n != "WhatsApp contact" {
@@ -177,6 +245,18 @@ func unwrap(msg *waE2E.Message) *waE2E.Message {
 			inner = msg.GetDocumentWithCaptionMessage()
 		case msg.GetEditedMessage() != nil:
 			inner = msg.GetEditedMessage()
+		case msg.GetViewOnceMessageV2() != nil:
+			inner = msg.GetViewOnceMessageV2()
+		case msg.GetViewOnceMessageV2Extension() != nil:
+			inner = msg.GetViewOnceMessageV2Extension()
+		case msg.GetGroupMentionedMessage() != nil:
+			inner = msg.GetGroupMentionedMessage()
+		case msg.GetSpoilerMessage() != nil:
+			inner = msg.GetSpoilerMessage()
+		case msg.GetBotForwardedMessage() != nil:
+			inner = msg.GetBotForwardedMessage()
+		case msg.GetLottieStickerMessage() != nil:
+			inner = msg.GetLottieStickerMessage()
 		}
 		if inner == nil || inner.GetMessage() == nil {
 			break
@@ -391,7 +471,11 @@ func (r *Runtime) ingestHistoryLocked(data *waHistorySync.HistorySync) {
 		}
 		if name := firstNonEmpty(conv.GetName(), conv.GetDisplayName()); name != "" {
 			if chatJID, err := types.ParseJID(chatRaw); err == nil {
-				r.setNameLocked(chatJID, name)
+				if chatJID.Server == types.GroupServer {
+					r.names["group:"+chatJID.ToNonAD().String()] = name
+				} else {
+					r.setNameLocked(chatJID, name)
+				}
 			}
 		}
 		for _, wrapped := range conv.GetMessages() {

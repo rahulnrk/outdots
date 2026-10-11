@@ -428,18 +428,26 @@ class SqlCipherObservationStore(
             else -> NotificationCategory.GeneralNotification
         }
 
+        // Summary reflects the newest message by provider time, not whichever row was written last
+        // (history sync delivers old messages after new ones).
+        val prevLatest = db.rawQuery(
+            "SELECT latest_event_at, title, latest_snippet FROM conversation_summaries WHERE conversation_key = ?",
+            arrayOf(obs.conversationId.key),
+        ).use { c -> if (c.moveToFirst()) Triple(c.getLong(0), c.getString(1), c.getString(2)) else null }
+        val eventAt = obs.postTime.epochMillis.takeIf { it > 0 } ?: obs.observedAt.epochMillis
+        val isNewest = prevLatest == null || eventAt >= prevLatest.first
         val convValues = ContentValues().apply {
             put("conversation_key", obs.conversationId.key)
             put("account_key", obs.accountId.key)
-            put("title", obs.title ?: obs.senderHint)
+            put("title", if (isNewest || prevLatest == null) obs.title ?: obs.senderHint else prevLatest.second)
             put("app_name", appName)
             put("sender_hint", obs.senderHint)
             put("package_id", obs.packageId)
-            put("latest_snippet", obs.textFragments.lastOrNull() ?: obs.title ?: "")
+            put("latest_snippet", if (isNewest || prevLatest == null) obs.textFragments.lastOrNull() ?: obs.title ?: "" else prevLatest.third)
             put("category", notifCategory.name)
             put("coverage", coverageFor(obs.provenance).name)
             put("coverage_explanation", coverageExplanation)
-            put("latest_event_at", obs.observedAt.epochMillis)
+            put("latest_event_at", maxOf(eventAt, prevLatest?.first ?: 0L))
             // Derive counts from the stored rows. A constant 1 here made every conversation report a
             // single message regardless of how many observations it contains.
             put("observation_count", countRows(db, "conversation_key = ?", obs.conversationId.key))
