@@ -308,6 +308,7 @@ class InboxViewModel(
             outboxStatusMessage = null,
             localDraftText = "",
             originalGeneratedDraft = null,
+            draftVersions = emptyList(),
             localDraftWarning = null,
             localDraftStatus = null,
             localDraftFeedback = null,
@@ -371,6 +372,7 @@ class InboxViewModel(
             outboxStatusMessage = null,
             localDraftText = "",
             originalGeneratedDraft = null,
+            draftVersions = emptyList(),
             localDraftWarning = null,
             localDraftStatus = null,
             localDraftFeedback = null,
@@ -378,7 +380,7 @@ class InboxViewModel(
         )
     }
 
-    fun requestLocalDraft(userIntent: String) {
+    fun requestLocalDraft(userIntent: String, revise: Boolean = false) {
         val selected = _state.value.selectedConversation ?: return
         val retrieved = _state.value.retrievedContext ?: return
         val experiment = localDraftExperiment ?: run {
@@ -389,9 +391,10 @@ class InboxViewModel(
             return
         }
         val generation = ++localDraftGeneration
+        val previous = if (revise) _state.value.localDraftText.takeIf { it.isNotBlank() } else null
         _state.value = _state.value.copy(
-            localDraftStatus = "Generating locally on this device…",
-            localDraftText = "",
+            localDraftStatus = if (previous != null) "Rewriting on this device…" else "Generating locally on this device…",
+            localDraftText = previous ?: "",
             localDraftWarning = retrieved.coverageWarning.ifBlank { null },
             isLocalDraftInProgress = true,
             localDraftFeedback = null,
@@ -410,6 +413,7 @@ class InboxViewModel(
                 userIntent = userIntent,
                 styleProfile = _state.value.activeStyleProfile,
                 understandingNote = _state.value.understanding[selected.conversationId.key]?.explanation,
+                previousDraft = previous,
             ),
         ) { result ->
             val applyResult = applyResult@{
@@ -418,6 +422,7 @@ class InboxViewModel(
                     is LocalDraftResult.Success -> _state.value = _state.value.copy(
                         localDraftText = result.proposal.text,
                         originalGeneratedDraft = result.proposal.text,
+                        draftVersions = (_state.value.draftVersions + result.proposal.text).takeLast(5),
                         localDraftWarning = result.warning.ifBlank { null },
                         localDraftStatus = "Local draft ready (${result.latencyMs} ms). Review it before use.",
                         isLocalDraftInProgress = false,

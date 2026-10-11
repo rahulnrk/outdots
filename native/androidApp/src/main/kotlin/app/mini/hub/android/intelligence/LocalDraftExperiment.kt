@@ -38,6 +38,8 @@ data class LocalDraftRequest(
     val styleProfile: CompactStyleProfile? = null,
     /** Local understanding explanation, never treated as a commitment. */
     val understandingNote: String? = null,
+    /** Draft the user wants revised; null for a first draft. */
+    val previousDraft: String? = null,
 )
 
 sealed class LocalDraftResult {
@@ -449,7 +451,12 @@ class LocalDraftExperiment internal constructor(
             append("[${index + 1}] ")
             append(observation.senderHint)
             append(": ")
-            appendLine(observation.textFragments.joinToString(" "))
+            val body = observation.textFragments.joinToString(" ").replace(Regex("\u27e6(\\w+):[^\u27e7]*\u27e7"), "[$1]")
+            appendLine(body)
+        }
+        request.previousDraft?.takeIf { it.isNotBlank() }?.let {
+            appendLine("Previous draft to revise: $it")
+            appendLine("Rewrite it following the user's instruction below.")
         }
         appendLine("User reply intent: ${request.userIntent.trim()}")
         appendLine("Return only the editable reply text.")

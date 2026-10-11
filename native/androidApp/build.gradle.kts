@@ -94,6 +94,7 @@ dependencies {
         debugImplementation(files(whatsappJar))
     }
     implementation("com.google.zxing:core:3.5.3")
+    implementation("androidx.core:core-ktx:1.13.1")
     testImplementation(kotlin("test"))
     androidTestImplementation(kotlin("test"))
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

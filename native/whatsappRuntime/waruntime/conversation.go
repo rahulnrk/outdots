@@ -166,30 +166,52 @@ func messageBody(msg *waE2E.Message) string {
 		return ext.GetText()
 	}
 	if img := msg.GetImageMessage(); img != nil {
-		if img.GetCaption() != "" {
-			return img.GetCaption()
-		}
-		return "[image]"
+		return img.GetCaption()
 	}
 	if vid := msg.GetVideoMessage(); vid != nil {
-		if vid.GetCaption() != "" {
-			return vid.GetCaption()
-		}
-		return "[video]"
+		return vid.GetCaption()
 	}
 	if doc := msg.GetDocumentMessage(); doc != nil {
-		if doc.GetCaption() != "" {
-			return doc.GetCaption()
-		}
-		return "[document]"
-	}
-	if msg.GetAudioMessage() != nil {
-		return "[audio]"
-	}
-	if msg.GetStickerMessage() != nil {
-		return "[sticker]"
+		return firstNonEmpty(doc.GetCaption(), doc.GetFileName())
 	}
 	return ""
+}
+
+// mediaKind classifies a downloadable attachment. Empty means text only.
+func mediaKind(msg *waE2E.Message) string {
+	if msg == nil {
+		return ""
+	}
+	switch {
+	case msg.GetImageMessage() != nil:
+		return "image"
+	case msg.GetVideoMessage() != nil:
+		if msg.GetVideoMessage().GetGifPlayback() {
+			return "gif"
+		}
+		return "video"
+	case msg.GetStickerMessage() != nil:
+		return "sticker"
+	case msg.GetAudioMessage() != nil:
+		return "audio"
+	case msg.GetDocumentMessage() != nil:
+		return "document"
+	}
+	return ""
+}
+
+// encodeBody prefixes a media marker the Android client renders inline.
+func encodeBody(id string, msg *waE2E.Message) string {
+	body := messageBody(msg)
+	kind := mediaKind(msg)
+	if kind == "" {
+		return body
+	}
+	marker := "\u27e6" + kind + ":" + id + "\u27e7"
+	if body == "" {
+		return marker
+	}
+	return marker + " " + body
 }
 
 func firstNonEmpty(values ...string) string {
@@ -254,10 +276,11 @@ func (r *Runtime) ingestWebMessageLocked(chatFallback string, info *waWeb.WebMes
 	if key == nil {
 		return
 	}
-	body := messageBody(info.GetMessage())
+	body := encodeBody(key.GetID(), info.GetMessage())
 	if body == "" {
 		return
 	}
+	r.keepMediaLocked(key.GetID(), info.GetMessage())
 	chat := key.GetRemoteJID()
 	if chat == "" {
 		chat = chatFallback
@@ -289,10 +312,11 @@ func (r *Runtime) ingestWebMessageLocked(chatFallback string, info *waWeb.WebMes
 }
 
 func (r *Runtime) ingestLiveMessageLocked(v *events.Message) {
-	body := messageBody(v.Message)
+	body := encodeBody(v.Info.ID, v.Message)
 	if body == "" {
 		return
 	}
+	r.keepMediaLocked(v.Info.ID, v.Message)
 	if v.Info.PushName != "" {
 		r.setNameLocked(v.Info.Sender, v.Info.PushName)
 	}

@@ -9,7 +9,7 @@ import (
 )
 
 type sqliteDump struct {
-	Version int          `json:"v"`
+	Version int           `json:"v"`
 	Tables  []sqliteTable `json:"t"`
 }
 

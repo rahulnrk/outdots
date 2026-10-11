@@ -95,6 +95,9 @@ fun InboxScreen(
     onStyleLearningChanged: (Boolean) -> Unit = {},
 ) {
     val state by viewModel.state
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val conversationLabels = remember { app.mini.hub.android.ConversationLabels(context) }
+    var labels by remember { mutableStateOf(conversationLabels.all()) }
     var showSourceSettings by remember { mutableStateOf(false) }
     var showAccountSettings by remember { mutableStateOf(false) }
     var showLearningSettings by remember { mutableStateOf(false) }
@@ -106,7 +109,7 @@ fun InboxScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("MINI Hub — Private Local Inbox") },
+                title = { Text("MINI") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 ),
@@ -205,7 +208,32 @@ fun InboxScreen(
                 // Conversation Detail View
                 val record = state.attentionRecords[state.selectedConversation!!.conversationId.key] 
                     ?: app.mini.hub.attention.AttentionRules.default(state.selectedConversation!!.conversationId, app.mini.hub.domain.UtcInstant(System.currentTimeMillis()))
-                ConversationDetailView(
+                val selectedKey = state.selectedConversation!!.conversationId.key
+                ThreadView(
+                    summary = state.selectedConversation!!,
+                    timeline = state.selectedTimeline,
+                    label = labels[selectedKey],
+                    onLabel = { l ->
+                        conversationLabels.set(selectedKey, l)
+                        labels = conversationLabels.all()
+                        viewModel.applyAttentionAction(
+                            state.selectedConversation!!.conversationId,
+                            app.mini.hub.attention.AttentionAction.SetPriority(
+                                if (l == "Priority") app.mini.hub.attention.ConversationPriority.Important else app.mini.hub.attention.ConversationPriority.Normal,
+                            ),
+                        )
+                    },
+                    draftText = state.localDraftText,
+                    draftStatus = state.localDraftStatus,
+                    draftVersions = state.draftVersions,
+                    isDrafting = state.isLocalDraftInProgress,
+                    onBack = { viewModel.clearSelection() },
+                    onDraft = { instruction, revise -> viewModel.requestLocalDraft(instruction, revise) },
+                    onCancelDraft = { viewModel.cancelLocalDraft() },
+                    onDraftChanged = { text -> viewModel.updateLocalDraftText(text) },
+                    onApprove = { body -> viewModel.prepareDraft(body, "") },
+                )
+                if (false) ConversationDetailView(
                     summary = state.selectedConversation!!,
                     understanding = state.understanding[state.selectedConversation!!.conversationId.key],
                     styleProfile = state.activeStyleProfile,
@@ -279,15 +307,10 @@ fun InboxScreen(
                         }
                     }
                 } else {
-                    // Inbox List View
-                    LocalUnderstandingDashboard(
+                    // Chat-style list for every source
+                    ChatListView(
                         conversations = state.conversations,
-                        understanding = state.understanding,
-                    )
-                    ConversationListView(
-                        conversations = state.conversations,
-                        view = state.attentionView,
-                        understanding = state.understanding,
+                        labels = labels,
                         onSelect = { viewModel.selectConversation(it) },
                     )
                 }

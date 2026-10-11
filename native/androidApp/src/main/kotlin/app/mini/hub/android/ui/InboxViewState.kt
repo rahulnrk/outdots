@@ -30,6 +30,8 @@ data class InboxViewState(
     val isLoading: Boolean = false,
     val localDraftText: String = "",
     val originalGeneratedDraft: String? = null,
+    /** Recent AI versions for this conversation, newest last. */
+    val draftVersions: List<String> = emptyList(),
     val localDraftWarning: String? = null,
     val localDraftStatus: String? = null,
     val localDraftFeedback: DraftUsefulnessFeedback? = null,

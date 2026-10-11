@@ -39,6 +39,7 @@ type Runtime struct {
 	inbound    []inboundMessage
 	chats      map[string][]inboundMessage
 	names      map[string]string
+	media      map[string]*waE2E.Message
 	dirty      bool
 	watchDir   string
 }

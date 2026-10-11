@@ -121,6 +121,11 @@ class GomobileWhatsAppClient private constructor(private val native: Any) : What
     override fun unencryptedSessionFiles(): List<String> =
         string("unencryptedFiles").lines().map { it.trim() }.filter { it.isNotEmpty() }
 
+    fun mediaThumbnail(id: String): ByteArray? = runCatching { invoke("mediaThumbnail", id) as? ByteArray }.getOrNull()
+
+    fun downloadMedia(id: String, dir: String): String? =
+        runCatching { invoke("downloadMedia", id, dir) as? String }.getOrNull()
+
     private fun chatJid(payload: ExactActionPayload): String {
         val raw = payload.conversationId.trim().ifBlank { payload.recipients.firstOrNull().orEmpty() }
         val fromScoped = raw.substringAfterLast("|conversation|", missingDelimiterValue = "")

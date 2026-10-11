@@ -335,6 +335,8 @@ class AndroidConnectorRegistry(
     /** Pasted BotFather token; validated with getMe. Network I/O, call off the main thread. */
     fun connectTelegram(botToken: String): ConnectOutcome = telegram.connect(botToken)
 
+    fun whatsappMediaThumbnail(id: String) = whatsappHost.mediaThumbnail(id)
+    fun whatsappDownloadMedia(id: String) = whatsappHost.downloadMedia(id)
     fun startWhatsAppPairing() = whatsappHost.startPairing()
     fun startWhatsAppPhonePairing(phoneE164: String) = whatsappHost.startPhonePairing(phoneE164)
     fun pollWhatsAppPairing() = whatsappHost.pollPairing()
