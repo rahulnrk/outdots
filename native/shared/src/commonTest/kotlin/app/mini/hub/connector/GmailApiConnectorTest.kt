@@ -208,6 +208,87 @@ class GmailApiConnectorTest {
         assertTrue(first.notificationKey != otherAccount.notificationKey)
     }
 
+    /** Fake Gmail history: record ids are numeric; [pageSize] records per history page. */
+    private class FakeHistory(val records: List<Pair<Long, String>>, val pageSize: Int, val latest: Long) {
+        var historyCalls = 0
+        val transport = ProviderHttpTransport { url, _ ->
+            when {
+                url.contains("/history?") -> {
+                    historyCalls++
+                    val start = url.substringAfter("startHistoryId=").substringBefore("&").toLong()
+                    val offset = url.substringAfter("pageToken=", "0").substringBefore("&").toInt()
+                    val after = records.filter { it.first > start }
+                    val slice = after.drop(offset).take(pageSize)
+                    val body = slice.joinToString(",") { (id, change) ->
+                        val (kind, msg) = change.split(":")
+                        val key = if (kind == "add") "messagesAdded" else "messagesDeleted"
+                        "{\"id\":\"$id\",\"$key\":[{\"message\":{\"id\":\"$msg\",\"threadId\":\"t-$msg\"}}]}"
+                    }
+                    val next = if (offset + pageSize < after.size) ",\"nextPageToken\":\"${offset + pageSize}\"" else ""
+                    ProviderHttpResponse(200, "{\"history\":[$body],\"historyId\":\"$latest\"$next}")
+                }
+                url.contains("/messages/") -> {
+                    val id = url.substringAfter("/messages/").substringBefore("?")
+                    ProviderHttpResponse(200, "{\"id\":\"$id\",\"snippet\":\"s\"}")
+                }
+                else -> error("Unexpected URL")
+            }
+        }
+    }
+
+    private class Drained(val added: List<String>, val deleted: List<String>, val passes: Int)
+
+    private fun drain(fake: FakeHistory, start: String, maxMessages: Int, preKnown: Set<String> = emptySet()): Drained {
+        val connector = GmailApiConnector("https://gmail.test/users/me")
+        val account = ConnectedAccount(
+            AccountId(Provider.GMAIL, "local-a"), "owner@example.com", "Owner", AccountType.GoogleConsumer,
+            ConnectorRoute.OfficialProviderApi, ConnectionState.Authorized,
+        )
+        val known = preKnown.toMutableSet()
+        val added = mutableListOf<String>()
+        val deleted = mutableListOf<String>()
+        var cursor = start
+        var passes = 0
+        while (true) {
+            passes++
+            assertTrue(passes <= 20, "sync did not terminate; cursor stuck at $cursor")
+            val r = connector.syncIncremental(account, StoredAccessToken("t", null), cursor, fake.transport, maxMessages) { it in known }
+            r.messages.forEach { added += it.providerMessageId; known += it.providerMessageId }
+            r.deleted.forEach { deleted += it.providerMessageId; known -= it.providerMessageId }
+            val next = assertNotNull(r.nextHistoryId)
+            if (!r.moreAvailable) break
+            assertTrue(next.toLong() > cursor.toLong(), "cursor must advance on moreAvailable: $cursor -> $next")
+            cursor = next
+        }
+        return Drained(added, deleted, passes)
+    }
+
+    @Test
+    fun incrementalReturnsAll120MessagesExactlyOnceAcrossPasses() {
+        val records = (1..120).map { (1000L + it) to "add:m$it" }
+        val result = drain(FakeHistory(records, pageSize = 25, latest = 2000), "1000", maxMessages = 10)
+        assertEquals((1..120).map { "m$it" }, result.added)
+        assertTrue(result.passes in 12..13)
+    }
+
+    @Test
+    fun incrementalCursorAdvancesWhenPassIsCutAcrossManyPages() {
+        // Small pages exhaust MAX_HISTORY_PAGES before maxMessages; already-known messages must not stall it.
+        val records = (1..120).map { (1000L + it) to "add:m$it" }
+        val result = drain(FakeHistory(records, pageSize = 3, latest = 2000), "1000", maxMessages = 50, preKnown = setOf("m1", "m2", "m3"))
+        assertEquals((4..120).map { "m$it" }, result.added)
+    }
+
+    @Test
+    fun incrementalMidPageCutoffSkipsNothingAndHonoursDeletions() {
+        val records = (1..30).map { (1000L + it) to "add:m$it" } +
+            listOf(1031L to "del:m5", 1032L to "del:m28", 1033L to "add:m31")
+        val result = drain(FakeHistory(records, pageSize = 33, latest = 2000), "1000", maxMessages = 7)
+        assertEquals((1..31).map { "m$it" }.toSet(), result.added.toSet())
+        assertEquals(result.added.size, result.added.toSet().size)
+        assertEquals(listOf("m5", "m28"), result.deleted)
+    }
+
     @Test
     fun disconnectPreservesLocalProviderHistory() {
         val accounts = InMemoryConnectedAccountStore()

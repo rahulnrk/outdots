@@ -59,10 +59,12 @@ data class GmailSyncReport(
     val state: ConnectionState,
     val refreshed: Boolean,
     val skippedReason: String? = null,
+    /** History remained beyond this bounded pass; a prompt follow-up pass should run. */
+    val moreAvailable: Boolean = false,
 ) {
     val processedCount: Long get() = checkpoint.processedCount
     fun logLine(trigger: String): String =
-        "trigger=$trigger account=$accountLocalId state=$state fetched=$fetched inserted=$inserted refreshed=$refreshed" +
+        "trigger=$trigger account=$accountLocalId state=$state fetched=$fetched inserted=$inserted refreshed=$refreshed more=$moreAvailable" +
             (skippedReason?.let { " skipped=$it" } ?: "")
 }
 
@@ -176,7 +178,7 @@ class AndroidGmailConnector(
             ),
         )
         val nextCheckpoint = SyncCheckpoint(cursor = incResult.nextHistoryId, processedCount = cursor.processedCount, gapCount = nextGap)
-        return GmailSyncReport(current.id.localId, nextCheckpoint, incResult.listedCount, newObs.size, ConnectionState.Healthy, refreshed)
+        return GmailSyncReport(current.id.localId, nextCheckpoint, incResult.listedCount, newObs.size, ConnectionState.Healthy, refreshed, moreAvailable = incResult.moreAvailable)
     }
 
     fun fetchThread(threadId: String, account: ConnectedAccount): List<app.mini.hub.connector.ProviderMessage> {

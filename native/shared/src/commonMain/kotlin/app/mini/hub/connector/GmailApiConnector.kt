@@ -86,8 +86,11 @@ class GmailApiConnector(
         var pageToken: String? = null
         var latest = startHistoryId
         var pages = 0
+        // Id of the last history record whose changes are fully captured in added/deleted.
+        var lastRecordId: String? = null
+        var stoppedMidPage = false
         try {
-            do {
+            pageLoop@ do {
                 val url = buildString {
                     append("$apiBase/history?startHistoryId=").append(urlEncode(startHistoryId))
                     append("&historyTypes=messageAdded&historyTypes=messageDeleted&maxResults=").append(maxMessages)
@@ -95,7 +98,8 @@ class GmailApiConnector(
                 }
                 val page = api.get(url)
                 page.str("historyId")?.let { latest = it }
-                page["history"]?.objects.orEmpty().forEach { record ->
+                for (record in page["history"]?.objects.orEmpty()) {
+                    if (added.size >= maxMessages) { stoppedMidPage = true; break }
                     record["messagesAdded"]?.objects.orEmpty().mapNotNull { it["message"] }.forEach { m ->
                         val id = m.str("id") ?: return@forEach
                         if (m["labelIds"]?.array?.any { it.string == "DRAFT" } == true) return@forEach
@@ -104,7 +108,9 @@ class GmailApiConnector(
                     record["messagesDeleted"]?.objects.orEmpty().mapNotNull { it["message"]?.str("id") }.forEach { id ->
                         added.remove(id); deleted += id
                     }
+                    record.str("id")?.let { lastRecordId = it }
                 }
+                if (stoppedMidPage) break@pageLoop
                 pageToken = page.str("nextPageToken")
                 pages++
             } while (pageToken != null && pages < MAX_HISTORY_PAGES && added.size < maxMessages)
@@ -114,9 +120,11 @@ class GmailApiConnector(
             if (e.kind != ProviderErrorKind.NotFound && e.kind != ProviderErrorKind.CursorInvalid && e.reason != "invalidArgument") throw e
             return snapshot(account, api, transport, accessToken, maxMessages, isKnown, gap = true)
         }
-        // If more history remains than this bounded pass may fetch, do not advance past it.
-        val truncated = pageToken != null
-        val fetched = added.entries.take(maxMessages).filterNot { isKnown(it.key) }.mapNotNull { (id, thread) ->
+        // If more history remains than this bounded pass may fetch, advance only to the last fully
+        // processed history record, so the next pass resumes after it and nothing is skipped.
+        val truncated = stoppedMidPage || pageToken != null
+        val nextCursor = if (!truncated) latest else lastRecordId ?: startHistoryId
+        val fetched = added.entries.filterNot { isKnown(it.key) }.mapNotNull { (id, thread) ->
             try { metadata(api, id, thread) } catch (err: ConnectorHttpException) {
                 if (err.kind == ProviderErrorKind.NotFound) null else throw err  // deleted after being listed
             }
@@ -125,7 +133,7 @@ class GmailApiConnector(
         return GmailIncrementalResult(
             messages = fetched,
             deleted = tombstones,
-            nextHistoryId = if (truncated) startHistoryId else latest,
+            nextHistoryId = nextCursor,
             gap = false,
             moreAvailable = truncated,
         )
@@ -245,7 +253,7 @@ data class GmailIncrementalResult(
     val nextHistoryId: String?,
     /** True when the previous cursor expired and changes between the two points were not replayed. */
     val gap: Boolean,
-    /** History remained beyond this bounded pass; the cursor was not advanced so nothing is skipped. */
+    /** History remained beyond this bounded pass; the cursor only advanced to the last fully processed record. */
     val moreAvailable: Boolean,
     val listedCount: Int = messages.size + deleted.size,
 )

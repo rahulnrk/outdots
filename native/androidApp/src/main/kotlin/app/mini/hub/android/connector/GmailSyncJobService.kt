@@ -33,7 +33,12 @@ class GmailSyncJobService : JobService() {
                 if (!RuntimeStorage.runIfReady(MiniHubRuntime.storage, "sync_job", { Log.w(LOG_TAG, it) }) {
                     val power = getSystemService(Context.POWER_SERVICE) as PowerManager
                     Log.i(LOG_TAG, "job start trigger=$trigger screenInteractive=${power.isInteractive} idle=${power.isDeviceIdleMode}")
-                    runAll(applicationContext, trigger)
+                    val summary = runAll(applicationContext, trigger)
+                    val followUps = params.extras.getInt(EXTRA_FOLLOW_UP_DEPTH, 0)
+                    if (shouldRequestFollowUp(summary.moreAvailable, followUps)) {
+                        Log.i(LOG_TAG, "more history available; requesting follow-up depth=${followUps + 1}")
+                        requestSoon(applicationContext, TRIGGER_FOLLOW_UP, followUps + 1)
+                    }
                 }) return@execute
             } catch (e: Exception) {
                 Log.w(LOG_TAG, "job failed trigger=$trigger error=${e.javaClass.simpleName}")
@@ -51,6 +56,14 @@ class GmailSyncJobService : JobService() {
         const val PERIODIC_JOB_ID = 41_001
         const val ONESHOT_JOB_ID = 41_002
         const val EXTRA_TRIGGER = "trigger"
+        const val EXTRA_FOLLOW_UP_DEPTH = "follow_up_depth"
+        const val TRIGGER_FOLLOW_UP = "more_available"
+        /** Bounds a chain of prompt follow-ups; after this the periodic job continues the backlog. */
+        const val MAX_FOLLOW_UPS = 20
+
+        /** Pure decision: request a prompt pass when history remains, up to [MAX_FOLLOW_UPS] in a row. */
+        fun shouldRequestFollowUp(moreAvailable: Boolean, followUpsSoFar: Int): Boolean =
+            moreAvailable && followUpsSoFar < MAX_FOLLOW_UPS
 
         fun runSync(context: Context, trigger: String): List<GmailSyncReport> {
             MiniHubRuntime.init(context)
@@ -80,9 +93,12 @@ class GmailSyncJobService : JobService() {
         }
 
         /** Requests a prompt sync, for example when a Gmail notification is observed. */
-        fun requestSoon(context: Context, trigger: String) {
+        fun requestSoon(context: Context, trigger: String, followUpDepth: Int = 0) {
             val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
-            val extras = android.os.PersistableBundle().apply { putString(EXTRA_TRIGGER, trigger) }
+            val extras = android.os.PersistableBundle().apply {
+                putString(EXTRA_TRIGGER, trigger)
+                putInt(EXTRA_FOLLOW_UP_DEPTH, followUpDepth)
+            }
             val job = JobInfo.Builder(ONESHOT_JOB_ID, ComponentName(context, GmailSyncJobService::class.java))
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                 .setOverrideDeadline(10_000L)

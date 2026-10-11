@@ -250,6 +250,7 @@ class AndroidConnectorRegistry(
             inserted = gmailReports.sumOf { it.inserted } + otherReports.sumOf { it.inserted },
             updated = otherReports.sumOf { it.updated },
             needsAttention = needsAttention,
+            moreAvailable = gmailReports.any { it.moreAvailable },
         )
     }
 
@@ -269,7 +270,7 @@ class AndroidConnectorRegistry(
 
     fun listAccounts(): List<ConnectedAccount> = accounts.list()
 
-    data class SyncSummary(val accounts: Int, val inserted: Int, val updated: Int, val needsAttention: Int)
+    data class SyncSummary(val accounts: Int, val inserted: Int, val updated: Int, val needsAttention: Int, val moreAvailable: Boolean = false)
 
     private val observationFactory = app.mini.hub.connector.ConnectorObservationFactory(digest)
 
