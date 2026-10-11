@@ -248,6 +248,14 @@ fun ThreadView(
                 }
             }
         }
+        if (summary.coverage == app.mini.hub.observation.ConversationCoverage.NotificationOnly) {
+            Text(
+                summary.coverageExplanation,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
         if (showLabels) {
             AlertDialog(
                 onDismissRequest = { showLabels = false },
@@ -388,6 +396,13 @@ private fun MessageBubble(obs: ObservedNotification, isGroupish: Boolean) {
                     color = MaterialTheme.colorScheme.outline,
                     modifier = Modifier.align(Alignment.End),
                 )
+                if (obs.truncationState == app.mini.hub.observation.TruncationState.Truncated) {
+                    Text(
+                        "Message shortened by ${SourceAppNames.forPackage(obs.packageId)} notification",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
             }
         }
     }

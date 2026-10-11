@@ -58,4 +58,28 @@ class CommunicationSourcesTest {
         assertTrue(policy.isEligible(payload("app.mini.hub", tag = "synthetic_test")))
         assertEquals(null, policy.sourceForPackage("app.mini.hub"))
     }
+
+    @Test
+    fun linkedinKeepsMessagesAndExcludesNonCommunicationAlerts() {
+        val policy = CommunicationSourcePolicy { setOf(CommunicationSource.LinkedIn) }
+        assertEquals(
+            IngestOfferResult.Accepted,
+            policy.let { if (it.isEligible(payload("com.linkedin.android").copy(title = "New message from Alex", text = "Can we talk?"))) IngestOfferResult.Accepted else IngestOfferResult.Filtered },
+        )
+        assertEquals(
+            IngestOfferResult.Filtered,
+            policy.let { if (it.isEligible(payload("com.linkedin.android").copy(title = "New connection request", text = "Connect with Alex"))) IngestOfferResult.Accepted else IngestOfferResult.Filtered },
+        )
+    }
+
+    @Test
+    fun linkedinMessageNotificationUsesDirectMessageConversationCategory() {
+        val normalizer = NotificationNormalizer(ids, digest)
+        val observation = normalizer.normalize(
+            payload("com.linkedin.android").copy(title = "New message from Alex", text = "Can we talk?"),
+            clock.now(),
+        )
+        assertEquals(NotificationCategory.DirectMessage, normalizer.deriveNotificationCategory(payload("com.linkedin.android").copy(title = "New message from Alex", text = "Can we talk?")))
+        assertTrue(observation.conversationId.value.endsWith("Alex"))
+    }
 }

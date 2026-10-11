@@ -170,6 +170,8 @@ class NotificationNormalizer(
     fun deriveNotificationCategory(payload: NotificationRawPayload): NotificationCategory = when {
         payload.isOngoing || payload.category == "service" || payload.packageId.contains("whoop", ignoreCase = true) ->
             NotificationCategory.OngoingService
+        payload.packageId == "com.linkedin.android" && isLinkedInCommunication(payload) ->
+            if (payload.isGroupSummary) NotificationCategory.GroupMessage else NotificationCategory.DirectMessage
         payload.category == "msg" || payload.category == "message" ||
             payload.packageId.contains("whatsapp", ignoreCase = true) ||
             payload.packageId.contains("facebook.orca", ignoreCase = true) ->
@@ -207,7 +209,12 @@ class NotificationNormalizer(
     private fun deriveConversationKey(payload: NotificationRawPayload, appName: String, category: NotificationCategory): String {
         // Direct messages and group messages group by thread / sender
         if (category == NotificationCategory.DirectMessage || category == NotificationCategory.GroupMessage) {
-            val titleClean = payload.title?.trim()?.replace(Regex("[^a-zA-Z0-9_.-]"), "_")
+            val titleSource = if (providerForPayload(payload) == Provider.LINKEDIN) {
+                payload.title?.trim()
+                    ?.replace(Regex("^(new\\s+)?(message|inmail|conversation)\\s+(from|with)\\s+", RegexOption.IGNORE_CASE), "")
+                    ?.trim()
+            } else payload.title?.trim()
+            val titleClean = titleSource?.replace(Regex("[^a-zA-Z0-9_.-]"), "_")
             if (!titleClean.isNullOrBlank() && titleClean != payload.packageId) return titleClean
             val tagClean = payload.tag?.trim()?.replace(Regex("[^a-zA-Z0-9_.-]"), "_")
             if (!tagClean.isNullOrBlank()) return tagClean
@@ -219,6 +226,8 @@ class NotificationNormalizer(
         if (!subClean.isNullOrBlank()) return "${appClean}_${subClean}"
         return "${appClean}_alerts"
     }
+
+    private fun providerForPayload(payload: NotificationRawPayload): Provider = mapPackageToProvider(payload.packageId)
 
     private fun computeContentDigest(payload: NotificationRawPayload, fragments: List<String>): String {
         val raw = buildString {
