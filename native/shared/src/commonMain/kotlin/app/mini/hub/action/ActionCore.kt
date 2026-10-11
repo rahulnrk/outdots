@@ -41,15 +41,37 @@ data class ExactActionPayload(
     }
 
     fun canonical(): String = buildString {
-        append(accountId).append('|').append(conversationId).append('|').append(route.name).append('|')
-        recipients.sorted().forEach { append("r:").append(it).append('|') }
-        append("subject:").append(subject ?: "").append('|').append("body:").append(body).append('|')
-        attachments.sortedBy { it.id }.forEach { append("a:").append(it.id).append(':').append(it.name).append(':').append(it.sha256).append(':').append(it.sizeBytes).append('|') }
-        sourceVersions.sortedBy { it.id }.forEach { append("s:").append(it.id).append(':').append(it.revision).append('|') }
-        append("grant:").append(grantVersion).append('|').append("policy:").append(policyVersion)
-        // Appended only when present so digests of earlier payloads stay unchanged.
-        replyTarget?.let { append('|').append("reply:").append(it) }
+        // v2 format: length-prefixed or field-escaped components prevent delimiter injection.
+        append("v2|")
+        append(encodeField(accountId)).append('|')
+        append(encodeField(conversationId)).append('|')
+        append(route.name).append('|')
+        recipients.sorted().forEach { append("r:").append(encodeField(it)).append(';') }
+        append('|')
+        append("subj:").append(encodeField(subject ?: "")).append('|')
+        append("body:").append(encodeField(body)).append('|')
+        attachments.sortedBy { it.id }.forEach {
+            append("a:").append(encodeField(it.id)).append(':')
+                .append(encodeField(it.name)).append(':')
+                .append(it.sha256).append(':')
+                .append(it.sizeBytes).append(';')
+        }
+        append('|')
+        sourceVersions.sortedBy { it.id }.forEach {
+            append("s:").append(encodeField(it.id)).append(':')
+                .append(it.revision).append(';')
+        }
+        append('|')
+        append("grant:").append(encodeField(grantVersion)).append('|')
+        append("policy:").append(encodeField(policyVersion))
+        replyTarget?.let { append('|').append("reply:").append(encodeField(it)) }
     }
+
+    private fun encodeField(value: String): String =
+        value.replace("\\", "\\\\")
+            .replace("|", "\\|")
+            .replace(":", "\\:")
+            .replace(";", "\\;")
 }
 
 /** Implemented with platform crypto in production. Weak fallback digests are forbidden. */

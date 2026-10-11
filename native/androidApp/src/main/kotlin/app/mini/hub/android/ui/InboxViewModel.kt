@@ -549,6 +549,8 @@ class InboxViewModel(
             if (replyTarget != null && !s.startsWith("Re:", ignoreCase = true)) "Re: $s" else s
         } else null
 
+        val sourceVersions = live.map { app.mini.hub.action.SourceVersion(it.id.key, it.revision) }
+
         val payload = ExactActionPayload(
             accountId = selected.accountId.key,
             conversationId = selected.conversationId.key,
@@ -557,7 +559,7 @@ class InboxViewModel(
             subject = subject,
             body = body,
             attachments = emptyList(),
-            sourceVersions = emptyList(),
+            sourceVersions = sourceVersions,
             grantVersion = if (route == ActionRoute.Api) "grant-v1-api-send" else "grant-v1-user-initiated",
             policyVersion = if (route == ActionRoute.Api) "policy-v1-api-review" else "policy-v1-notification-handoff",
             replyTarget = if (route == ActionRoute.Api) replyTarget else null,
