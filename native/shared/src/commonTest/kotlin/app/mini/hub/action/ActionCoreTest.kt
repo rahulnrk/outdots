@@ -80,4 +80,32 @@ class ActionCoreTest {
     @Test fun apiApprovalRequiresRecipient() {
         assertFails { controller.approve(ActionState(), payload().copy(recipients = emptyList())) }
     }
+
+    @Test fun revokedGrantsInvalidateBeforeTheApprovalIsConsumed() {
+        val approved = payload()
+        val (state, command) = controller.approve(ActionState(), approved)
+        val live = LiveDispatchChecks(
+            grantVersion = "grants:none",
+            policyVersion = approved.policyVersion,
+            sourceVersions = approved.sourceVersions,
+        )
+        val result = controller.dispatch(state, command.id, approved, ProviderGateway { _, _ -> error("must not send") }, null, live)
+        assertEquals(OutboxState.ExpiredOrInvalidated, result.outbox.single().state)
+        assertEquals("policy_or_grants_changed_since_approval", result.outbox.single().failureReason)
+        assertTrue(!result.approvals.single().consumed)
+    }
+
+    @Test fun editedSourceRevisionInvalidatesBeforeTheApprovalIsConsumed() {
+        val approved = payload()
+        val (state, command) = controller.approve(ActionState(), approved)
+        val live = LiveDispatchChecks(
+            grantVersion = approved.grantVersion,
+            policyVersion = approved.policyVersion,
+            sourceVersions = listOf(SourceVersion("message-1", 2)),
+        )
+        val result = controller.dispatch(state, command.id, approved, ProviderGateway { _, _ -> error("must not send") }, null, live)
+        assertEquals(OutboxState.ExpiredOrInvalidated, result.outbox.single().state)
+        assertEquals("source_changed_since_approval", result.outbox.single().failureReason)
+        assertTrue(!result.approvals.single().consumed)
+    }
 }

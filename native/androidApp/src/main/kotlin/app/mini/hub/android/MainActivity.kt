@@ -74,6 +74,7 @@ class MainActivity : ComponentActivity() {
             accountStore = accountStore,
             gateway = registry.gateway,
             apiReplyAllowed = registry::canReplyViaApi,
+            capabilitiesFor = registry::capabilities,
             onLearnFromApprovedText = { summary, body, recipient, authorship ->
                 val category = StyleContext.forMessage(summary.accountId.provider, summary.title, body)
                 val recipientId = "${summary.accountId.key}|${recipient.ifBlank { summary.senderHint }}"

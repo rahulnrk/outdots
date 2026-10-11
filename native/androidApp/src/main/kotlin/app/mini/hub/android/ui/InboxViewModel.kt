@@ -13,7 +13,11 @@ import app.mini.hub.action.ActionController
 import app.mini.hub.action.ActionRoute
 import app.mini.hub.action.ExactActionPayload
 import app.mini.hub.action.HandoffLauncher
+import app.mini.hub.action.LiveDispatchChecks
 import app.mini.hub.action.OutboxState
+import app.mini.hub.action.SourceVersion
+import app.mini.hub.connector.AuthorizationSnapshot
+import app.mini.hub.connector.CapabilitySnapshot
 import app.mini.hub.android.intelligence.LocalDraftExperiment
 import app.mini.hub.android.intelligence.LocalDraftRequest
 import app.mini.hub.android.intelligence.LocalDraftResult
@@ -57,6 +61,8 @@ class InboxViewModel(
     private val gateway: app.mini.hub.action.ProviderGateway? = null,
     /** True only when the account may reply via API right now (scopes granted, gates cleared). */
     private val apiReplyAllowed: (app.mini.hub.connector.ConnectedAccount) -> Boolean = { false },
+    /** Live capability snapshot used to bind and re-check grant/policy versions. */
+    private val capabilitiesFor: (app.mini.hub.connector.ConnectedAccount) -> CapabilitySnapshot? = { null },
     /**
      * Called after the user reviews and approves text they authored or edited inside MINI.
      * Unedited AI drafts are not passed here.
@@ -549,7 +555,10 @@ class InboxViewModel(
             if (replyTarget != null && !s.startsWith("Re:", ignoreCase = true)) "Re: $s" else s
         } else null
 
-        val sourceVersions = live.map { app.mini.hub.action.SourceVersion(it.id.key, it.revision) }
+        val sourceVersions = live.map { SourceVersion(it.id.key, it.revision) }
+        val enabled = connectedAccount?.let { capabilitiesFor(it)?.enabled }.orEmpty()
+        val grantVersion = AuthorizationSnapshot.grantVersion(connectedAccount?.grantedScopes.orEmpty())
+        val policyVersion = AuthorizationSnapshot.policyVersion(enabled, route)
 
         val payload = ExactActionPayload(
             accountId = selected.accountId.key,
@@ -560,8 +569,8 @@ class InboxViewModel(
             body = body,
             attachments = emptyList(),
             sourceVersions = sourceVersions,
-            grantVersion = if (route == ActionRoute.Api) "grant-v1-api-send" else "grant-v1-user-initiated",
-            policyVersion = if (route == ActionRoute.Api) "policy-v1-api-review" else "policy-v1-notification-handoff",
+            grantVersion = grantVersion,
+            policyVersion = policyVersion,
             replyTarget = if (route == ActionRoute.Api) replyTarget else null,
         )
 
@@ -621,7 +630,9 @@ class InboxViewModel(
 
         if (payload.route == ActionRoute.NativeHandoff) {
             // Handoff opens an activity: it must stay on the main thread and makes no network call.
-            val finalState = actionStore.transaction { actionController.dispatch(it, cmdId, payload, gateway, launcher) }
+            val finalState = actionStore.transaction {
+                actionController.dispatch(it, cmdId, payload, gateway, launcher, liveDispatchChecks(payload))
+            }
             applyDispatchResult(payload, context, finalState.outbox.find { it.id == cmdId })
             return
         }
@@ -633,7 +644,8 @@ class InboxViewModel(
         _state.value = _state.value.copy(isSending = true, outboxStatusMessage = "Sending through ${context?.providerName ?: "the provider"}…")
         sendRunner(Runnable {
             val finalCommand = runCatching {
-                val begun = actionStore.transaction { actionController.beginDispatch(it, cmdId, payload) }
+                val liveChecks = liveDispatchChecks(payload)
+                val begun = actionStore.transaction { actionController.beginDispatch(it, cmdId, payload, liveChecks) }
                 val command = begun.outbox.first { it.id == cmdId }
                 if (command.state != OutboxState.Dispatching) {
                     command
@@ -683,6 +695,30 @@ class InboxViewModel(
     /** Test hook: puts an exact payload under review without going through route selection. */
     internal fun setReviewPayloadForTest(payload: ExactActionPayload, context: ReviewContext? = null) {
         _state.value = _state.value.copy(activeReviewPayload = payload, reviewContext = context)
+    }
+
+    private fun liveDispatchChecks(payload: ExactActionPayload): LiveDispatchChecks {
+        val accountId = runCatching { app.mini.hub.domain.AccountId.parse(payload.accountId) }.getOrNull()
+        val account = accountId?.let { accountStore?.get(it) }
+        val grant: String
+        val policy: String
+        if (account != null) {
+            val enabled = capabilitiesFor(account)?.enabled.orEmpty()
+            grant = AuthorizationSnapshot.grantVersion(account.grantedScopes)
+            policy = AuthorizationSnapshot.policyVersion(enabled, payload.route)
+        } else {
+            grant = payload.grantVersion
+            policy = payload.policyVersion
+        }
+        return LiveDispatchChecks(grant, policy, liveSourceVersions(payload))
+    }
+
+    private fun liveSourceVersions(payload: ExactActionPayload): List<SourceVersion> {
+        val conversationId = runCatching { app.mini.hub.domain.ScopedId.parse(payload.conversationId) }.getOrNull()
+            ?: return payload.sourceVersions
+        return observationStore.getObservationsForConversation(conversationId)
+            .filter { !it.isRemoved }
+            .map { SourceVersion(it.id.key, it.revision) }
     }
 
     private fun selectedConversationForLearning(): ConversationObservationSummary =

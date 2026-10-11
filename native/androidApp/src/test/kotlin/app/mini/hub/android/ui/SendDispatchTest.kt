@@ -9,6 +9,7 @@ import app.mini.hub.action.ExactActionPayload
 import app.mini.hub.action.GatewayResult
 import app.mini.hub.action.OutboxState
 import app.mini.hub.action.ProviderGateway
+import app.mini.hub.action.SourceVersion
 import app.mini.hub.android.StartupRecovery
 import app.mini.hub.android.connector.RefreshingGateway
 import app.mini.hub.attention.InMemoryAttentionStore
@@ -62,7 +63,8 @@ class SendDispatchTest {
     private fun apiPayload() = ExactActionPayload(
         accountId = account.key, conversationId = convId.key, route = ActionRoute.Api,
         recipients = listOf("bob@example.com"), subject = "Re: x", body = "Reviewed body",
-        attachments = emptyList(), sourceVersions = emptyList(),
+        attachments = emptyList(),
+        sourceVersions = listOf(SourceVersion(ScopedId(account, ScopedId.Kind.OBSERVATION, "o1").key, 1L)),
         grantVersion = "grant-v1-api-send", policyVersion = "policy-v1-api-review", replyTarget = "m1",
     )
 

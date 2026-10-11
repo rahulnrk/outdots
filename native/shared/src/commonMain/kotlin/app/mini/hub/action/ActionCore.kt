@@ -115,6 +115,13 @@ sealed class GatewayResult {
 fun interface ProviderGateway { fun execute(command: OutboxCommand, payload: ExactActionPayload): GatewayResult }
 fun interface HandoffLauncher { fun open(command: OutboxCommand, payload: ExactActionPayload): Boolean }
 
+/** Current authorization and evidence, re-read immediately before dispatch. */
+data class LiveDispatchChecks(
+    val grantVersion: String,
+    val policyVersion: String,
+    val sourceVersions: List<SourceVersion>,
+)
+
 class ActionController(
     private val clock: Clock,
     private val digest: DigestProvider,
@@ -133,10 +140,10 @@ class ActionController(
         return state.copy(approvals = state.approvals + approval, outbox = state.outbox + command) to command
     }
 
-    fun dispatch(state: ActionState, commandId: String, payload: ExactActionPayload, gateway: ProviderGateway?, handoff: HandoffLauncher?): ActionState {
+    fun dispatch(state: ActionState, commandId: String, payload: ExactActionPayload, gateway: ProviderGateway?, handoff: HandoffLauncher?, live: LiveDispatchChecks? = null): ActionState {
         val command = state.outbox.find { it.id == commandId } ?: error("command not found")
         if (command.state != OutboxState.Ready) return state
-        val consumed = beginDispatch(state, commandId, payload)
+        val consumed = beginDispatch(state, commandId, payload, live)
         val begun = consumed.outbox.first { it.id == commandId }
         if (begun.state != OutboxState.Dispatching) return consumed
         val now = begun.lastAttemptAt ?: clock.now()
@@ -154,7 +161,7 @@ class ActionController(
      * this state durably before any provider I/O so a crash can only ever end in OutcomeUnknown.
      * A command that is not Ready is returned unchanged.
      */
-    fun beginDispatch(state: ActionState, commandId: String, payload: ExactActionPayload): ActionState {
+    fun beginDispatch(state: ActionState, commandId: String, payload: ExactActionPayload, live: LiveDispatchChecks? = null): ActionState {
         val command = state.outbox.find { it.id == commandId } ?: error("command not found")
         if (command.state != OutboxState.Ready) return state
         val now = clock.now()
@@ -163,6 +170,14 @@ class ActionController(
         if (now < approval.approvedAt) return fail(state, commandId, OutboxState.ExpiredOrInvalidated, "clock_skew_detected", now)
         if (now > approval.expiresAt || approval.consumed) return fail(state, commandId, OutboxState.ExpiredOrInvalidated, "approval_expired_or_consumed", now)
         if (digest.sha256(payload.canonical()) != command.payloadDigest) return fail(state, commandId, OutboxState.ExpiredOrInvalidated, "payload_changed_since_approval", now)
+        if (live != null) {
+            if (live.grantVersion != payload.grantVersion || live.policyVersion != payload.policyVersion) {
+                return fail(state, commandId, OutboxState.ExpiredOrInvalidated, "policy_or_grants_changed_since_approval", now)
+            }
+            if (!sameSources(live.sourceVersions, payload.sourceVersions)) {
+                return fail(state, commandId, OutboxState.ExpiredOrInvalidated, "source_changed_since_approval", now)
+            }
+        }
         return state.copy(
             approvals = state.approvals.map { if (it.id == approval.id) it.copy(consumed = true) else it },
             outbox = state.outbox.map { if (it.id == commandId) it.copy(state = OutboxState.Dispatching, lastAttemptAt = now) else it },
@@ -190,4 +205,6 @@ class ActionController(
 
     private fun update(state: ActionState, id: String, next: OutboxState, now: UtcInstant, receipt: String? = null): ActionState = state.copy(outbox = state.outbox.map { if (it.id == id) it.copy(state = next, lastAttemptAt = now, receipt = receipt) else it })
     private fun fail(state: ActionState, id: String, next: OutboxState, reason: String, now: UtcInstant): ActionState = state.copy(outbox = state.outbox.map { if (it.id == id) it.copy(state = next, lastAttemptAt = now, failureReason = reason) else it })
+    private fun sameSources(a: List<SourceVersion>, b: List<SourceVersion>): Boolean =
+        a.sortedWith(compareBy({ it.id }, { it.revision })) == b.sortedWith(compareBy({ it.id }, { it.revision }))
 }
