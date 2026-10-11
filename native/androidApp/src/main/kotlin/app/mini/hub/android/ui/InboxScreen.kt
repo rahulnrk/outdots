@@ -394,6 +394,7 @@ fun InboxScreen(
             routes = routes,
             capabilities = capabilities,
             connectionStatus = connectionStatus,
+            onRequestPermission = onRequestPermission,
             onConnect = onConnect,
             onConnectTelegram = onConnectTelegram,
             onConnectMatrix = onConnectMatrix,
@@ -520,6 +521,7 @@ private fun ConnectedAccountSettingsDialog(
     routes: List<app.mini.hub.android.connector.ConnectRouteInfo>,
     capabilities: (ConnectedAccount) -> app.mini.hub.connector.CapabilitySnapshot?,
     connectionStatus: String?,
+    onRequestPermission: () -> Unit,
     onConnect: (app.mini.hub.domain.Provider) -> Unit,
     onConnectTelegram: (String) -> Unit,
     onConnectMatrix: (app.mini.hub.domain.Provider, String, String) -> Unit,
@@ -639,6 +641,7 @@ private fun ConnectedAccountSettingsDialog(
                     OutlinedButton(
                         onClick = { 
                             if (route.usesMatrixEntry) matrixEntryProvider = route.provider 
+                            else if (route.usesNotificationFallback) onRequestPermission()
                             else if (route.usesInstagramToken) showInstagramEntry = true
                             else if (route.usesTokenEntry) showTelegramEntry = true
                             else if (route.usesPhoneLocalPairing) showWhatsAppPairing = true

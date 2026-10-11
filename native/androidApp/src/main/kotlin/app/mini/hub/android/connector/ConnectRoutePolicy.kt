@@ -33,6 +33,7 @@ object ConnectRoutePolicy {
         all.filter { route ->
             when {
                 route.usesMatrixEntry -> false
+                route.usesNotificationFallback -> isDebugBuild
                 route.usesPhoneLocalPairing -> isDebugBuild && route.provider in DEBUG_PHONE_LOCAL_PROVIDERS
                 route.provider in MATRIX_BRIDGE_PROVIDERS -> false
                 route.provider in RELEASE_PROVIDERS -> true
@@ -40,7 +41,7 @@ object ConnectRoutePolicy {
                 else -> false
             }
         }.map { route ->
-            val needsLabel = route.provider in DEBUG_ONLY_PROVIDERS || route.usesPhoneLocalPairing
+            val needsLabel = route.provider in DEBUG_ONLY_PROVIDERS || route.usesPhoneLocalPairing || route.usesNotificationFallback
             if (needsLabel) route.copy(title = route.title + NOT_LIVE_QUALIFIED) else route
         }
 }

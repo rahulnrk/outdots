@@ -50,6 +50,8 @@ data class ConnectRouteInfo(
     val usesPhoneLocalPairing: Boolean = false,
     /** Instagram official API with a pasted long-lived token. */
     val usesInstagramToken: Boolean = false,
+    /** Notification observer plus native-app handoff. This is not an authenticated account. */
+    val usesNotificationFallback: Boolean = false,
 )
 
 /**
@@ -234,6 +236,14 @@ class AndroidConnectorRegistry(
         ConnectRouteInfo(
             Provider.LINKEDIN, "LinkedIn", "Advanced Matrix bridge; hosting not qualified", true,
             "Advanced mode only: provide a user-controlled Matrix homeserver URL and access token. This does not prove LinkedIn inbox authorization.", usesMatrixEntry = true
+        ),
+        ConnectRouteInfo(
+            Provider.LINKEDIN,
+            "LinkedIn notifications (personal)",
+            "Notification-only observer; no LinkedIn login",
+            configured = true,
+            status = "Enable Android Notification Access and select LinkedIn under Sources. Replies open LinkedIn with your reviewed text.",
+            usesNotificationFallback = true,
         ),
     )
 

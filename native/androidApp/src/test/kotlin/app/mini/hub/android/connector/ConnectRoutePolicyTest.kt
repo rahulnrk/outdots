@@ -8,10 +8,11 @@ import kotlin.test.assertTrue
 
 /** T6: only qualified routes are offered; the Matrix bridge is unreachable from any UI. */
 class ConnectRoutePolicyTest {
-    private fun route(p: Provider, matrix: Boolean = false, token: Boolean = false, phoneLocal: Boolean = false) =
+    private fun route(p: Provider, matrix: Boolean = false, token: Boolean = false, phoneLocal: Boolean = false, notification: Boolean = false) =
         ConnectRouteInfo(
             p, p.name, "kinds", true, "status",
             usesTokenEntry = token, usesMatrixEntry = matrix, usesPhoneLocalPairing = phoneLocal,
+            usesNotificationFallback = notification,
         )
 
     private val all = listOf(
@@ -20,6 +21,7 @@ class ConnectRoutePolicyTest {
         route(Provider.WHATSAPP, phoneLocal = true),
         route(Provider.WHATSAPP, matrix = true), route(Provider.WHATSAPP_BUSINESS, matrix = true),
         route(Provider.INSTAGRAM, matrix = true), route(Provider.LINKEDIN, matrix = true),
+        route(Provider.LINKEDIN, notification = true),
         route(Provider.FACEBOOK),
     )
 
@@ -33,7 +35,7 @@ class ConnectRoutePolicyTest {
     fun debugAddsChatRoutesLabelledNotLiveQualified() {
         val offered = ConnectRoutePolicy.visible(all, isDebugBuild = true)
         assertEquals(
-            listOf(Provider.GMAIL, Provider.OUTLOOK, Provider.TEAMS, Provider.SLACK, Provider.GOOGLE_CHAT, Provider.TWITTER, Provider.TELEGRAM, Provider.WHATSAPP),
+            listOf(Provider.GMAIL, Provider.OUTLOOK, Provider.TEAMS, Provider.SLACK, Provider.GOOGLE_CHAT, Provider.TWITTER, Provider.TELEGRAM, Provider.WHATSAPP, Provider.LINKEDIN),
             offered.map { it.provider },
         )
         offered.filter { it.provider !in setOf(Provider.GMAIL, Provider.OUTLOOK) }.forEach {
