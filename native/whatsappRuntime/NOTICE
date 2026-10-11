@@ -1,0 +1,10 @@
+This directory packages a phone-local WhatsApp companion runtime.
+
+It depends on whatsmeow (https://github.com/tulir/whatsmeow), which is
+Mozilla Public License 2.0. Source of whatsmeow and modifications to it
+must remain under MPL-2.0. MINI application code outside this directory
+is separately licensed.
+
+Pinned revision: c386243a72bacad080ba2938b37e1e4e0f1ca3b2
+Module version: v0.0.0-20261007111105-c386243a72ba
+License text: https://github.com/tulir/whatsmeow/blob/main/LICENSE

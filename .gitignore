@@ -9,3 +9,9 @@ coverage/
 .vite/
 .local-vault/
 scripts/android-endurance/output/
+tmp/go/
+tmp/go126root/
+tmp/go126.zip
+tmp/gopath/
+tmp/go.zip
+native/whatsappRuntime/build/
