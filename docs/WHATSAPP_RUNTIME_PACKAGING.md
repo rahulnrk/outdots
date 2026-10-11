@@ -45,8 +45,10 @@ The Go runtime uses **in-memory** sqlite (`mode=memory`). It does not write a pl
 - Matrix homeserver connect remains refused.
 - `UnprovisionedWhatsAppClient` is used only when `libgojni.so` / gomobile classes are missing.
 
+## Verified
+
+- Owner verified on Pixel 10 Pro (2026-10-11): pairing-code link, live inbound with notifications paused, reviewed outbound send, history backfill after relink, and reconnect after process death without relinking.
+
 ## Not done
 
-- Owner verified on Pixel 10 Pro (2026-10-11): pairing-code link, live inbound messages in MINI with notifications paused, and reviewed outbound send delivered. History backfill after relink and process-death reconnect not yet verified.
-- No process-death reconnect evidence from a device.
 - Messenger, Instagram, LinkedIn unchanged.
