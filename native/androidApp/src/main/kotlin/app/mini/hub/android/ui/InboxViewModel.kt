@@ -159,6 +159,7 @@ class InboxViewModel(
         val policy = CommunicationSourcePolicy(selectedSources)
         val summaries = observationStore.getConversationSummaries()
             .filter { policy.isVisibleInInbox(it.packageId) }
+            .filterNot { isHiddenWhatsAppChat(it.conversationId.value) }
         val loadResult = attentionStore.loadAll()
 
         var failure: String? = null

@@ -3,6 +3,7 @@ package waruntime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -47,7 +48,7 @@ func (r *Runtime) ConversationJSON(chat string) (string, error) {
 
 func (r *Runtime) rememberLocked(msg inboundMessage) {
 	r.ensureStores()
-	if msg.ID == "" || msg.Chat == "" || msg.Body == "" {
+	if msg.ID == "" || msg.Chat == "" || msg.Body == "" || isHiddenChat(msg.Chat) {
 		return
 	}
 	msg.Chat = canonicalChat(msg.Chat)
@@ -123,6 +124,13 @@ func (r *Runtime) labelLocked(raw string) string {
 	return fallbackLabel(jid)
 }
 
+// isHiddenChat drops Status updates, Channels (newsletters) and broadcast lists.
+func isHiddenChat(chat string) bool {
+	c := strings.ToLower(chat)
+	return strings.HasPrefix(c, "status@") || strings.HasSuffix(c, "@newsletter") ||
+		strings.HasSuffix(c, "@broadcast") || strings.Contains(c, "status@broadcast")
+}
+
 func fallbackLabel(jid types.JID) string {
 	switch jid.Server {
 	case types.DefaultUserServer:
@@ -155,7 +163,115 @@ func canonicalChat(raw string) string {
 	return jid.ToNonAD().String()
 }
 
+// unwrap returns the real content inside ephemeral/view-once/edited wrappers and turns
+// business template/button/list/interactive messages into plain text + media.
+func unwrap(msg *waE2E.Message) *waE2E.Message {
+	for i := 0; i < 4 && msg != nil; i++ {
+		var inner *waE2E.FutureProofMessage
+		switch {
+		case msg.GetEphemeralMessage() != nil:
+			inner = msg.GetEphemeralMessage()
+		case msg.GetViewOnceMessage() != nil:
+			inner = msg.GetViewOnceMessage()
+		case msg.GetDocumentWithCaptionMessage() != nil:
+			inner = msg.GetDocumentWithCaptionMessage()
+		case msg.GetEditedMessage() != nil:
+			inner = msg.GetEditedMessage()
+		}
+		if inner == nil || inner.GetMessage() == nil {
+			break
+		}
+		msg = inner.GetMessage()
+	}
+	return msg
+}
+
+func joinNonEmpty(parts ...string) string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if s := strings.TrimSpace(p); s != "" {
+			out = append(out, s)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// businessContent extracts text and an embedded media message from business formats.
+func businessContent(msg *waE2E.Message) (string, *waE2E.Message) {
+	if t := msg.GetTemplateMessage(); t != nil {
+		h := t.GetHydratedTemplate()
+		if h == nil {
+			h = t.GetHydratedFourRowTemplate()
+		}
+		if h != nil {
+			var media *waE2E.Message
+			switch {
+			case h.GetImageMessage() != nil:
+				media = &waE2E.Message{ImageMessage: h.GetImageMessage()}
+			case h.GetVideoMessage() != nil:
+				media = &waE2E.Message{VideoMessage: h.GetVideoMessage()}
+			case h.GetDocumentMessage() != nil:
+				media = &waE2E.Message{DocumentMessage: h.GetDocumentMessage()}
+			}
+			return joinNonEmpty(h.GetHydratedTitleText(), h.GetHydratedContentText(), h.GetHydratedFooterText()), media
+		}
+		if im := t.GetInteractiveMessageTemplate(); im != nil {
+			return joinNonEmpty(im.GetBody().GetText(), im.GetFooter().GetText()), nil
+		}
+	}
+	if b := msg.GetButtonsMessage(); b != nil {
+		var media *waE2E.Message
+		switch {
+		case b.GetImageMessage() != nil:
+			media = &waE2E.Message{ImageMessage: b.GetImageMessage()}
+		case b.GetVideoMessage() != nil:
+			media = &waE2E.Message{VideoMessage: b.GetVideoMessage()}
+		case b.GetDocumentMessage() != nil:
+			media = &waE2E.Message{DocumentMessage: b.GetDocumentMessage()}
+		}
+		return joinNonEmpty(b.GetText(), b.GetContentText(), b.GetFooterText()), media
+	}
+	if im := msg.GetInteractiveMessage(); im != nil {
+		var media *waE2E.Message
+		if h := im.GetHeader(); h != nil {
+			switch {
+			case h.GetImageMessage() != nil:
+				media = &waE2E.Message{ImageMessage: h.GetImageMessage()}
+			case h.GetVideoMessage() != nil:
+				media = &waE2E.Message{VideoMessage: h.GetVideoMessage()}
+			case h.GetDocumentMessage() != nil:
+				media = &waE2E.Message{DocumentMessage: h.GetDocumentMessage()}
+			}
+			return joinNonEmpty(h.GetTitle(), h.GetSubtitle(), im.GetBody().GetText(), im.GetFooter().GetText()), media
+		}
+		return joinNonEmpty(im.GetBody().GetText(), im.GetFooter().GetText()), nil
+	}
+	if l := msg.GetListMessage(); l != nil {
+		return joinNonEmpty(l.GetTitle(), l.GetDescription(), l.GetFooterText()), nil
+	}
+	if r := msg.GetButtonsResponseMessage(); r != nil {
+		return r.GetSelectedDisplayText(), nil
+	}
+	if r := msg.GetTemplateButtonReplyMessage(); r != nil {
+		return r.GetSelectedDisplayText(), nil
+	}
+	if r := msg.GetListResponseMessage(); r != nil {
+		return r.GetTitle(), nil
+	}
+	if p := msg.GetPollCreationMessage(); p != nil {
+		return "📊 " + p.GetName(), nil
+	}
+	if c := msg.GetContactMessage(); c != nil {
+		return "👤 " + c.GetDisplayName(), nil
+	}
+	if loc := msg.GetLocationMessage(); loc != nil {
+		return fmt.Sprintf("📍 %s https://maps.google.com/?q=%f,%f", loc.GetName(), loc.GetDegreesLatitude(), loc.GetDegreesLongitude()), nil
+	}
+	return "", nil
+}
+
 func messageBody(msg *waE2E.Message) string {
+	msg = unwrap(msg)
 	if msg == nil {
 		return ""
 	}
@@ -174,11 +290,27 @@ func messageBody(msg *waE2E.Message) string {
 	if doc := msg.GetDocumentMessage(); doc != nil {
 		return firstNonEmpty(doc.GetCaption(), doc.GetFileName())
 	}
-	return ""
+	text, _ := businessContent(msg)
+	return text
+}
+
+// mediaMessage returns the message that actually carries a downloadable attachment.
+func mediaMessage(msg *waE2E.Message) *waE2E.Message {
+	msg = unwrap(msg)
+	if msg == nil {
+		return nil
+	}
+	if msg.GetImageMessage() != nil || msg.GetVideoMessage() != nil || msg.GetStickerMessage() != nil ||
+		msg.GetAudioMessage() != nil || msg.GetDocumentMessage() != nil {
+		return msg
+	}
+	_, media := businessContent(msg)
+	return media
 }
 
 // mediaKind classifies a downloadable attachment. Empty means text only.
 func mediaKind(msg *waE2E.Message) string {
+	msg = mediaMessage(msg)
 	if msg == nil {
 		return ""
 	}

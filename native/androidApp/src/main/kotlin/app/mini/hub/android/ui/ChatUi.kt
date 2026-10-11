@@ -73,6 +73,11 @@ import kotlinx.coroutines.withContext
 private val MEDIA_MARKER = Regex("\u27e6([\\w-]+):([^\u27e7]+)\u27e7\\s?")
 private val URL = Regex("(https?://[^\\s]+|www\\.[^\\s]+)")
 
+internal fun isHiddenWhatsAppChat(chatId: String): Boolean {
+    val c = chatId.lowercase()
+    return c.startsWith("status@") || c.endsWith("@newsletter") || c.endsWith("@broadcast")
+}
+
 internal data class MediaRef(val rawKind: String, val id: String) {
     val isGmail get() = rawKind.startsWith("gm-")
     val kind get() = rawKind.removePrefix("gm-")
@@ -205,7 +210,14 @@ fun ThreadView(
     onApprove: (String) -> Unit,
     onAttention: (app.mini.hub.attention.AttentionAction) -> Unit = {},
 ) {
-    val messages = remember(timeline) { timeline.filterNot { it.isRemoved }.sortedBy { it.postTime.epochMillis } }
+    val messages = remember(timeline) {
+        val live = timeline.filterNot { it.isRemoved }
+        // Prefer synced provider rows; drop notification duplicates when the account is connected.
+        val synced = live.filter { it.notificationKey.startsWith("provider:") }
+        (if (synced.isNotEmpty()) synced else live).sortedBy { it.postTime.epochMillis }
+    }
+    val isEmail = summary.accountId.provider == app.mini.hub.domain.Provider.GMAIL ||
+        summary.accountId.provider == app.mini.hub.domain.Provider.OUTLOOK
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.scrollToItem(messages.size - 1) }
     var showLabels by remember { mutableStateOf(false) }
@@ -253,7 +265,23 @@ fun ThreadView(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (messages.isEmpty()) item { Text("No messages yet.", color = MaterialTheme.colorScheme.outline) }
-            items(messages, key = { it.id.key }) { obs -> MessageBubble(obs, isGroupish = summary.title != obs.senderHint) }
+            if (isEmail) {
+                items(messages, key = { it.id.key }) { obs -> EmailCard(obs, expandedByDefault = obs == messages.last()) }
+            } else {
+                items(messages, key = { it.id.key }) { obs -> MessageBubble(obs, isGroupish = summary.title != obs.senderHint) }
+            }
+        }
+        if (isEmail) {
+            val subject = messages.lastOrNull { !it.title.isNullOrBlank() }?.title ?: summary.title
+            val to = messages.lastOrNull { it.direction != MessageDirection.Outbound }?.senderHint ?: summary.senderHint
+            Text(
+                "Reply to ${displaySender(to)} · Re: $subject",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
         Composer(
             draftText = draftText,
@@ -267,6 +295,67 @@ fun ThreadView(
         )
     }
 }
+
+@Composable
+private fun EmailCard(obs: ObservedNotification, expandedByDefault: Boolean) {
+    var expanded by rememberSaveable(obs.id.key) { mutableStateOf(expandedByDefault) }
+    val mine = obs.direction == MessageDirection.Outbound
+    val joined = obs.textFragments.joinToString("\n")
+    val attachments = allMedia(joined)
+    val body = splitMedia(joined).second
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) { Text(displaySender(obs.senderHint).firstOrNull()?.uppercase() ?: "?", fontWeight = FontWeight.Bold) }
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(if (mine) "You" else displaySender(obs.senderHint), fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    if (!expanded) {
+                        Text(previewText(joined), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.outline)
+                    }
+                }
+                Text(fullTime(obs.postTime.epochMillis), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+            }
+            if (expanded) {
+                Spacer(modifier = Modifier.height(6.dp))
+                EmailField("From", obs.senderHint)
+                obs.recipients?.takeIf { it.isNotEmpty() }?.let { EmailField("To", it.joinToString(", ")) }
+                obs.title?.takeIf { it.isNotBlank() }?.let { EmailField("Subject", it) }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                if (body.isNotBlank()) LinkText(body)
+                if (attachments.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("📎 ${attachments.size} attachment(s)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    attachments.forEach { MediaView(it) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmailField(label: String, value: String) {
+    Row {
+        Text("$label: ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+        Text(value, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+private fun displaySender(raw: String): String =
+    raw.substringBefore('<').trim().trim('"').ifBlank { raw.substringAfter('<').substringBefore('>') }
+
+private fun fullTime(millis: Long): String =
+    SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()).format(Date(millis))
 
 @Composable
 private fun MessageBubble(obs: ObservedNotification, isGroupish: Boolean) {

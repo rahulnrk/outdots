@@ -47,7 +47,8 @@ func (r *Runtime) restoreExtrasLocked(raw []byte) {
 const maxMediaRefs = 2000
 
 func (r *Runtime) keepMediaLocked(id string, msg *waE2E.Message) {
-	if id == "" || mediaKind(msg) == "" {
+	msg = mediaMessage(msg)
+	if id == "" || msg == nil || mediaKind(msg) == "" {
 		return
 	}
 	if r.media == nil {
