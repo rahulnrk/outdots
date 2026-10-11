@@ -32,9 +32,13 @@ data class ExactActionPayload(
      * invalidates approval. Null for a new message in [conversationId].
      */
     val replyTarget: String? = null,
+    /** Cc/Bcc for email. Part of the approved digest. */
+    val cc: List<String> = emptyList(),
+    val bcc: List<String> = emptyList(),
 ) {
     init {
-        require(accountId.isNotBlank() && conversationId.isNotBlank())
+        require(accountId.isNotBlank())
+        require(conversationId.isNotBlank() || route == ActionRoute.NativeHandoff || subject != null) { "conversationId required except for a new email" }
         require(body.isNotBlank())
         require(recipients.distinct() == recipients) { "duplicate recipients are not allowed" }
         require(attachments.distinctBy { it.id }.size == attachments.size) { "duplicate attachments are not allowed" }
@@ -65,6 +69,8 @@ data class ExactActionPayload(
         append("grant:").append(encodeField(grantVersion)).append('|')
         append("policy:").append(encodeField(policyVersion))
         replyTarget?.let { append('|').append("reply:").append(encodeField(it)) }
+        if (cc.isNotEmpty()) append("|cc:").append(cc.sorted().joinToString(";") { encodeField(it) })
+        if (bcc.isNotEmpty()) append("|bcc:").append(bcc.sorted().joinToString(";") { encodeField(it) })
     }
 
     private fun encodeField(value: String): String =

@@ -327,6 +327,39 @@ class InboxViewModel(
         )
     }
 
+    /** Compose button: opens a new email thread (To/Cc/Bcc/Subject) on the chosen account. */
+    fun startComposeEmail(accountId: app.mini.hub.domain.AccountId) {
+        val summary = ConversationObservationSummary(
+            conversationId = app.mini.hub.domain.ScopedId(accountId, app.mini.hub.domain.ScopedId.Kind.CONVERSATION, "compose:${clock.now().epochMillis}"),
+            accountId = accountId,
+            title = "New email",
+            appName = "Gmail",
+            senderHint = "",
+            packageId = "com.google.android.gm",
+            latestSnippet = "",
+            category = app.mini.hub.observation.NotificationCategory.DirectMessage,
+            coverage = app.mini.hub.observation.ConversationCoverage.PartialApiSync,
+            coverageExplanation = "New email",
+            latestEventAt = clock.now(),
+            observationCount = 0, unreadCount = 0, isRemoved = false,
+        )
+        clearSearch()
+        abandonLocalDraft()
+        _state.value = _state.value.copy(
+            selectedConversation = summary,
+            selectedTimeline = emptyList(),
+            retrievedContext = retrievalEngine.retrieve(
+                ScopedRetrievalQuery(conversationId = summary.conversationId, compartment = CompartmentId(accountId.key), tokenBudget = 650),
+            ),
+            activeReviewPayload = null,
+            localDraftText = "",
+            draftVersions = emptyList(),
+            localDraftStatus = null,
+            conversationLoadStatus = null,
+            composeNewTo = "",
+        )
+    }
+
     fun selectConversationFromSearch(result: app.mini.hub.search.SearchResult) {
         val conv = _state.value.conversations.firstOrNull { it.conversationId == result.conversationId }
             ?: observationStore.getConversationSummaries(result.accountId).firstOrNull { it.conversationId == result.conversationId }
@@ -666,6 +699,66 @@ class InboxViewModel(
     }
 
     private fun prepareNewEmail(selected: ConversationObservationSummary, to: String, subject: String, body: String) {
+        prepareComposeEmail(selected.accountId, listOf(to), emptyList(), emptyList(), subject, body)
+    }
+
+    /**
+     * New email to any address. Sends through Gmail when allowed, otherwise opens Gmail's compose
+     * with every field prefilled. The approved payload carries the text exactly as typed.
+     */
+    fun prepareComposeEmail(
+        accountId: app.mini.hub.domain.AccountId,
+        to: List<String>,
+        cc: List<String>,
+        bcc: List<String>,
+        subject: String,
+        body: String,
+    ) {
+        val clean = { l: List<String> ->
+            l.flatMap { it.split(',', ';') }.map { it.trim() }.filter { it.isNotEmpty() }
+                .map { app.mini.hub.connector.EmailAddress.extract(it) ?: it }.distinctBy { it.lowercase() }
+        }
+        val toL = clean(to); val ccL = clean(cc) - toL.toSet(); val bccL = clean(bcc) - (toL + ccL).toSet()
+        val bad = (toL + ccL + bccL).firstOrNull { app.mini.hub.connector.EmailAddress.extract(it) == null }
+        if (toL.isEmpty() || bad != null || body.isBlank()) {
+            _state.value = _state.value.copy(outboxStatusMessage = when {
+                toL.isEmpty() -> "Add at least one recipient."
+                bad != null -> "\"$bad\" is not a valid email address."
+                else -> "Write a message first."
+            })
+            return
+        }
+        val account = accountStore?.get(accountId)
+        val apiOk = account != null && account.state in USABLE_STATES && apiReplyAllowed(account)
+        val route = if (apiOk) ActionRoute.Api else ActionRoute.NativeHandoff
+        val enabled = account?.let { capabilitiesFor(it)?.enabled }.orEmpty()
+        val payload = ExactActionPayload(
+            accountId = accountId.key,
+            conversationId = "",
+            route = route,
+            recipients = toL,
+            subject = subject.ifBlank { "(no subject)" },
+            body = body,
+            attachments = emptyList(),
+            sourceVersions = emptyList(),
+            grantVersion = AuthorizationSnapshot.grantVersion(account?.grantedScopes.orEmpty()),
+            policyVersion = AuthorizationSnapshot.policyVersion(enabled, route),
+            replyTarget = null,
+            cc = ccL,
+            bcc = bccL,
+        )
+        _state.value = _state.value.copy(
+            activeReviewPayload = payload,
+            reviewContext = ReviewContext(
+                providerName = providerLabel(accountId.provider),
+                isReply = false,
+                handoffPackage = if (route == ActionRoute.NativeHandoff) "com.google.android.gm" else null,
+                note = if (route == ActionRoute.Api) null else "MINI will open Gmail with To, Cc, Subject and your message filled in. You tap Send in Gmail.",
+            ),
+        )
+    }
+
+    private fun prepareNewEmailUnused(selected: ConversationObservationSummary, to: String, subject: String, body: String) {
         val account = accountStore?.get(selected.accountId)
         val apiOk = account != null && account.state in USABLE_STATES && apiReplyAllowed(account)
         val route = if (apiOk) ActionRoute.Api else ActionRoute.NativeHandoff

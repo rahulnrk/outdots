@@ -115,6 +115,12 @@ fun InboxScreen(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 ),
                 actions = {
+                    TextButton(onClick = {
+                        val gmail = accountStore.list().firstOrNull {
+                            it.id.provider == app.mini.hub.domain.Provider.GMAIL && it.state != app.mini.hub.connector.ConnectionState.Disconnected
+                        }
+                        if (gmail != null) viewModel.startComposeEmail(gmail.id) else showAccountSettings = true
+                    }) { Text("✏ Compose") }
                     TextButton(onClick = { showSourceSettings = true }) {
                         Text("Sources")
                     }
@@ -211,11 +217,23 @@ fun InboxScreen(
                     ?: app.mini.hub.attention.AttentionRules.default(state.selectedConversation!!.conversationId, app.mini.hub.domain.UtcInstant(System.currentTimeMillis()))
                 val selectedKey = state.selectedConversation!!.conversationId.key
                 var newSubject by remember(selectedKey) { mutableStateOf("") }
+                var newTo by remember(selectedKey) { mutableStateOf(state.composeNewTo.orEmpty()) }
+                var newCc by remember(selectedKey) { mutableStateOf("") }
+                var newBcc by remember(selectedKey) { mutableStateOf("") }
+                var showCcBcc by remember(selectedKey) { mutableStateOf(false) }
                 if (state.composeNewTo != null) {
+                    val emailKb = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Email)
+                    OutlinedTextField(newTo, { newTo = it }, label = { Text("To (comma separated)") }, singleLine = true, keyboardOptions = emailKb, modifier = Modifier.fillMaxWidth())
+                    if (showCcBcc) {
+                        OutlinedTextField(newCc, { newCc = it }, label = { Text("Cc") }, singleLine = true, keyboardOptions = emailKb, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(newBcc, { newBcc = it }, label = { Text("Bcc") }, singleLine = true, keyboardOptions = emailKb, modifier = Modifier.fillMaxWidth())
+                    } else {
+                        TextButton(onClick = { showCcBcc = true }) { Text("+ Cc / Bcc") }
+                    }
                     OutlinedTextField(
                         value = newSubject,
                         onValueChange = { newSubject = it },
-                        label = { Text("Subject (new email to ${state.composeNewTo})") },
+                        label = { Text("Subject") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -242,7 +260,11 @@ fun InboxScreen(
                     onDraft = { instruction, revise -> viewModel.requestLocalDraft(instruction, revise) },
                     onCancelDraft = { viewModel.cancelLocalDraft() },
                     onDraftChanged = { text -> viewModel.updateLocalDraftText(text) },
-                    onApprove = { body -> viewModel.prepareDraft(body, "", newSubject) },
+                    onApprove = { body ->
+                        if (state.composeNewTo != null) {
+                            viewModel.prepareComposeEmail(state.selectedConversation!!.accountId, listOf(newTo), listOf(newCc), listOf(newBcc), newSubject, body)
+                        } else viewModel.prepareDraft(body, "", newSubject)
+                    },
                     onAttention = { a -> viewModel.applyAttentionAction(state.selectedConversation!!.conversationId, a) },
                 )
                 if (false) ConversationDetailView(

@@ -25,6 +25,20 @@ class AndroidNativeHandoffLauncher(
 
     override fun open(command: OutboxCommand, payload: ExactActionPayload): Boolean {
         return try {
+            // Email: open a prefilled compose (mailto) so To/Cc/Bcc/Subject/Body arrive exactly as approved.
+            if (payload.subject != null && payload.recipients.all { it.contains('@') } && payload.recipients.isNotEmpty()) {
+                val compose = Intent(Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:")).apply {
+                    putExtra(Intent.EXTRA_EMAIL, payload.recipients.toTypedArray())
+                    if (payload.cc.isNotEmpty()) putExtra(Intent.EXTRA_CC, payload.cc.toTypedArray())
+                    if (payload.bcc.isNotEmpty()) putExtra(Intent.EXTRA_BCC, payload.bcc.toTypedArray())
+                    putExtra(Intent.EXTRA_SUBJECT, payload.subject)
+                    putExtra(Intent.EXTRA_TEXT, payload.body)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                val gmail = Intent(compose).setPackage("com.google.android.gm")
+                if (gmail.resolveActivity(context.packageManager) != null) { context.startActivity(gmail); return true }
+                if (compose.resolveActivity(context.packageManager) != null) { context.startActivity(compose); return true }
+            }
             val sendIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_TEXT, payload.body)

@@ -118,16 +118,18 @@ object MimeMessageBuilder {
     fun build(
         to: List<String>,
         cc: List<String> = emptyList(),
+        bcc: List<String> = emptyList(),
         subject: String?,
         body: String,
         inReplyTo: String? = null,
         references: String? = null,
     ): String {
         require(to.isNotEmpty()) { "At least one recipient is required" }
-        requireNoHeaderInjection(subject, inReplyTo, references, *to.toTypedArray(), *cc.toTypedArray())
+        requireNoHeaderInjection(subject, inReplyTo, references, *to.toTypedArray(), *cc.toTypedArray(), *bcc.toTypedArray())
         val lines = mutableListOf<String>()
         lines += "To: " + to.joinToString(", ")
         if (cc.isNotEmpty()) lines += "Cc: " + cc.joinToString(", ")
+        if (bcc.isNotEmpty()) lines += "Bcc: " + bcc.joinToString(", ")
         subject?.let { lines += "Subject: " + encodeHeader(it) }
         inReplyTo?.let { lines += "In-Reply-To: $it" }
         references?.let { lines += "References: $it" }
@@ -178,7 +180,7 @@ class GmailSender(
             references = listOfNotNull(headers["references"], inReplyTo).joinToString(" ")
             if (subject == null) return SendOutcome.Rejected("subject_required_in_reviewed_payload")
         }
-        val mime = MimeMessageBuilder.build(payload.recipients, subject = subject, body = payload.body, inReplyTo = inReplyTo, references = references)
+        val mime = MimeMessageBuilder.build(payload.recipients, cc = payload.cc, bcc = payload.bcc, subject = subject, body = payload.body, inReplyTo = inReplyTo, references = references)
         val body = buildMap<String, Any> {
             put("raw", Base64Url.encode(mime.encodeToByteArray()))
             if (payload.replyTarget != null) put("threadId", payload.conversationId)
