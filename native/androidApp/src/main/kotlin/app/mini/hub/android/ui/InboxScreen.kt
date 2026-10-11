@@ -61,6 +61,7 @@ import app.mini.hub.domain.UtcInstant
 import app.mini.hub.observation.ConversationObservationSummary
 import app.mini.hub.observation.CommunicationSource
 import app.mini.hub.observation.ObservedNotification
+import app.mini.hub.observation.LinkedInActivityType
 import app.mini.hub.understanding.MessageUnderstanding
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -505,6 +506,29 @@ private fun CommunicationSourceSettingsDialog(
                             },
                         )
                         Text(source.displayName)
+                    }
+                    if (source == CommunicationSource.LinkedIn && source in selected) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("LinkedIn activity", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Messages always appear in Chats. Choose which non-message activity appears in Notifications.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        var activities by remember { mutableStateOf(preferences.selectedLinkedInActivities()) }
+                        LinkedInActivityType.entries.forEach { activity ->
+                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(
+                                    checked = activity in activities,
+                                    onCheckedChange = { enabled ->
+                                        preferences.setLinkedInActivitySelected(activity, enabled)
+                                        activities = preferences.selectedLinkedInActivities()
+                                        onChanged()
+                                    },
+                                )
+                                Text(activity.displayName)
+                            }
+                        }
                     }
                 }
             }

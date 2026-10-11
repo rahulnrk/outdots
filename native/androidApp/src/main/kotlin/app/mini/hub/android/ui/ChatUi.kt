@@ -121,6 +121,8 @@ fun ChatListView(
     onSelect: (ConversationObservationSummary) -> Unit,
 ) {
     var filter by rememberSaveable { mutableStateOf<String?>(null) }
+    val linkedinActivities = conversations.filter(::isLinkedInActivitySummary)
+    val chatConversations = conversations.filterNot(::isLinkedInActivitySummary)
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 6.dp),
@@ -131,7 +133,20 @@ fun ChatListView(
                 FilterChip(selected = filter == label, onClick = { filter = if (filter == label) null else label }, label = { Text(label) })
             }
         }
-        val shown = conversations
+        if (linkedinActivities.isNotEmpty() && filter == null) {
+            Text("LinkedIn notifications", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(
+                "Activity is kept separate from messages. Choose which LinkedIn activity types to capture in Sources.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+            linkedinActivities.sortedByDescending { it.latestEventAt.epochMillis }.forEach { activity ->
+                LinkedInActivityRow(activity)
+            }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+        }
+        val shown = chatConversations
             .filter { filter == null || labels[it.conversationId.key] == filter }
             .sortedByDescending { it.latestEventAt.epochMillis }
         if (shown.isEmpty()) {
@@ -150,6 +165,43 @@ fun ChatListView(
             }
         }
     }
+}
+
+private fun isLinkedInActivitySummary(summary: ConversationObservationSummary): Boolean =
+    summary.packageId == "com.linkedin.android" &&
+        summary.category != app.mini.hub.observation.NotificationCategory.DirectMessage &&
+        summary.category != app.mini.hub.observation.NotificationCategory.GroupMessage
+
+@Composable
+private fun LinkedInActivityRow(summary: ConversationObservationSummary) {
+    val context = LocalContext.current
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(summary.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(summary.latestSnippet, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("LinkedIn activity · ${summary.categoryLabel()}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+            }
+            OutlinedButton(onClick = {
+                runCatching {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://www.linkedin.com/"))
+                            .setPackage("com.linkedin.android")
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+            }) { Text("Open") }
+        }
+    }
+}
+
+private fun ConversationObservationSummary.categoryLabel(): String = when (category) {
+    app.mini.hub.observation.NotificationCategory.SocialUpdate -> "Social update"
+    app.mini.hub.observation.NotificationCategory.GeneralNotification -> "General alert"
+    else -> category.name
 }
 
 @Composable

@@ -156,7 +156,7 @@ class InboxViewModel(
 
     /** Store reads and analysis; runs on the refresh worker. */
     private fun loadRefresh(previousRecords: Map<String, app.mini.hub.attention.ConversationAttention>): RefreshResult {
-        val policy = CommunicationSourcePolicy(selectedSources)
+        val policy = CommunicationSourcePolicy(selectedSources = selectedSources)
         val summaries = observationStore.getConversationSummaries()
             .filter { policy.isVisibleInInbox(it.packageId) }
             .filterNot { isHiddenWhatsAppChat(it.conversationId.value) }

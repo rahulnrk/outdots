@@ -73,6 +73,22 @@ class CommunicationSourcesTest {
     }
 
     @Test
+    fun linkedinActivityIsOptInAndClassifiedSeparatelyFromMessages() {
+        val connection = payload("com.linkedin.android").copy(title = "New connection request", text = "Connect with Alex")
+        val disabled = CommunicationSourcePolicy(
+            selectedSources = { setOf(CommunicationSource.LinkedIn) },
+            selectedLinkedInActivities = { emptySet() },
+        )
+        val enabled = CommunicationSourcePolicy(
+            selectedSources = { setOf(CommunicationSource.LinkedIn) },
+            selectedLinkedInActivities = { setOf(LinkedInActivityType.ConnectionRequests) },
+        )
+        assertEquals(LinkedInActivityType.ConnectionRequests, classifyLinkedInActivity(connection))
+        assertFalse(disabled.isEligible(connection))
+        assertTrue(enabled.isEligible(connection))
+    }
+
+    @Test
     fun linkedinMessageNotificationUsesDirectMessageConversationCategory() {
         val normalizer = NotificationNormalizer(ids, digest)
         val observation = normalizer.normalize(

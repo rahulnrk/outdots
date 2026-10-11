@@ -49,6 +49,15 @@ enum class CommunicationSource(
     }
 }
 
+/** Non-message LinkedIn events kept in a separate notification feed. */
+enum class LinkedInActivityType(val displayName: String) {
+    ConnectionRequests("Connection requests"),
+    Jobs("Jobs"),
+    Posts("Posts"),
+    Reactions("Reactions"),
+    ProfileAlerts("Profile alerts"),
+}
+
 /** Human app label for a stored row. API rows say which provider and that they are API-synced. */
 object SourceAppNames {
     private val API_NAMES = mapOf(
@@ -83,6 +92,7 @@ object SourceAppNames {
 
 /** Exact package allow-list used before notification normalization and persistence. */
 class CommunicationSourcePolicy(
+    private val selectedLinkedInActivities: () -> Set<LinkedInActivityType> = { emptySet() },
     private val selectedSources: () -> Set<CommunicationSource>,
 ) {
     fun sourceForPackage(packageId: String): CommunicationSource? =
@@ -90,11 +100,16 @@ class CommunicationSourcePolicy(
 
     fun isEligible(payload: NotificationRawPayload): Boolean =
         payload.tag == "synthetic_test" ||
-            (isEligiblePackage(payload.packageId) && isCommunicationPayload(payload))
+            (isEligiblePackage(payload.packageId) && isCommunicationPayload(payload) &&
+                (payload.packageId != "com.linkedin.android" ||
+                    isLinkedInCommunication(payload) ||
+                    classifyLinkedInActivity(payload)?.let { it in selectedLinkedInActivities() } == true))
 
     /** LinkedIn publishes many non-conversation notifications through the same app package. */
     private fun isCommunicationPayload(payload: NotificationRawPayload): Boolean =
-        payload.packageId != "com.linkedin.android" || isLinkedInCommunication(payload)
+        payload.packageId != "com.linkedin.android" ||
+            isLinkedInCommunication(payload) ||
+            classifyLinkedInActivity(payload) != null
 
     fun isEligiblePackage(packageId: String): Boolean {
         val source = sourceForPackage(packageId) ?: return false
@@ -110,6 +125,25 @@ class CommunicationSourcePolicy(
         packageId.startsWith(CommunicationSource.API_PACKAGE_PREFIX) || isEligiblePackage(packageId)
 
     fun selected(): Set<CommunicationSource> = selectedSources()
+}
+
+/** Classifies only known LinkedIn non-message notification families. Unknown activity is ignored. */
+fun classifyLinkedInActivity(payload: NotificationRawPayload): LinkedInActivityType? {
+    if (payload.packageId != "com.linkedin.android") return null
+    val haystack = listOf(payload.category, payload.title, payload.subText, payload.text)
+        .filterNotNull()
+        .joinToString(" ")
+        .trim()
+        .lowercase()
+    if (haystack.isBlank() || isLinkedInCommunication(payload)) return null
+    return when {
+        "connection request" in haystack || "invitation" in haystack || "connect with" in haystack -> LinkedInActivityType.ConnectionRequests
+        "job" in haystack || "jobs" in haystack || "hiring" in haystack || "applicant" in haystack -> LinkedInActivityType.Jobs
+        "post" in haystack || "comment" in haystack || "article" in haystack -> LinkedInActivityType.Posts
+        "like" in haystack || "reaction" in haystack || "reposted" in haystack || "mentioned" in haystack -> LinkedInActivityType.Reactions
+        "profile" in haystack || "birthday" in haystack || "follow" in haystack || "followers" in haystack -> LinkedInActivityType.ProfileAlerts
+        else -> null
+    }
 }
 
 /**

@@ -109,9 +109,10 @@ object MiniHubRuntime {
             val idGen = IdGenerator { prefix -> "$prefix-${System.currentTimeMillis()}-${counter++}" }
             clock = Clock { UtcInstant(System.currentTimeMillis()) }
             communicationSourcePreferences = CommunicationSourcePreferences(context.applicationContext)
-            val communicationSourcePolicy = CommunicationSourcePolicy {
-                communicationSourcePreferences.selectedSources()
-            }
+            val communicationSourcePolicy = CommunicationSourcePolicy(
+                selectedSources = { communicationSourcePreferences.selectedSources() },
+                selectedLinkedInActivities = { communicationSourcePreferences.selectedLinkedInActivities() },
+            )
             val digest = DigestProvider { payload ->
                 val md = MessageDigest.getInstance("SHA-256")
                 md.digest(payload.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
