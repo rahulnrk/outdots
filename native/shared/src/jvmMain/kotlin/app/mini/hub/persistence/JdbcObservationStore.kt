@@ -94,8 +94,55 @@ class JdbcObservationStore(path: String) : ObservationStore {
     @Synchronized
     override fun persistBatch(observations: List<ObservedNotification>): Int {
         if (observations.isEmpty()) return 0
-        transaction { observations.forEach { writeRow(it) } }
+        transaction {
+            observations.forEach { insertObservationRowOnly(it) }
+            // Update summaries once per touched conversation
+            observations.map { it.conversationId.key }.distinct().forEach { convKey ->
+                val sample = observations.last { it.conversationId.key == convKey }
+                updateConversationSummary(sample)
+            }
+        }
         return observations.size
+    }
+
+    private fun insertObservationRowOnly(obs: ObservedNotification) {
+        prepare(
+            """INSERT OR REPLACE INTO notification_observations (id, account_key, conversation_key, package_id, notification_key,
+                notification_id, tag, sender_hint, title, text_fragments_json, raw_text_digest, observed_at, post_time, revision,
+                is_removed, is_group_summary, truncation_state, correlation_confidence, provenance, direction, recipients_json, reply_anchor)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            obs.id.key, obs.accountId.key, obs.conversationId.key, obs.packageId, obs.notificationKey,
+            obs.notificationId, obs.tag, obs.senderHint, obs.title, obs.textFragments.joinToString("\u001F"), obs.rawTextDigest,
+            obs.observedAt.epochMillis, obs.postTime.epochMillis, obs.revision, if (obs.isRemoved) 1 else 0,
+            if (obs.isGroupSummary) 1 else 0, obs.truncationState.name, obs.correlationConfidence.name, obs.provenance.name,
+            ObservationSchema.encodeDirection(obs.direction), ObservationSchema.encodeRecipients(obs.recipients), obs.replyAnchor,
+        ).use { it.executeUpdate() }
+
+        runCatching {
+            prepare("DELETE FROM obs_fts WHERE obs_id = ?", obs.id.key).use { it.executeUpdate() }
+            if (!obs.isRemoved) {
+                prepare(
+                    "INSERT INTO obs_fts(obs_id, conversation_key, account_key, package_id, title, body) VALUES (?,?,?,?,?,?)",
+                    obs.id.key, obs.conversationId.key, obs.accountId.key, obs.packageId,
+                    obs.title ?: "", obs.textFragments.joinToString(" "),
+                ).use { it.executeUpdate() }
+            }
+        }
+    }
+
+    private fun updateConversationSummary(obs: ObservedNotification) {
+        val conv = obs.conversationId.key
+        prepare(
+            """INSERT OR REPLACE INTO conversation_summaries (conversation_key, account_key, title, app_name, sender_hint, package_id,
+                latest_snippet, category, coverage, coverage_explanation, latest_event_at, observation_count, unread_count, is_removed)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            conv, obs.accountId.key, obs.title ?: obs.senderHint, SourceAppNames.forPackage(obs.packageId), obs.senderHint, obs.packageId,
+            obs.textFragments.lastOrNull() ?: obs.title ?: "", categoryOf(obs).name, coverageFor(obs.provenance).name,
+            coverageExplanationFor(obs.provenance, getCursor(obs.packageId)?.gapCount ?: 0L), obs.observedAt.epochMillis,
+            count("SELECT COUNT(*) FROM notification_observations WHERE conversation_key = ?", conv),
+            count("SELECT COUNT(*) FROM notification_observations WHERE conversation_key = ? AND is_removed = 0", conv),
+            if (obs.isRemoved) 1 else 0,
+        ).use { it.executeUpdate() }
     }
 
     @Synchronized
