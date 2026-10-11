@@ -71,14 +71,24 @@ class OutlookGraphConnector(
     /** Full selected conversation with bodies, newest last. */
     fun fetchConversation(conversationId: String, accessToken: StoredAccessToken, transport: ProviderHttpTransport): List<ProviderMessage> {
         val filter = urlEncode("conversationId eq '${conversationId.replace("'", "''")}'")
-        val page = client(transport, accessToken).call(
-            ProviderHttpRequest(
-                HttpMethod.GET,
-                "$graphBase/me/messages?\$filter=$filter&\$top=50&\$select=$SELECT",
-                auth(accessToken) + PREFER,
-            ),
-        )
-        return page["value"]?.objects.orEmpty().mapNotNull { parse(it) }.sortedBy { it.occurredAtMillis }
+        var nextUrl: String? = "$graphBase/me/messages?\$filter=$filter&\$top=50&\$select=$SELECT"
+        val out = mutableListOf<ProviderMessage>()
+        var pages = 0
+        val apiClient = client(transport, accessToken)
+
+        while (nextUrl != null && pages < MAX_PAGES) {
+            val page = apiClient.call(
+                ProviderHttpRequest(
+                    HttpMethod.GET,
+                    nextUrl,
+                    auth(accessToken) + PREFER,
+                ),
+            )
+            out.addAll(page["value"]?.objects.orEmpty().mapNotNull { parse(it) })
+            nextUrl = page.str("@odata.nextLink")
+            pages++
+        }
+        return out.sortedBy { it.occurredAtMillis }
     }
 
     private fun initialDelta() = "$graphBase/me/mailFolders/inbox/messages/delta?\$select=$SELECT"
