@@ -47,7 +47,6 @@ The Go runtime uses **in-memory** sqlite (`mode=memory`). It does not write a pl
 
 ## Not done
 
-- No owner-scanned Linked Devices session on a physical phone in this milestone.
-- No ingested live WhatsApp message.
+- Owner verified on Pixel 10 Pro (2026-10-11): pairing-code link, live inbound messages in MINI with notifications paused, and reviewed outbound send delivered. History backfill after relink and process-death reconnect not yet verified.
 - No process-death reconnect evidence from a device.
 - Messenger, Instagram, LinkedIn unchanged.
