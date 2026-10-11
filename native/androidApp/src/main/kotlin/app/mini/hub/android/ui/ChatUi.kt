@@ -119,6 +119,7 @@ fun ChatListView(
     conversations: List<ConversationObservationSummary>,
     labels: Map<String, String>,
     onSelect: (ConversationObservationSummary) -> Unit,
+    onAttention: (app.mini.hub.domain.ScopedId, app.mini.hub.attention.AttentionAction) -> Unit = { _, _ -> },
 ) {
     var filter by rememberSaveable { mutableStateOf<String?>(null) }
     val linkedinActivities = conversations.filter(::isLinkedInActivitySummary)
@@ -142,7 +143,7 @@ fun ChatListView(
                 modifier = Modifier.padding(bottom = 6.dp),
             )
             linkedinActivities.sortedByDescending { it.latestEventAt.epochMillis }.forEach { activity ->
-                LinkedInActivityRow(activity)
+                LinkedInActivityRow(activity, onAttention)
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
         }
@@ -173,27 +174,36 @@ private fun isLinkedInActivitySummary(summary: ConversationObservationSummary): 
         summary.category != app.mini.hub.observation.NotificationCategory.GroupMessage
 
 @Composable
-private fun LinkedInActivityRow(summary: ConversationObservationSummary) {
+private fun LinkedInActivityRow(
+    summary: ConversationObservationSummary,
+    onAttention: (app.mini.hub.domain.ScopedId, app.mini.hub.attention.AttentionAction) -> Unit,
+) {
     val context = LocalContext.current
+    fun openLinkedIn() {
+        runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://www.linkedin.com/"))
+                    .setPackage("com.linkedin.android")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
     Card(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp).clickable { openLinkedIn() },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
-        Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(10.dp)) {
+            Column {
                 Text(summary.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(summary.latestSnippet, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text("LinkedIn activity · ${summary.categoryLabel()}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
             }
-            OutlinedButton(onClick = {
-                runCatching {
-                    context.startActivity(
-                        Intent(Intent.ACTION_VIEW, Uri.parse("https://www.linkedin.com/"))
-                            .setPackage("com.linkedin.android")
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
-                }
-            }) { Text("Open") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = {
+                    onAttention(summary.conversationId, app.mini.hub.attention.AttentionAction.MarkDone)
+                }) { Text("Acknowledge") }
+                OutlinedButton(onClick = ::openLinkedIn) { Text("Open in LinkedIn") }
+            }
         }
     }
 }

@@ -375,6 +375,7 @@ fun InboxScreen(
                         conversations = state.conversations,
                         labels = labels,
                         onSelect = { viewModel.selectConversation(it) },
+                        onAttention = { conversationId, action -> viewModel.applyAttentionAction(conversationId, action) },
                     )
                 }
             }
