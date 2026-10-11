@@ -1,41 +1,40 @@
 # Security review
 
-Updated 2026-10-08 after commits `d99858b` and `b67fc36`. This is an engineering review of the
-synthetic/local implementation, not a production certification.
+Engineering review of the current code, not a production certification. Status words follow
+[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md): "fixture-tested" means unit/fixture tests
+only, "qualified on device/live" means exercised on a physical device or live provider.
 
 ## Trust boundaries
 
-1. Provider and notification adapters are untrusted inputs. Messages and notification fragments are evidence,
-   not instructions to the model or authorization to act.
-2. `packages/domain` is trusted decision logic. It has no network or credential access.
-3. The React hub is a presentation layer over in-memory synthetic state. It is not a vault.
-4. `packages/publisher` is outside the device boundary. It exposes release metadata and sanitized aggregate
-diagnostics only. It does not accept inbox bodies, prompts or memory.
-5. The Kotlin intelligence layer treats model output as an untrusted proposal. It cannot approve or execute actions.
+1. Provider APIs and notification content are untrusted evidence, never instructions or
+   authorization to act.
+2. The KMP core (`native/shared`) holds decision logic: account-scoped IDs refuse cross-account
+   access, time comes from an injected `Clock`.
+3. Model output is an untrusted proposal. It cannot approve or execute actions.
+4. The TypeScript reference and web demo run over synthetic in-memory state. They are not a vault.
+5. `packages/publisher` sits outside the device and accepts only sanitized aggregate diagnostics.
 
-## Findings and mitigations
+## Controls
 
-| ID | Threat | Mitigation | Status |
-|---|---|---|---|
-| SR-01 | Concurrent dispatch can duplicate a send | Per-command in-process dispatch lock; approval consumed and command enters dispatching before gateway call; interrupted dispatch recovers to outcome unknown | Fixed and tested in `security.test.ts`; durable DB lock still open |
-| SR-02 | Invalid or rolled-back clock bypasses expiry | Invalid clocks fail closed; dispatch rejects time earlier than approval | Fixed and tested |
-| SR-03 | Incoming/edit/deletion changes reviewed source | Approval stores source versions; send rechecks source versions, digest and draft status | Fixed and tested |
-| SR-04 | Approval replay, recipient or attachment drift | Cryptographic SHA-256 digest binds account, route, recipients, body, attachments, evidence, policy and grant versions; IDs are unique | Fixed and tested |
-| SR-05 | Fake provider acceptance or native-send claim | Empty receipts become outcome unknown; thrown gateway calls become unknown; handoff requires an injected launcher and never creates a receipt | Fixed and tested |
-| SR-06 | Permission revocation or wrong provider policy | Route capability, connector qualification, send grant, provider window and policy are rechecked immediately before dispatch | Fixed and tested |
-| SR-07 | Cross-account or cross-compartment retrieval | Conversation account filters messages/observations; memory is compartment scoped and evidence tombstones invalidate facts; omissions are surfaced | Fixed and tested |
-| SR-08 | Prompt injection in sender/message text or fabricated commitments | Greeting sanitization, account-owned context checks and mandatory user decisions for price/date; model contracts only return evidence-backed proposals | Fixed in TS reference; full local model evaluation open |
-| SR-09 | Same-millisecond priority override collision | Override IDs include a sequence and selection uses insertion order as tie-breaker | Fixed and tested |
-| PUB-01 | Fabricated entitlement | Publisher returns unavailable when no billing authority is configured | Fixed and tested |
-| PUB-02/03 | Private content smuggling or oversized diagnostic body | Strict schemas, safe error-code/counter grammar, JSON content type and byte limit | Fixed and tested |
+| Area | Control | Status |
+|---|---|---|
+| Storage | SQLCipher with random DB keys wrapped by Android Keystore (AES-GCM) for actions, observations, attention | Qualified on device (Pixel 10 Pro) |
+| Storage failure | If any encrypted store cannot open, the runtime enters an explicit failed state, the UI shows a blocking error, and background hosts do nothing. There is no memory-only fallback | Fixture-tested; not device-verified |
+| Screen capture | `FLAG_SECURE` on the main window | Implemented |
+| Approval binding | SHA-256 digest of exact payload (account, route, recipients, body, attachments, evidence, grants/policy, expiry); re-checked at dispatch | Fixture-tested (TS and KMP) |
+| Send outcomes | "Accepted" means provider acceptance only. Failures after the call starts are `OutcomeUnknown` and never auto-retried. The consumed approval and `Dispatching` state are committed before the provider call, which runs off the main thread and outside any DB transaction; at process start an interrupted `Dispatching` command becomes `OutcomeUnknown` | Fixture-tested; not device-verified |
+| API send gating | Off unless `CapabilityResolver` finds the scope granted and every `ReleaseGate` is cleared. Qualification gates clear only from owner-recorded evidence written by the debug-only `GateEvidenceDebugReceiver`. Tests and defaults never clear them | Fixture-tested; no live send claimed |
+| Handoff | Opens the native app with the reviewed text; never fabricates a receipt | Qualified on device |
+| Source exposure | Release builds offer Gmail, Outlook and notifications only. Slack/Teams/Google Chat/Telegram/X are debug-only and labelled "not live-qualified". Matrix bridge route is not offered in the UI | Implemented |
+| Logging | Local account IDs, states and counts only; no content, addresses or tokens | Convention |
+| OAuth | Public client IDs only; no client secrets in the repo | Implemented |
+| Publisher | Strict diagnostics schema, byte limit, no fabricated entitlement | Fixture-tested |
 
 ## Open risks
 
-- The web hub state is memory-only and does not survive restart.
-- The current dispatch lock is process-local. Durable transactional outbox and recovery require the native store.
-- SQLCipher, Android Keystore, OAuth token storage, notification permissions and real provider adapters are not implemented.
-- The deterministic intelligence backend is only a contract/test double. It is not a qualified local model.
-- No native device, low-memory, thermal, accessibility or malicious-app test has run.
-- The publisher has no billing authority or signed manifest verification and correctly does not claim one.
-
-No private content, credentials or real provider account was used in this review.
+- Durable outbox restart recovery is wired at process start but not yet qualified on device.
+- Non-Gmail connectors and the Matrix bridge are fixture-tested only; bridge hosting is undecided.
+- The local model is not qualified for drafting quality or prompt-injection resistance on device.
+- No low-memory, thermal, accessibility or malicious-app testing has run.
+- iOS is not built.
+- Publisher has no billing authority or signed manifest verification.

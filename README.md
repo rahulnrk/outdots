@@ -1,40 +1,42 @@
-# Private AI Communication Hub
+# MINI: Private AI Communication Hub
 
-This repository turns the supplied architecture document into a buildable product foundation.
+A local-first unified inbox. MINI pulls messages from several services into one encrypted on-device
+store, flags what needs attention, drafts replies with an on-device model, and sends only after the
+user reviews the exact text. Product spec: `private-ai-communication-hub-architecture-v1-2.md`.
 
-The MVP targets English drafting. Hindi and Telugu written in English letters,
-including mixed English messages, are tested now as exploratory cases for later
-builds. Native-script Hindi/Telugu support is also post-MVP. See
-[MVP language scope](docs/MVP_LANGUAGE_SCOPE.md).
+Per-feature status lives in [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md). It
+separates "fixture-tested" from "qualified on device/live"; passing unit tests do not imply live
+provider access.
 
-## What is built now
+## Layout
 
-The current implementation is an end-to-end local-first MVP slice that proves the core product mechanics before native Android/iOS work:
+- **`native/`**: the product. Kotlin Multiplatform core (`shared`) plus an Android Compose app
+  (`androidApp`). iOS targets are declared but not buildable on Windows.
+- **`packages/domain`, `apps/hub`, `packages/publisher`**: the earlier TypeScript reference. Domain
+  rules, a React demo over synthetic data (no live providers), and a publisher skeleton. Rules are
+  kept in parity with `native/` by hand.
 
-- A shared domain core for accounts, connector capability snapshots, evidence, workflow, priority, reply eligibility, drafts, approvals and outbox commands.
-- A React web hub that demonstrates the intended first slice: Gmail plus WhatsApp notification evidence in one inbox, visibly different coverage, scoped local context, user decision capture, draft generation, exact review, approval and route-specific execution.
-- A tiny publisher service skeleton for release manifests and entitlement checks. It intentionally has no private inbox, prompt or memory endpoint.
-- Tests for the critical safety rules: user priority override, reply-window blocking, approval digest stability, send-time payload invalidation and no blind duplicate send.
+## Sources
 
-## Run locally
+- Release builds offer Gmail, Outlook and Android notification observation.
+- Slack, Teams, Google Chat, Telegram and X appear only in debug builds, labelled "not
+  live-qualified".
+- The Matrix bridge route (WhatsApp/Instagram/LinkedIn) exists as a foundation only and is not
+  offered in the UI.
 
-```bash
+## Sending
+
+Every send binds a SHA-256 digest of the exact reviewed payload to a short-lived approval. API
+sending is off unless the scope is granted and every release gate is cleared by owner-recorded
+evidence. Otherwise MINI hands the text off to the native app. No live API send is claimed.
+
+## Quick start
+
+```cmd
 npm install
-npm test
-npm run build
-npm run dev
+powershell -ExecutionPolicy Bypass -File scripts\verify.ps1
 ```
 
-Then open the Vite URL printed by `npm run dev`.
-
-## Important product boundary
-
-This is not yet a native Android/iOS app and it does not connect to live Gmail, WhatsApp or local LLM runtimes. That is deliberate for this first code drop because the folder originally contained only an architecture document. The repo now isolates the durable product rules in a testable domain package so native KMP/Android/iOS adapters can be added without rewriting workflow correctness.
-
-## Near-term native path
-
-1. Port the pure domain types/reducers to Kotlin Multiplatform or generate equivalent contracts from the TypeScript model.
-2. Replace demo adapters with native Gmail OAuth/sync and Android notification observation adapters.
-3. Replace deterministic drafting with the local inference engine behind the `DraftingEngine` boundary.
-4. Replace browser local state with SQLCipher-backed SQLite and platform key storage.
-5. Preserve the same exact-review, approval digest and outbox state tests as release gates.
+See [docs/SETUP_AND_RUN.md](docs/SETUP_AND_RUN.md) for details and
+[docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md) for the threat review. MVP drafting is English
+only ([language scope](docs/MVP_LANGUAGE_SCOPE.md)).

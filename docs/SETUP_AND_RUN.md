@@ -1,40 +1,57 @@
 # Setup and run
 
-## Supported components today
-
-| Component | Platform | Status |
+| Component | Requirements | Status |
 |---|---|---|
-| TypeScript domain reference + tests | Node 20+ on Windows/macOS/Linux | Runs |
-| Web hub harness (synthetic data, simulated provider) | Any modern browser via Vite | Runs |
+| Android app + KMP core (`native/`) | JDK 17, Android SDK | Builds and runs; see status doc for qualification |
+| TypeScript domain reference + tests | Node 20+ | Runs |
+| Web demo (`apps/hub`) | Browser via Vite | Runs over synthetic data only |
 | Publisher skeleton | Node | Runs locally, not deployed |
-| Kotlin Multiplatform core + Android app (`native/`) | JDK 17, Android SDK 34/35 | Being built, see below |
-| iOS app | macOS + Xcode | Not buildable in the current Windows environment |
+| iOS | macOS + Xcode | Not buildable on Windows |
 
-## Web harness
+## Verify everything
 
 ```cmd
-cd C:\Users\nande\Downloads\Mini
-npm install
-npm run typecheck
-npm test
-npm run build
-npm run dev
+powershell -ExecutionPolicy Bypass -File scripts\verify.ps1
 ```
 
-Open the URL Vite prints (normally http://localhost:5173). All accounts and messages are synthetic. Provider
-dispatch in the harness is simulated and never contacts Gmail or WhatsApp.
+Runs `npm test`, `npm run typecheck`, then `gradlew.bat :shared:jvmTest :androidApp:testDebugUnitTest`
+in `native/`, and exits non-zero on any failure. There is no hosted CI.
 
-## Native (in progress)
+## Native
 
-Once `native/` lands:
+`native/local.properties` (gitignored) needs `sdk.dir`, e.g. `C:\\Users\\<you>\\AppData\\Local\\Android\\Sdk`.
 
 ```cmd
-cd C:\Users\nande\Downloads\Mini\native
+cd native
 gradlew.bat :shared:jvmTest
+gradlew.bat :androidApp:testDebugUnitTest
 gradlew.bat :androidApp:assembleDebug
 ```
 
-`native/local.properties` must contain `sdk.dir` pointing at the Android SDK
-(for example `C:\\Users\\<you>\\AppData\\Local\\Android\\Sdk`). It is not committed.
+OAuth client IDs are public IDs supplied at build time with `-Pmini.googleOAuthClientId=...`
+(also `mini.outlookOAuthClientId`, `mini.slackClientId`, `mini.xClientId`) or in
+`native/local.properties`. Never add a client secret. The Google ID sets the manifest redirect
+scheme, so changing it requires a rebuild.
 
-This file is updated as components become runnable.
+The on-device model `qwen2.5-0.5b-instruct-q8.task` is not in the repo and not downloaded by the
+app. Push it to the app's external `files/models/` directory.
+
+### Device tests
+
+`androidApp/src/androidTest` needs a physical device (and connected accounts for Gmail tests):
+
+```cmd
+adb install -r <apk>
+adb shell am instrument -w -e class <Class>#<method> app.mini.hub.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Do **not** use `connectedDebugAndroidTest`. It uninstalls the app and wipes stored authorizations.
+
+## Web demo
+
+```cmd
+npm install
+npm run dev
+```
+
+Opens at http://127.0.0.1:5173. All accounts and messages are synthetic and dispatch is simulated.
