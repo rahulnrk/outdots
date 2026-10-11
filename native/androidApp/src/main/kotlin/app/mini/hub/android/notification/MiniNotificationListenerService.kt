@@ -75,6 +75,8 @@ class MiniNotificationListenerService : NotificationListenerService() {
         super.onListenerConnected()
         MiniHubRuntime.init(applicationContext)
         isConnected = true
+        // Logged once per connection, never per notification, so a broken store cannot spam logs.
+        if (!MiniHubRuntime.isStorageReady) MiniHubRuntime.logState("work=notification_listener skipped storage=unavailable")
     }
 
     override fun onListenerDisconnected() {
@@ -84,6 +86,7 @@ class MiniNotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
+        if (!MiniHubRuntime.isStorageReady) return
         val pkg = sbn.packageName ?: return
 
         // Filter out self-notifications, allowing only synthetic test harness notifications
@@ -145,6 +148,7 @@ class MiniNotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         if (sbn == null) return
+        if (!MiniHubRuntime.isStorageReady) return
         val pkg = sbn.packageName ?: return
         if (pkg == packageName && sbn.tag != "synthetic_test") return
         if (pkg != packageName && !MiniHubRuntime.isCommunicationSourcePackageSelected(pkg)) return

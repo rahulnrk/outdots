@@ -34,6 +34,7 @@ import java.util.UUID
 class SyntheticNotificationReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         MiniHubRuntime.init(context.applicationContext)
+        if (!MiniHubRuntime.isStorageReady) return
 
         when (intent?.action) {
             ACTION_QUERY_ACCOUNTING -> {

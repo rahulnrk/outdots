@@ -10,6 +10,7 @@ import android.os.PowerManager
 import android.util.Log
 import app.mini.hub.action.DigestProvider
 import app.mini.hub.android.MiniHubRuntime
+import app.mini.hub.android.RuntimeStorage
 import java.security.MessageDigest
 import java.util.concurrent.Executors
 
@@ -29,9 +30,11 @@ class GmailSyncJobService : JobService() {
         executor.execute {
             try {
                 MiniHubRuntime.init(applicationContext)
-                val power = getSystemService(Context.POWER_SERVICE) as PowerManager
-                Log.i(LOG_TAG, "job start trigger=$trigger screenInteractive=${power.isInteractive} idle=${power.isDeviceIdleMode}")
-                runAll(applicationContext, trigger)
+                if (!RuntimeStorage.runIfReady(MiniHubRuntime.storage, "sync_job", { Log.w(LOG_TAG, it) }) {
+                    val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+                    Log.i(LOG_TAG, "job start trigger=$trigger screenInteractive=${power.isInteractive} idle=${power.isDeviceIdleMode}")
+                    runAll(applicationContext, trigger)
+                }) return@execute
             } catch (e: Exception) {
                 Log.w(LOG_TAG, "job failed trigger=$trigger error=${e.javaClass.simpleName}")
             } finally {

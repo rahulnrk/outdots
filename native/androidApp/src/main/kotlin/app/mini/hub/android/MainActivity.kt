@@ -4,8 +4,14 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import app.mini.hub.android.connector.AndroidConnectedAccountStore
 import app.mini.hub.android.connector.AndroidKeystoreAccessTokenStore
 import app.mini.hub.android.connector.ConnectOutcome
@@ -34,6 +40,19 @@ class MainActivity : ComponentActivity() {
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
 
         MiniHubRuntime.init(applicationContext)
+        val storage = MiniHubRuntime.storage
+        if (storage is RuntimeStorage.Failed) {
+            // Blocking: no inbox, no accounts, no sending. Nothing would be durable.
+            setContent {
+                MaterialTheme {
+                    Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+                        Text("MINI cannot open its storage", style = MaterialTheme.typography.headlineSmall)
+                        Text(storage.userMessage, modifier = Modifier.padding(top = 12.dp))
+                    }
+                }
+            }
+            return
+        }
         styleLearningEnabled.value = MiniHubRuntime.styleEngine.getConsent().isEnabled
         // One background job syncs every connected account (Gmail and the other API routes).
         GmailSyncJobService.schedulePeriodic(applicationContext)
@@ -190,6 +209,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleOAuthIntent(intent: android.content.Intent?) {
         val uri = intent?.data ?: return
+        if (!MiniHubRuntime.isStorageReady) return
         val registry = MiniHubRuntime.connectors
         val handled = registry.handlesRedirect(uri)
         android.util.Log.i("MiniOAuth", "Intent received: scheme=${uri.scheme} path=${uri.path} handled=$handled")
@@ -212,6 +232,6 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         if (::viewModel.isInitialized) viewModel.onAppBackgrounded()
-        MiniHubRuntime.ingestCoordinator.setUiListener(null)
+        if (MiniHubRuntime.isStorageReady) MiniHubRuntime.ingestCoordinator.setUiListener(null)
     }
 }

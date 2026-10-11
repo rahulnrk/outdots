@@ -25,8 +25,6 @@ import app.mini.hub.observation.NotificationNormalizer
 import app.mini.hub.observation.NotificationRawPayload
 import app.mini.hub.observation.ObservationIngestCoordinator
 import app.mini.hub.persistence.ActionStore
-import app.mini.hub.persistence.InMemoryActionStore
-import app.mini.hub.persistence.InMemoryObservationStore
 import app.mini.hub.persistence.ObservationStore
 import app.mini.hub.persistence.SqlCipherActionStore
 import app.mini.hub.persistence.SqlCipherObservationStore
@@ -82,8 +80,16 @@ object MiniHubRuntime {
 
     private val backgroundExecutor = Executors.newSingleThreadExecutor()
 
+    /** Null until [init]; [RuntimeStorage.Failed] means stores and connectors were not wired. */
+    @Volatile var storage: RuntimeStorage? = null
+        private set
+    val isStorageReady: Boolean get() = storage is RuntimeStorage.Ready
+
+    /** Count-free state line for hosts that skip work because storage is unavailable. */
+    fun logState(line: String) { android.util.Log.w("MiniRuntime", line) }
+
     fun isCommunicationSourcePackageSelected(packageId: String): Boolean =
-        ::communicationSourcePreferences.isInitialized &&
+        isStorageReady && ::communicationSourcePreferences.isInitialized &&
             CommunicationSource.forExactPackage(packageId) in communicationSourcePreferences.selectedSources()
 
     fun init(context: Context) {
@@ -103,23 +109,23 @@ object MiniHubRuntime {
                 md.digest(payload.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
             }
 
-            observationStore = try {
-                SqlCipherObservationStore(context.applicationContext)
-            } catch (_: Throwable) {
-                InMemoryObservationStore()
+            // No memory-only fallback: data would silently vanish on restart.
+            val opened = RuntimeStorage.open(
+                openObservations = { SqlCipherObservationStore(context.applicationContext) },
+                openActions = { SqlCipherActionStore(context.applicationContext) },
+                openAttention = { app.mini.hub.persistence.SqlCipherAttentionStore(context.applicationContext) },
+            )
+            storage = opened
+            if (opened is RuntimeStorage.Failed) {
+                logState("storage=unavailable cause=${opened.cause}")
+                // Stay inert: no stores, connectors or background work. Hosts check isStorageReady.
+                isInitialized = true
+                return
             }
-
-            actionStore = try {
-                SqlCipherActionStore(context.applicationContext)
-            } catch (_: Throwable) {
-                InMemoryActionStore()
-            }
-
-            attentionStore = try {
-                app.mini.hub.persistence.SqlCipherAttentionStore(context.applicationContext)
-            } catch (e: Throwable) {
-                app.mini.hub.attention.UnavailableAttentionStore(e.message ?: "Encrypted storage unavailable")
-            }
+            opened as RuntimeStorage.Ready
+            observationStore = opened.observations
+            actionStore = opened.actions
+            attentionStore = opened.attention
 
             val normalizer = NotificationNormalizer(idGen, digest)
             val deduplicator = NotificationDeduplicator()
@@ -217,7 +223,7 @@ object MiniHubRuntime {
      * to be opened. Notification-only rows are ignored.
      */
     fun bootstrapStyleFromStoredHistory() {
-        if (!isInitialized || !styleEngine.getConsent().isEnabled) return
+        if (!isInitialized || !isStorageReady || !styleEngine.getConsent().isEnabled) return
         var learned = 0
         val now = clock.now()
         connectors.listAccounts().forEach { account ->
@@ -240,6 +246,7 @@ object MiniHubRuntime {
      */
     fun onNotificationReceived(payload: NotificationRawPayload) {
         if (!isInitialized) return
+        if (!RuntimeStorage.runIfReady(storage, "notification_ingest", ::logState) {}) return
         ingestCoordinator.enqueue(payload)
         backgroundExecutor.execute {
             ingestCoordinator.drainAndProcessAll(100)

@@ -45,6 +45,7 @@ class LocalDraftEvaluationReceiver : BroadcastReceiver() {
 
     private fun runEvaluation(context: Context, selectedCaseId: String?, forcedTimeoutMillis: Long, verifyTimeoutRecovery: Boolean, englishOnly: Boolean, styleCompare: Boolean) {
         MiniHubRuntime.init(context)
+        if (!MiniHubRuntime.isStorageReady) return
         val experiment = MiniHubRuntime.localDraftExperiment
         val selectedCases = if (styleCompare) {
             styleCases().filter { selectedCaseId == null || it.id == selectedCaseId }

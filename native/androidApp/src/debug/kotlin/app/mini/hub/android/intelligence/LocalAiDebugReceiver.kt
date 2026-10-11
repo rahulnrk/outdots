@@ -16,6 +16,7 @@ import app.mini.hub.android.MiniHubRuntime
 class LocalAiDebugReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         MiniHubRuntime.init(context.applicationContext)
+        if (!MiniHubRuntime.isStorageReady) return
         val experiment = MiniHubRuntime.localDraftExperiment
         when (intent?.action) {
             ACTION_FAULT -> {
