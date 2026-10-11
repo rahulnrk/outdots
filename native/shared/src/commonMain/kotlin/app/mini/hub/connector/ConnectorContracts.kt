@@ -7,6 +7,7 @@ import app.mini.hub.domain.Provider
 enum class ConnectorRoute {
     OfficialProviderApi,
     ThirdPartyBridge,
+    PhoneLocalBridge,
     NotificationOnly,
     UserImport,
     NativeHandoff,

@@ -64,9 +64,18 @@ object PhoneLocalBridgePolicy {
 
     fun classifyIdentity(providerAccountId: String): BridgeIdentityKind {
         val id = providerAccountId.trim()
-        return if (id.startsWith("@") && ':' in id) BridgeIdentityKind.MatrixUser else BridgeIdentityKind.Unknown
+        return when {
+            id.startsWith("@") && ':' in id -> BridgeIdentityKind.MatrixUser
+            E164.matches(id) -> BridgeIdentityKind.ProviderAccount
+            else -> BridgeIdentityKind.Unknown
+        }
     }
 
-    fun classifyReceipt(receipt: String): BridgeReceiptKind =
-        if (receipt.startsWith("matrix:")) BridgeReceiptKind.HomeserverEvent else BridgeReceiptKind.Unknown
+    fun classifyReceipt(receipt: String): BridgeReceiptKind = when {
+        receipt.startsWith("matrix:") -> BridgeReceiptKind.HomeserverEvent
+        receipt.startsWith("whatsapp:") -> BridgeReceiptKind.ProviderForwarding
+        else -> BridgeReceiptKind.Unknown
+    }
+
+    private val E164 = Regex("^\\+[1-9][0-9]{7,14}$")
 }

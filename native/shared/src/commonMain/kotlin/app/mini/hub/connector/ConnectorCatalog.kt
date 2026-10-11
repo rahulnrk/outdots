@@ -121,6 +121,7 @@ object CapabilityResolver {
  */
 object ConnectorCatalog {
     const val TELEGRAM_BOT_SCOPE = "telegram.bot"
+    const val WHATSAPP_PHONE_SESSION_SCOPE = UnprovisionedWhatsAppClient.PHONE_SESSION_SCOPE
 
     private const val GMAIL_READ = "https://www.googleapis.com/auth/gmail.readonly"
     private const val GMAIL_SEND = "https://www.googleapis.com/auth/gmail.send"
@@ -298,6 +299,28 @@ object ConnectorCatalog {
 
     private const val PERSONAL_NOTE = "No official personal-inbox API. Notifications only: may hide text, combine chats, and never include sent history. Replies open the app."
 
+    val whatsappPhoneLocal = ConnectorDescriptor(
+        provider = Provider.WHATSAPP,
+        routeName = "WhatsApp personal (phone-local linked device)",
+        accountKind = RouteAccountKind.PersonalInbox,
+        route = ConnectorRoute.PhoneLocalBridge,
+        status = ImplementationStatus.DeferredExternalRequirement,
+        grants = listOf(
+            CapabilityGrant(Capability.ListHistory, listOf(setOf(WHATSAPP_PHONE_SESSION_SCOPE))),
+            CapabilityGrant(Capability.ReadBody, listOf(setOf(WHATSAPP_PHONE_SESSION_SCOPE))),
+            CapabilityGrant(Capability.IncrementalSync, listOf(setOf(WHATSAPP_PHONE_SESSION_SCOPE))),
+            CapabilityGrant(Capability.Reply, listOf(setOf(WHATSAPP_PHONE_SESSION_SCOPE))),
+            CapabilityGrant(Capability.LocalAiDrafting, listOf(setOf(WHATSAPP_PHONE_SESSION_SCOPE))),
+        ),
+        gates = mapOf(Capability.Reply to sendGates),
+        routeGates = emptySet(),
+        coverageNote = "Phone-local companion session. Pairing is unavailable until a licensed Android runtime is packaged. Not a Matrix homeserver and not WhatsApp Business Cloud API.",
+        officialDocs = listOf(
+            "https://faq.whatsapp.com/1317564962315842",
+            "https://github.com/tulir/whatsmeow/blob/main/LICENSE",
+        ),
+    )
+
     val whatsappPersonalBridge = matrixBridge(
         Provider.WHATSAPP, "WhatsApp Personal Bridge (mautrix)", RouteAccountKind.PersonalInbox,
         "Connected via Matrix companion device bridge. Messages processed and stored unencrypted on the user-configured Matrix homeserver."
@@ -356,13 +379,19 @@ object ConnectorCatalog {
 
     val apiRoutes = listOf(
         gmail, outlook, teams, slack, googleChat, telegramBot, xDirectMessages,
+        whatsappPhoneLocal,
         whatsappPersonalBridge, whatsappBusinessBridge, instagramBridge, linkedinBridge
     )
     val all: List<ConnectorDescriptor> = apiRoutes + personalFallbacks + businessRoutes
 
     fun routesFor(provider: Provider): List<ConnectorDescriptor> = all.filter { it.provider == provider }
 
-    /** The implemented API descriptor for a connected account's provider, if any. */
-    fun apiRouteFor(provider: Provider): ConnectorDescriptor? =
-        apiRoutes.firstOrNull { it.provider == provider }
+    /** Preferred send/read route. Phone-local wins over a remote Matrix foundation adapter. */
+    fun apiRouteFor(provider: Provider): ConnectorDescriptor? {
+        val routes = apiRoutes.filter { it.provider == provider }
+        return routes.firstOrNull { it.route == ConnectorRoute.PhoneLocalBridge }
+            ?: routes.firstOrNull { it.route == ConnectorRoute.OfficialProviderApi }
+            ?: routes.firstOrNull { it.route != ConnectorRoute.ThirdPartyBridge }
+            ?: routes.firstOrNull()
+    }
 }

@@ -527,7 +527,10 @@ class InboxViewModel(
         val provider = selected.accountId.provider
         val connectedAccount = accountStore?.get(selected.accountId)
         val isApiAccount = connectedAccount != null &&
-            connectedAccount.route == app.mini.hub.connector.ConnectorRoute.OfficialProviderApi &&
+            connectedAccount.route in setOf(
+                app.mini.hub.connector.ConnectorRoute.OfficialProviderApi,
+                app.mini.hub.connector.ConnectorRoute.PhoneLocalBridge,
+            ) &&
             connectedAccount.state in USABLE_STATES
         val isEmail = app.mini.hub.connector.ReplyTargets.usesSubject(provider)
 
