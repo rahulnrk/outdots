@@ -54,6 +54,7 @@ object SourceAppNames {
     private val API_NAMES = mapOf(
         "outlook" to "Outlook", "teams" to "Teams", "slack" to "Slack", "google_chat" to "Google Chat",
         "telegram" to "Telegram bot", "twitter" to "X DMs", "gmail" to "Gmail",
+        "whatsapp" to "WhatsApp", "whatsapp_business" to "WhatsApp Business",
     )
 
     fun forPackage(packageId: String): String {

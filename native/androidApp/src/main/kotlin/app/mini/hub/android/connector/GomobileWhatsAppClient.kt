@@ -79,7 +79,7 @@ class GomobileWhatsAppClient private constructor(private val native: Any) : What
     override fun linkedPhoneE164(): String? = string("linkedPhone").ifBlank { null }
 
     override fun send(payload: ExactActionPayload): SendOutcome {
-        val chat = payload.conversationId.ifBlank { payload.recipients.firstOrNull().orEmpty() }
+        val chat = chatJid(payload)
         if (chat.isBlank()) return SendOutcome.Rejected("whatsapp_missing_chat")
         return try {
             val stanza = invoke("sendText", chat, payload.body) as? String
@@ -99,6 +99,15 @@ class GomobileWhatsAppClient private constructor(private val native: Any) : What
         return parseInbound(raw)
     }
 
+    override fun conversation(chatJid: String): List<ProviderMessage> {
+        val raw = try {
+            invoke("conversationJSON", chatJid) as? String ?: "[]"
+        } catch (_: Throwable) {
+            return emptyList()
+        }
+        return parseInbound(raw)
+    }
+
     override fun persistSnapshot(): ByteArray? = try {
         invoke("snapshot") as? ByteArray
     } catch (_: Throwable) {
@@ -111,6 +120,12 @@ class GomobileWhatsAppClient private constructor(private val native: Any) : What
 
     override fun unencryptedSessionFiles(): List<String> =
         string("unencryptedFiles").lines().map { it.trim() }.filter { it.isNotEmpty() }
+
+    private fun chatJid(payload: ExactActionPayload): String {
+        val raw = payload.conversationId.trim().ifBlank { payload.recipients.firstOrNull().orEmpty() }
+        val fromScoped = raw.substringAfterLast("|conversation|", missingDelimiterValue = "")
+        return fromScoped.ifBlank { raw }
+    }
 
     private fun string(method: String): String = (invoke(method) as? String).orEmpty()
     private fun long(method: String): Long = (invoke(method) as? Long) ?: 0L
@@ -165,8 +180,11 @@ class GomobileWhatsAppClient private constructor(private val native: Any) : What
                     obj.optString("id"),
                     obj.optString("chat"),
                     obj.optString("sender"),
+                    obj.optString("name"),
+                    obj.optString("title"),
                     obj.optString("body"),
                     obj.optLong("ts", 0L),
+                    obj.optBoolean("out", false),
                 )
             }
             return out
@@ -187,7 +205,7 @@ class GomobileWhatsAppClient private constructor(private val native: Any) : What
                     val rest = obj.substring(colon + 1).trim()
                     return if (rest.startsWith('"')) rest.drop(1).substringBefore('"') else rest.substringBefore(',').trim()
                 }
-                addMessage(out, field("id"), field("chat"), field("sender"), field("body"), field("ts").toLongOrNull() ?: 0L)
+                addMessage(out, field("id"), field("chat"), field("sender"), field("name"), field("title"), field("body"), field("ts").toLongOrNull() ?: 0L, field("out") == "true")
             }
             return out
         }
@@ -197,21 +215,33 @@ class GomobileWhatsAppClient private constructor(private val native: Any) : What
             id: String,
             chat: String,
             sender: String,
+            name: String,
+            title: String,
             body: String,
             ts: Long,
+            outbound: Boolean,
         ) {
             if (id.isBlank() || chat.isBlank() || body.isBlank()) return
+            val display = displayName(sender, name)
             out += ProviderMessage(
                 providerMessageId = id,
                 conversationId = chat,
-                sender = sender.ifBlank { chat },
-                subject = null,
+                sender = display,
+                subject = displayName(chat, title),
                 snippet = body.take(240),
                 occurredAtMillis = ts,
                 bodyText = body,
-                direction = MessageDirection.Inbound,
+                direction = if (outbound) MessageDirection.Outbound else MessageDirection.Inbound,
                 replyAnchor = id,
             )
+        }
+
+        internal fun displayName(sender: String, name: String): String {
+            if (name.isNotBlank() && !name.contains("@lid")) return name
+            val raw = sender.trim()
+            if (raw.endsWith("@s.whatsapp.net")) return "+" + raw.substringBefore("@")
+            if (raw.contains("@lid")) return "WhatsApp contact"
+            return raw.ifBlank { "WhatsApp contact" }
         }
     }
 }

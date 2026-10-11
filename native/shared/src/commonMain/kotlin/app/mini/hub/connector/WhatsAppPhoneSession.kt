@@ -66,6 +66,7 @@ interface WhatsAppPhoneClient {
     fun linkedPhoneE164(): String?
     fun send(payload: ExactActionPayload): SendOutcome
     fun drainInbound(): List<ProviderMessage> = emptyList()
+    fun conversation(chatJid: String): List<ProviderMessage> = emptyList()
     fun persistSnapshot(): ByteArray? = null
     fun logout() {}
     fun unencryptedSessionFiles(): List<String> = emptyList()
@@ -140,6 +141,8 @@ class WhatsAppPhoneSession(
     fun drainInbound(): List<ProviderMessage> = client.drainInbound().also {
         client.persistSnapshot()?.let { bytes -> store.save(accountId, WhatsAppSessionEnvelope(bytes)) }
     }
+
+    fun conversation(chatJid: String): List<ProviderMessage> = client.conversation(chatJid)
 
     private fun persistIfLinked(result: WhatsAppPairing) {
         if (result is WhatsAppPairing.Linked) store.save(accountId, result.envelope)

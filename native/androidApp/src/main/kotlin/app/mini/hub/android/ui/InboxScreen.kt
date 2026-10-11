@@ -959,6 +959,100 @@ fun BadgeLabel(text: String, color: Color) {
 }
 
 @Composable
+private fun LinkedThreadView(
+    summary: ConversationObservationSummary,
+    timeline: List<ObservedNotification>,
+    localDraftText: String,
+    localDraftStatus: String?,
+    isLocalDraftInProgress: Boolean,
+    onBack: () -> Unit,
+    onLocalDraftRequested: (String) -> Unit,
+    onLocalDraftChanged: (String) -> Unit,
+    onDraftPrepared: (String, String) -> Unit,
+    replyIntent: String,
+    onReplyIntentChanged: (String) -> Unit,
+) {
+    val messages = timeline.filterNot { it.isRemoved }.sortedBy { it.postTime.epochMillis }
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedButton(onClick = onBack) { Text("← Back") }
+            Text(summary.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        }
+        Text(
+            "Linked WhatsApp on this phone. Pausing notifications does not stop this chat.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 6.dp),
+        )
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (messages.isEmpty()) {
+                item {
+                    Text("Waiting for messages from the linked session…", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            items(messages, key = { it.id.key }) { obs ->
+                val mine = obs.direction == app.mini.hub.connector.MessageDirection.Outbound
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+                ) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(0.82f),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        ),
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            if (!mine) {
+                                Text(obs.senderHint, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            }
+                            Text(obs.textFragments.joinToString("\n"), style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = replyIntent,
+            onValueChange = onReplyIntentChanged,
+            label = { Text("Ask AI to draft (optional)") },
+            placeholder = { Text("e.g. confirm tomorrow 3pm") },
+            modifier = Modifier.fillMaxWidth(),
+            maxLines = 2,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        OutlinedTextField(
+            value = localDraftText,
+            onValueChange = onLocalDraftChanged,
+            label = { Text("Message") },
+            modifier = Modifier.fillMaxWidth(),
+            maxLines = 5,
+        )
+        localDraftStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 4.dp)) }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { onLocalDraftRequested(replyIntent.ifBlank { "write a short reply" }) },
+                enabled = !isLocalDraftInProgress,
+                modifier = Modifier.weight(1f),
+            ) { Text(if (isLocalDraftInProgress) "Drafting…" else "Draft with AI") }
+            Button(
+                onClick = { onDraftPrepared(localDraftText, summary.senderHint) },
+                enabled = localDraftText.isNotBlank() && !isLocalDraftInProgress,
+                modifier = Modifier.weight(1f),
+            ) { Text("Review and send") }
+        }
+    }
+}
+
+@Composable
 fun ConversationDetailView(
     summary: ConversationObservationSummary,
     understanding: MessageUnderstanding? = null,
@@ -983,6 +1077,22 @@ fun ConversationDetailView(
     onAttentionAction: (AttentionAction) -> Unit,
 ) {
     var replyIntent by rememberSaveable { mutableStateOf("") }
+    if (summary.packageId.startsWith(app.mini.hub.observation.CommunicationSource.API_PACKAGE_PREFIX)) {
+        LinkedThreadView(
+            summary = summary,
+            timeline = timeline,
+            localDraftText = localDraftText,
+            localDraftStatus = localDraftStatus,
+            isLocalDraftInProgress = isLocalDraftInProgress,
+            onBack = onBack,
+            onLocalDraftRequested = onLocalDraftRequested,
+            onLocalDraftChanged = onLocalDraftChanged,
+            onDraftPrepared = onDraftPrepared,
+            replyIntent = replyIntent,
+            onReplyIntentChanged = { replyIntent = it },
+        )
+        return
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(

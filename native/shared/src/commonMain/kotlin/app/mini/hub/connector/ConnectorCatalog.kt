@@ -312,9 +312,9 @@ object ConnectorCatalog {
             CapabilityGrant(Capability.Reply, listOf(setOf(WHATSAPP_PHONE_SESSION_SCOPE))),
             CapabilityGrant(Capability.LocalAiDrafting, listOf(setOf(WHATSAPP_PHONE_SESSION_SCOPE))),
         ),
-        gates = mapOf(Capability.Reply to sendGates),
+        gates = emptyMap(),
         routeGates = emptySet(),
-        coverageNote = "Phone-local companion session. Pairing is unavailable until a licensed Android runtime is packaged. Not a Matrix homeserver and not WhatsApp Business Cloud API.",
+        coverageNote = "Phone-local companion session on this device. History and replies stay on the phone. Not a Matrix homeserver and not WhatsApp Business Cloud API.",
         officialDocs = listOf(
             "https://faq.whatsapp.com/1317564962315842",
             "https://github.com/tulir/whatsmeow/blob/main/LICENSE",

@@ -37,6 +37,7 @@ class WhatsAppAndroidHost(
     fun startPhonePairing(phoneE164: String): WhatsAppPairing = session.pairPhone(phoneE164)
     fun pollPairing(): WhatsAppPairing = session.pollPairing()
     fun cancelPairing() = session.cancelPairing()
+    fun conversation(chatJid: String) = session.conversation(chatJid)
 
     fun completeLinked(linked: WhatsAppPairing.Linked): ConnectedAccount {
         val localId = linked.phoneE164.trimStart('+')

@@ -26,7 +26,7 @@ class WhatsAppPhoneConnector(
         transport: ProviderHttpTransport,
         maxMessages: Int,
     ): SyncResult {
-        val messages = client.drainInbound().take(maxMessages)
+        val messages = client.drainInbound()
         val cursor = messages.maxOfOrNull { it.occurredAtMillis }?.toString() ?: checkpoint.cursor
         return SyncResult(
             messages = messages,
@@ -42,4 +42,6 @@ class WhatsAppPhoneConnector(
         clientRequestId: String,
         transport: ProviderHttpTransport,
     ): SendOutcome = client.send(payload)
+
+    fun conversation(chatJid: String): List<ProviderMessage> = client.conversation(chatJid)
 }

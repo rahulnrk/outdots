@@ -14,13 +14,13 @@ import (
 	_ "modernc.org/sqlite"
 
 	"go.mau.fi/whatsmeow"
+	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
-	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 )
 
 // Runtime is the JNI-exported WhatsApp companion client.
@@ -37,6 +37,8 @@ type Runtime struct {
 	pairCode   string
 	lastErr    string
 	inbound    []inboundMessage
+	chats      map[string][]inboundMessage
+	names      map[string]string
 	dirty      bool
 	watchDir   string
 }
@@ -45,14 +47,22 @@ type inboundMessage struct {
 	ID     string `json:"id"`
 	Chat   string `json:"chat"`
 	Sender string `json:"sender"`
+	Name   string `json:"name"`
+	Title  string `json:"title"`
 	Body   string `json:"body"`
 	TS     int64  `json:"ts"`
+	Out    bool   `json:"out"`
 }
 
 // NewRuntime builds an empty in-memory session. watchDir is scanned for accidental
 // plaintext sqlite files; pass the Android app-specific whatsapp directory.
 func NewRuntime(watchDir string) (*Runtime, error) {
-	r := &Runtime{state: StateIdle, watchDir: watchDir}
+	r := &Runtime{
+		state:    StateIdle,
+		watchDir: watchDir,
+		chats:    make(map[string][]inboundMessage),
+		names:    make(map[string]string),
+	}
 	if err := r.openMemory(); err != nil {
 		return nil, err
 	}
@@ -399,6 +409,8 @@ func (r *Runtime) Logout() error {
 	r.state = StateIdle
 	r.qr = ""
 	r.inbound = nil
+	r.chats = make(map[string][]inboundMessage)
+	r.names = make(map[string]string)
 	r.dirty = false
 	return nil
 }
@@ -410,7 +422,7 @@ func (r *Runtime) SendText(chatJID, body string) (string, error) {
 	if client == nil || !client.IsLoggedIn() {
 		return "", errors.New("whatsapp_runtime_not_logged_in")
 	}
-	jid, err := types.ParseJID(chatJID)
+	jid, err := types.ParseJID(canonicalChat(chatJID))
 	if err != nil {
 		return "", err
 	}
@@ -420,7 +432,15 @@ func (r *Runtime) SendText(chatJID, body string) (string, error) {
 		return "", err
 	}
 	r.mu.Lock()
-	r.dirty = true
+	r.rememberLocked(inboundMessage{
+		ID:     resp.ID,
+		Chat:   jid.ToNonAD().String(),
+		Sender: linkedPhone(r.device),
+		Name:   "You",
+		Body:   body,
+		TS:     time.Now().UnixMilli(),
+		Out:    true,
+	})
 	r.mu.Unlock()
 	return resp.ID, nil
 }
@@ -460,22 +480,16 @@ func (r *Runtime) UnencryptedFiles() string {
 func (r *Runtime) onEvent(evt any) {
 	switch v := evt.(type) {
 	case *events.Message:
-		body := v.Message.GetConversation()
-		if body == "" && v.Message.GetExtendedTextMessage() != nil {
-			body = v.Message.GetExtendedTextMessage().GetText()
-		}
-		if body == "" {
-			return
-		}
 		r.mu.Lock()
-		r.inbound = append(r.inbound, inboundMessage{
-			ID:     v.Info.ID,
-			Chat:   v.Info.Chat.String(),
-			Sender: v.Info.Sender.String(),
-			Body:   body,
-			TS:     v.Info.Timestamp.UnixMilli(),
-		})
-		r.dirty = true
+		r.ingestLiveMessageLocked(v)
+		r.mu.Unlock()
+	case *events.HistorySync:
+		r.mu.Lock()
+		r.ingestHistoryLocked(v.Data)
+		r.mu.Unlock()
+	case *events.PushName:
+		r.mu.Lock()
+		r.setNameLocked(v.JID, v.NewPushName)
 		r.mu.Unlock()
 	case *events.Connected:
 		r.mu.Lock()

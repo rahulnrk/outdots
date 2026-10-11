@@ -211,6 +211,8 @@ class MainActivity : ComponentActivity() {
 
             // Register reactive UI listener so background ingest updates UI immediately
             MiniHubRuntime.ingestCoordinator.setUiListener { refreshInbox() }
+            MiniHubRuntime.inboxRefresh = { refreshInbox() }
+            MiniHubRuntime.setWhatsAppForeground(true)
         }
     }
 
@@ -245,6 +247,10 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         if (::viewModel.isInitialized) viewModel.onAppBackgrounded()
-        if (MiniHubRuntime.isStorageReady) MiniHubRuntime.ingestCoordinator.setUiListener(null)
+        if (MiniHubRuntime.isStorageReady) {
+            MiniHubRuntime.ingestCoordinator.setUiListener(null)
+            MiniHubRuntime.inboxRefresh = null
+            MiniHubRuntime.setWhatsAppForeground(false)
+        }
     }
 }

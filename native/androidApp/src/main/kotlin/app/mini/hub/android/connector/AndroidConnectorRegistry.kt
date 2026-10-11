@@ -280,6 +280,16 @@ class AndroidConnectorRegistry(
         )
     }
 
+    /** Drains companion-session messages into MINI. Returns inserted+updated count. */
+    fun ingestWhatsApp(): Int {
+        val account = accounts.list().firstOrNull {
+            it.id.provider == Provider.WHATSAPP && it.route == app.mini.hub.connector.ConnectorRoute.PhoneLocalBridge
+        } ?: return 0
+        val report = syncEngine.syncAccount(account, System.currentTimeMillis())
+        runCatching { whatsappHost.persistIfDirty() }
+        return report.inserted + report.updated
+    }
+
     /**
      * Full conversation text from the provider, for reading and drafting. Returns null when the
      * provider has no conversation reader, so the caller keeps the stored timeline.
@@ -292,6 +302,9 @@ class AndroidConnectorRegistry(
         return when (account.id.provider) {
             Provider.GMAIL -> gmail.fetchThread(conversationId, account)
             Provider.OUTLOOK -> outlookConnector.fetchConversation(conversationId, token, transport)
+            Provider.WHATSAPP -> if (account.route == app.mini.hub.connector.ConnectorRoute.PhoneLocalBridge) {
+                whatsappHost.conversation(conversationId)
+            } else null
             else -> null
         }
     }

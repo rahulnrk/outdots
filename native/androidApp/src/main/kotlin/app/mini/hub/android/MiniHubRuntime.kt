@@ -33,8 +33,12 @@ import app.mini.hub.style.AdaptiveStyleEngine
 import app.mini.hub.style.ContextCategory
 import app.mini.hub.style.StyleConsent
 import app.mini.hub.style.StyleContext
+import android.os.Handler
+import android.os.Looper
 import java.security.MessageDigest
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 /**
  * Process-wide singleton runtime ensuring headless notification ingestion,
@@ -79,6 +83,10 @@ object MiniHubRuntime {
     val outlookOAuth: app.mini.hub.android.connector.OutlookOAuthClient get() = connectors.outlookOAuth
 
     private val backgroundExecutor = Executors.newSingleThreadExecutor()
+    private val whatsappPoller = Executors.newSingleThreadScheduledExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    @Volatile private var whatsappPoll: ScheduledFuture<*>? = null
+    @Volatile var inboxRefresh: (() -> Unit)? = null
 
     /** Null until [init]; [RuntimeStorage.Failed] means stores and connectors were not wired. */
     @Volatile var storage: RuntimeStorage? = null
@@ -189,12 +197,14 @@ object MiniHubRuntime {
                 override fun onActivityStarted(activity: Activity) {
                     foregroundActivities++
                     timedCallback("onActivityStarted") { localDraftExperiment.setForeground(true) }
+                    setWhatsAppForeground(true)
                 }
 
                 override fun onActivityStopped(activity: Activity) {
                     foregroundActivities--
                     if (foregroundActivities <= 0) {
                         timedCallback("onActivityStopped") { localDraftExperiment.setForeground(false) }
+                        setWhatsAppForeground(false)
                     }
                 }
 
@@ -242,6 +252,21 @@ object MiniHubRuntime {
             )
         }
         if (learned > 0) styleStore.save(styleEngine)
+    }
+
+    fun setWhatsAppForeground(foreground: Boolean) {
+        if (!isStorageReady || !::connectors.isInitialized) return
+        if (foreground) {
+            if (whatsappPoll == null || whatsappPoll?.isCancelled == true) {
+                whatsappPoll = whatsappPoller.scheduleAtFixedRate({
+                    val n = runCatching { connectors.ingestWhatsApp() }.getOrDefault(0)
+                    if (n > 0) mainHandler.post { inboxRefresh?.invoke() }
+                }, 0, 2, TimeUnit.SECONDS)
+            }
+        } else {
+            whatsappPoll?.cancel(false)
+            whatsappPoll = null
+        }
     }
 
     /**
