@@ -25,6 +25,9 @@ sealed class WhatsAppPairing {
             require(PhoneLocalBridgePolicy.classifyIdentity(phoneE164) == BridgeIdentityKind.ProviderAccount)
         }
     }
+    data class PhoneCode(val code: String) : WhatsAppPairing() {
+        init { require(code.isNotBlank()) }
+    }
     data class Unavailable(val reason: String) : WhatsAppPairing()
     data object Cancelled : WhatsAppPairing()
 }
@@ -55,6 +58,8 @@ class InMemoryEncryptedBridgeSessionStore : EncryptedBridgeSessionStore {
 /** Companion-device client. Implementations must keep plaintext on the phone. */
 interface WhatsAppPhoneClient {
     fun startPairing(): WhatsAppPairing
+    fun startPhonePairing(phoneE164: String): WhatsAppPairing =
+        WhatsAppPairing.Unavailable(UnprovisionedWhatsAppClient.RUNTIME_NOT_PACKAGED)
     fun pollPairing(): WhatsAppPairing = startPairing()
     fun cancelPairing() {}
     fun restoreAndReconnect(envelope: WhatsAppSessionEnvelope): WhatsAppReconnect
@@ -109,6 +114,12 @@ class WhatsAppPhoneSession(
 
     fun pair(): WhatsAppPairing {
         val result = client.startPairing()
+        persistIfLinked(result)
+        return result
+    }
+
+    fun pairPhone(phoneE164: String): WhatsAppPairing {
+        val result = client.startPhonePairing(phoneE164)
         persistIfLinked(result)
         return result
     }

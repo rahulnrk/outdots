@@ -34,6 +34,7 @@ type Runtime struct {
 	state      string
 	qr         string
 	qrExpiry   int64
+	pairCode   string
 	lastErr    string
 	inbound    []inboundMessage
 	dirty      bool
@@ -120,6 +121,12 @@ func (r *Runtime) QrExpiresAtMillis() int64 {
 	return r.qrExpiry
 }
 
+func (r *Runtime) PairingCode() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.pairCode
+}
+
 func (r *Runtime) LastError() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -177,8 +184,101 @@ func (r *Runtime) StartPairing() error {
 	r.state = StateQr
 	r.lastErr = ""
 	r.qr = ""
+	r.pairCode = ""
 	go r.consumeQR(qrChan)
 	return nil
+}
+
+// StartPhonePairing requests an 8-character code for WhatsApp "Link with phone number".
+// phone may include + or spaces; it is reduced to international digits (no leading 0).
+func (r *Runtime) StartPhonePairing(phone string) error {
+	phone = digitsOnly(phone)
+	if len(phone) <= 6 {
+		return errors.New("phone too short")
+	}
+	if strings.HasPrefix(phone, "0") {
+		return errors.New("use international number, not a leading 0")
+	}
+
+	r.mu.Lock()
+	if r.client == nil {
+		r.mu.Unlock()
+		return errors.New("runtime closed")
+	}
+	if r.client.Store.ID != nil {
+		r.mu.Unlock()
+		return errors.New("already linked")
+	}
+	r.cancelPairLocked()
+	if r.client.IsConnected() {
+		r.client.Disconnect()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	r.cancelPair = cancel
+	client := r.client
+	r.state = StateCode
+	r.pairCode = ""
+	r.qr = ""
+	r.lastErr = ""
+	r.mu.Unlock()
+
+	qrChan, err := client.GetQRChannel(ctx)
+	if err != nil {
+		r.setPairError(err)
+		return err
+	}
+	if err := client.Connect(); err != nil {
+		r.setPairError(err)
+		return err
+	}
+	select {
+	case evt, ok := <-qrChan:
+		if !ok {
+			err = errors.New("whatsapp_connect_closed")
+			r.setPairError(err)
+			return err
+		}
+		if evt.Error != nil {
+			r.setPairError(evt.Error)
+			return evt.Error
+		}
+		go r.consumeQR(qrChan)
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(20 * time.Second):
+		err = errors.New("whatsapp_connect_timeout")
+		r.setPairError(err)
+		return err
+	}
+
+	code, err := client.PairPhone(ctx, phone, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
+	if err != nil {
+		r.setPairError(err)
+		return err
+	}
+	r.mu.Lock()
+	r.pairCode = code
+	r.state = StateCode
+	r.lastErr = ""
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *Runtime) setPairError(err error) {
+	r.mu.Lock()
+	r.state = StateError
+	r.lastErr = err.Error()
+	r.mu.Unlock()
+}
+
+func digitsOnly(phone string) string {
+	var b strings.Builder
+	for _, ch := range phone {
+		if ch >= '0' && ch <= '9' {
+			b.WriteRune(ch)
+		}
+	}
+	return b.String()
 }
 
 func (r *Runtime) consumeQR(qrChan <-chan whatsmeow.QRChannelItem) {
@@ -188,10 +288,13 @@ func (r *Runtime) consumeQR(qrChan <-chan whatsmeow.QRChannelItem) {
 		case "code":
 			r.qr = evt.Code
 			r.qrExpiry = time.Now().Add(20 * time.Second).UnixMilli()
-			r.state = StateQr
+			if r.state != StateCode {
+				r.state = StateQr
+			}
 		case "success":
 			r.state = StateLinked
 			r.qr = ""
+			r.pairCode = ""
 			r.dirty = true
 		case "timeout":
 			r.state = StateError
@@ -216,6 +319,7 @@ func (r *Runtime) CancelPairing() {
 	if r.state != StateLinked {
 		r.state = StateCancelled
 		r.qr = ""
+		r.pairCode = ""
 	}
 }
 
@@ -379,6 +483,11 @@ func (r *Runtime) onEvent(evt any) {
 			r.state = StateLinked
 			r.dirty = true
 		}
+		r.mu.Unlock()
+	case *events.PairSuccess:
+		r.mu.Lock()
+		r.state = StateLinked
+		r.dirty = true
 		r.mu.Unlock()
 	case *events.LoggedOut:
 		r.mu.Lock()

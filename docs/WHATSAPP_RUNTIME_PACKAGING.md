@@ -15,9 +15,9 @@ Pinned whatsmeow: `c386243a72bacad080ba2938b37e1e4e0f1ca3b2` (`go.mau.fi/whatsme
 
 | Artifact | Size |
 |---|---|
-| `whatsapp.aar` | 11 549 910 bytes (~11.0 MiB) |
-| `jni/arm64-v8a/libgojni.so` | 35 815 672 bytes (~34.2 MiB) |
-| Debug APK after packaging (`androidApp-debug.apk`) | 106 366 702 bytes (~101.4 MiB) |
+| `whatsapp.aar` | 11 566 708 bytes (~11.0 MiB) |
+| `jni/arm64-v8a/libgojni.so` | 35 857 056 bytes (~34.2 MiB) |
+| Debug APK after packaging (`androidApp-debug.apk`) | 124 599 734 bytes (~118.8 MiB) |
 
 The previous debug APK on this machine was not archived, so the APK figure is **after** including MediaPipe plus this runtime. The native library itself is 34.2 MiB.
 
@@ -40,7 +40,7 @@ The Go runtime uses **in-memory** sqlite (`mode=memory`). It does not write a pl
 
 ## App wiring
 
-- Debug Accounts offers “WhatsApp personal (not live-qualified)” with QR pairing.
+- Debug Accounts offers “WhatsApp personal (not live-qualified)” with a same-phone pairing code (WhatsApp → Linked devices → Link with phone number). QR remains available in the runtime but cannot be scanned by this phone.
 - Release does not offer WhatsApp.
 - Matrix homeserver connect remains refused.
 - `UnprovisionedWhatsAppClient` is used only when `libgojni.so` / gomobile classes are missing.

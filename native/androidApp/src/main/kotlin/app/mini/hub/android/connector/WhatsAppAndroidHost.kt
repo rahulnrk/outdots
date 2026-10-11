@@ -34,6 +34,7 @@ class WhatsAppAndroidHost(
     fun runtimeAvailable(): Boolean = packaged
 
     fun startPairing(): WhatsAppPairing = session.pair()
+    fun startPhonePairing(phoneE164: String): WhatsAppPairing = session.pairPhone(phoneE164)
     fun pollPairing(): WhatsAppPairing = session.pollPairing()
     fun cancelPairing() = session.cancelPairing()
 

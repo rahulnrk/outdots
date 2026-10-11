@@ -33,3 +33,20 @@ func TestSnapshotRoundTripAndNoPlaintextFiles(t *testing.T) {
 		t.Fatal("expected to detect planted sqlite file")
 	}
 }
+
+func TestStartPhonePairingRejectsLocalAndShortNumbers(t *testing.T) {
+	r, err := NewRuntime(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if err := r.StartPhonePairing("0123456789"); err == nil {
+		t.Fatal("expected leading-0 rejection")
+	}
+	if err := r.StartPhonePairing("+12"); err == nil {
+		t.Fatal("expected short rejection")
+	}
+	if got := digitsOnly("+1 (555) 123-4567"); got != "15551234567" {
+		t.Fatalf("digits: %s", got)
+	}
+}

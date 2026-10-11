@@ -30,6 +30,12 @@ class WhatsAppPhoneSessionTest {
         assertEquals(BridgeIdentityKind.Unknown, proof.identityKind)
         assertFalse(proof.reconnectsWithoutPastedHomeserverToken)
         assertEquals(WhatsAppReconnect.Unavailable("whatsapp_session_missing"), session.reconnect())
+        val phonePairing = session.pairPhone("+15551234567")
+        assertTrue(phonePairing is WhatsAppPairing.Unavailable)
+        assertEquals(
+            UnprovisionedWhatsAppClient.RUNTIME_NOT_PACKAGED,
+            (phonePairing as WhatsAppPairing.Unavailable).reason,
+        )
         val store = InMemoryEncryptedBridgeSessionStore()
         store.save(accountId, WhatsAppSessionEnvelope(byteArrayOf(4, 5, 6)))
         val withBlob = WhatsAppPhoneSession(accountId, store)

@@ -80,6 +80,9 @@ fun InboxScreen(
     onStartWhatsAppPairing: () -> app.mini.hub.connector.WhatsAppPairing = {
         app.mini.hub.connector.WhatsAppPairing.Unavailable(app.mini.hub.connector.UnprovisionedWhatsAppClient.RUNTIME_NOT_PACKAGED)
     },
+    onStartWhatsAppPhonePairing: (String) -> app.mini.hub.connector.WhatsAppPairing = {
+        app.mini.hub.connector.WhatsAppPairing.Unavailable(app.mini.hub.connector.UnprovisionedWhatsAppClient.RUNTIME_NOT_PACKAGED)
+    },
     onPollWhatsAppPairing: () -> app.mini.hub.connector.WhatsAppPairing = {
         app.mini.hub.connector.WhatsAppPairing.Unavailable(app.mini.hub.connector.UnprovisionedWhatsAppClient.RUNTIME_NOT_PACKAGED)
     },
@@ -310,6 +313,7 @@ fun InboxScreen(
             onConnectTelegram = onConnectTelegram,
             onConnectMatrix = onConnectMatrix,
             onStartWhatsAppPairing = onStartWhatsAppPairing,
+            onStartWhatsAppPhonePairing = onStartWhatsAppPhonePairing,
             onPollWhatsAppPairing = onPollWhatsAppPairing,
             onCancelWhatsAppPairing = onCancelWhatsAppPairing,
             onWhatsAppLinked = onWhatsAppLinked,
@@ -435,6 +439,7 @@ private fun ConnectedAccountSettingsDialog(
     onConnectTelegram: (String) -> Unit,
     onConnectMatrix: (app.mini.hub.domain.Provider, String, String) -> Unit,
     onStartWhatsAppPairing: () -> app.mini.hub.connector.WhatsAppPairing,
+    onStartWhatsAppPhonePairing: (String) -> app.mini.hub.connector.WhatsAppPairing,
     onPollWhatsAppPairing: () -> app.mini.hub.connector.WhatsAppPairing,
     onCancelWhatsAppPairing: () -> Unit,
     onWhatsAppLinked: (app.mini.hub.connector.WhatsAppPairing.Linked) -> Unit,
@@ -455,7 +460,7 @@ private fun ConnectedAccountSettingsDialog(
     }
     if (showWhatsAppPairing) {
         WhatsAppPairingDialog(
-            onStart = onStartWhatsAppPairing,
+            onStartPhone = onStartWhatsAppPhonePairing,
             onPoll = onPollWhatsAppPairing,
             onLinked = { onWhatsAppLinked(it); showWhatsAppPairing = false },
             onDismiss = {
@@ -579,52 +584,72 @@ private fun capabilitySummary(snapshot: app.mini.hub.connector.CapabilitySnapsho
 
 @Composable
 private fun WhatsAppPairingDialog(
-    onStart: () -> app.mini.hub.connector.WhatsAppPairing,
+    onStartPhone: (String) -> app.mini.hub.connector.WhatsAppPairing,
     onPoll: () -> app.mini.hub.connector.WhatsAppPairing,
     onLinked: (app.mini.hub.connector.WhatsAppPairing.Linked) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var status by remember { mutableStateOf("Starting companion session…") }
-    var qr by remember { mutableStateOf<String?>(null) }
+    var phone by remember { mutableStateOf("+") }
+    var status by remember { mutableStateOf("Enter the WhatsApp number on this phone, then tap Get code.") }
+    var code by remember { mutableStateOf<String?>(null) }
+    var started by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Link WhatsApp on this phone") },
         text = {
             Column {
                 Text(
-                    "Debug only. Open WhatsApp > Linked devices and scan this QR. Plaintext stays on the phone. This is not WhatsApp Business Cloud API.",
+                    "The QR is in MINI, not in WhatsApp. On this same phone, use a pairing code: WhatsApp → Linked devices → Link a device → Link with phone number instead.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(status, style = MaterialTheme.typography.bodyMedium)
-                qr?.let { payload ->
+                if (!started) {
+                    OutlinedTextField(
+                        value = phone,
+                        onValueChange = { phone = it.trim() },
+                        label = { Text("Your number (E.164)") },
+                        singleLine = true,
+                    )
+                }
+                Text(status, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+                code?.let { value ->
                     Spacer(modifier = Modifier.height(8.dp))
-                    WhatsAppQrImage(payload)
+                    Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 }
             }
         },
-        confirmButton = {},
+        confirmButton = {
+            if (!started) {
+                TextButton(
+                    onClick = { started = true },
+                    enabled = phone.length > 8,
+                ) { Text("Get code") }
+            }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        val started = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { onStart() }
-        when (started) {
+    androidx.compose.runtime.LaunchedEffect(started) {
+        if (!started) return@LaunchedEffect
+        status = "Asking WhatsApp for a pairing code…"
+        val startedState = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { onStartPhone(phone) }
+        when (startedState) {
             is app.mini.hub.connector.WhatsAppPairing.Linked -> {
-                onLinked(started)
+                onLinked(startedState)
                 return@LaunchedEffect
             }
+            is app.mini.hub.connector.WhatsAppPairing.PhoneCode -> {
+                code = startedState.code
+                status = "In WhatsApp: Linked devices → Link a device → Link with phone number instead. Enter this code."
+            }
             is app.mini.hub.connector.WhatsAppPairing.QrReady -> {
-                qr = started.qrPayload
-                status = "Scan this QR in WhatsApp"
+                status = "QR is ready, but this phone cannot scan itself. Use a pairing code instead."
             }
             is app.mini.hub.connector.WhatsAppPairing.Cancelled -> {
                 onDismiss()
                 return@LaunchedEffect
             }
             is app.mini.hub.connector.WhatsAppPairing.Unavailable -> {
-                if (started.reason != "qr_pending") {
-                    status = started.reason
-                }
+                if (startedState.reason != "qr_pending") status = startedState.reason
             }
         }
         while (true) {
@@ -634,10 +659,11 @@ private fun WhatsAppPairingDialog(
                     onLinked(next)
                     return@LaunchedEffect
                 }
-                is app.mini.hub.connector.WhatsAppPairing.QrReady -> {
-                    qr = next.qrPayload
-                    status = "Scan this QR in WhatsApp"
+                is app.mini.hub.connector.WhatsAppPairing.PhoneCode -> {
+                    code = next.code
+                    status = "In WhatsApp: Linked devices → Link a device → Link with phone number instead. Enter this code."
                 }
+                is app.mini.hub.connector.WhatsAppPairing.QrReady -> { }
                 is app.mini.hub.connector.WhatsAppPairing.Cancelled -> {
                     onDismiss()
                     return@LaunchedEffect

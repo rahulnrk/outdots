@@ -109,6 +109,7 @@ class MainActivity : ComponentActivity() {
                     onConnectTelegram = { token -> connectTelegram(token) },
                     onConnectMatrix = { provider, url, token -> connectMatrix(provider, url, token) },
                     onStartWhatsAppPairing = { MiniHubRuntime.connectors.startWhatsAppPairing() },
+                    onStartWhatsAppPhonePairing = { phone -> MiniHubRuntime.connectors.startWhatsAppPhonePairing(phone) },
                     onPollWhatsAppPairing = { MiniHubRuntime.connectors.pollWhatsAppPairing() },
                     onCancelWhatsAppPairing = { MiniHubRuntime.connectors.cancelWhatsAppPairing() },
                     onWhatsAppLinked = { linked ->

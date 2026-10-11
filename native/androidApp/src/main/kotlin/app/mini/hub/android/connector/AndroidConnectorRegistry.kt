@@ -206,7 +206,7 @@ class AndroidConnectorRegistry(
         ),
         ConnectRouteInfo(
             Provider.WHATSAPP, "WhatsApp personal", "Linked device on this phone", whatsappHost.packaged,
-            if (whatsappHost.packaged) "Scan the QR from WhatsApp > Linked devices. Debug companion session; unofficial multi-device protocol."
+            if (whatsappHost.packaged) "On this phone: Connect, enter your number, then enter the code in WhatsApp > Linked devices > Link with phone number. Debug companion session; unofficial multi-device protocol."
             else "WhatsApp runtime is not packaged in this build. Run native/whatsappRuntime/build-android.ps1.",
             usesPhoneLocalPairing = true,
         ),
@@ -323,6 +323,7 @@ class AndroidConnectorRegistry(
     fun connectTelegram(botToken: String): ConnectOutcome = telegram.connect(botToken)
 
     fun startWhatsAppPairing() = whatsappHost.startPairing()
+    fun startWhatsAppPhonePairing(phoneE164: String) = whatsappHost.startPhonePairing(phoneE164)
     fun pollWhatsAppPairing() = whatsappHost.pollPairing()
     fun cancelWhatsAppPairing() = whatsappHost.cancelPairing()
     fun completeWhatsAppLink(linked: app.mini.hub.connector.WhatsAppPairing.Linked): ConnectOutcome =

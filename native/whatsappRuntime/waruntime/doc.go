@@ -7,6 +7,7 @@ const (
 	PinnedWhatsmeow = "c386243a72bacad080ba2938b37e1e4e0f1ca3b2"
 	StateIdle       = "idle"
 	StateQr         = "qr"
+	StateCode       = "code"
 	StateLinked     = "linked"
 	StateError      = "error"
 	StateCancelled  = "cancelled"

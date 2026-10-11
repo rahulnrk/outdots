@@ -24,13 +24,31 @@ class GomobileWhatsAppClient private constructor(private val native: Any) : What
         }
     }
 
+    override fun startPhonePairing(phoneE164: String): WhatsAppPairing {
+        return try {
+            invoke("startPhonePairing", phoneE164)
+            pollPairing()
+        } catch (error: Throwable) {
+            WhatsAppPairing.Unavailable(error.message ?: UnprovisionedWhatsAppClient.RUNTIME_NOT_PACKAGED)
+        }
+    }
+
     override fun pollPairing(): WhatsAppPairing {
         val state = string("pairingState")
         return when (state) {
+            "code" -> {
+                val code = string("pairingCode")
+                if (code.isBlank()) WhatsAppPairing.Unavailable("qr_pending")
+                else WhatsAppPairing.PhoneCode(code)
+            }
             "qr" -> {
                 val qr = string("qrPayload")
                 if (qr.isBlank()) WhatsAppPairing.Unavailable("qr_pending")
-                else WhatsAppPairing.QrReady(qr, long("qrExpiresAtMillis"))
+                else try {
+                    WhatsAppPairing.QrReady(qr, long("qrExpiresAtMillis"))
+                } catch (_: IllegalArgumentException) {
+                    WhatsAppPairing.Unavailable("qr_payload_rejected")
+                }
             }
             "linked" -> {
                 val phone = linkedPhoneE164() ?: return WhatsAppPairing.Unavailable("linked_without_phone")
@@ -106,13 +124,22 @@ class GomobileWhatsAppClient private constructor(private val native: Any) : What
             }
         }.toTypedArray()
         val fn = native.javaClass.methods.first { it.name == method && it.parameterTypes.size == types.size }
-        return fn.invoke(native, *args)
+        return try {
+            fn.invoke(native, *args)
+        } catch (error: java.lang.reflect.InvocationTargetException) {
+            throw error.cause ?: error
+        }
     }
 
     companion object {
         fun load(watchDir: String): GomobileWhatsAppClient? {
             return try {
-                val runtimeClass = Class.forName("app.mini.hub.wa.Runtime")
+                runCatching { Class.forName("go.Seq") }
+                val runtimeClass = listOf(
+                    "app.mini.hub.wa.waruntime.Runtime",
+                    "app.mini.hub.wa.Runtime",
+                ).firstNotNullOfOrNull { name -> runCatching { Class.forName(name) }.getOrNull() }
+                    ?: return null
                 val instance = runtimeClass.methods.firstOrNull { it.name == "newRuntime" && it.parameterTypes.size == 1 }
                     ?.invoke(null, watchDir)
                     ?: runtimeClass.getConstructor(String::class.java).newInstance(watchDir)
