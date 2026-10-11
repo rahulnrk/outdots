@@ -211,7 +211,8 @@ fun ThreadView(
     onAttention: (app.mini.hub.attention.AttentionAction) -> Unit = {},
 ) {
     val messages = remember(timeline) {
-        val live = timeline.filterNot { it.isRemoved }
+        // A swiped-away notification is still a received message; only provider deletions hide it.
+        val live = timeline.filterNot { it.isRemoved && it.notificationKey.startsWith("provider:") }
         // Prefer synced provider rows; drop notification duplicates when the account is connected.
         val synced = live.filter { it.notificationKey.startsWith("provider:") }
         (if (synced.isNotEmpty()) synced else live)

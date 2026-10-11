@@ -199,7 +199,7 @@ class InboxViewModel(
                 val cached = understandingCache[key]?.takeIf { it.first == signature }?.second
                 key to (cached ?: MessageUnderstandingEngine.analyze(
                     summary,
-                    observationStore.getObservationsForConversation(summary.conversationId).filterNot { it.isRemoved },
+                    observationStore.getObservationsForConversation(summary.conversationId).filterNot { it.isRemoved && it.notificationKey.startsWith("provider:") },
                     record,
                 ).also { understandingCache[key] = signature to it })
             }
@@ -400,7 +400,7 @@ class InboxViewModel(
                         selectedTimeline = timeline,
                         understanding = _state.value.understanding + (summary.conversationId.key to MessageUnderstandingEngine.analyze(
                             summary,
-                            timeline.filterNot { it.isRemoved },
+                            timeline.filterNot { it.isRemoved && it.notificationKey.startsWith("provider:") },
                             _state.value.attentionRecords[summary.conversationId.key]
                                 ?: AttentionRules.default(summary.conversationId, clock.now()),
                         )),
@@ -605,7 +605,7 @@ class InboxViewModel(
         // Reply to the newest inbound message; fall back to the newest non-own message, then newest overall.
         // Timeline is ordered newest-first (TIMELINE_ORDER: post_time DESC, observed_at DESC, id DESC),
         // so firstOrNull gives the newest message matching the condition.
-        val live = _state.value.selectedTimeline.filter { !it.isRemoved }
+        val live = _state.value.selectedTimeline.filter { !(it.isRemoved && it.notificationKey.startsWith("provider:")) }
         val anchor = live.firstOrNull { isInboundMessage(it, connectedAccount) } ?: live.firstOrNull()
         val providerMessageId = anchor?.notificationKey
             ?.takeIf { it.startsWith("provider:${selected.accountId.key}:") }
@@ -817,7 +817,7 @@ class InboxViewModel(
         val conversationId = runCatching { app.mini.hub.domain.ScopedId.parse(payload.conversationId) }.getOrNull()
             ?: return payload.sourceVersions
         return observationStore.getObservationsForConversation(conversationId)
-            .filter { !it.isRemoved }
+            .filter { !(it.isRemoved && it.notificationKey.startsWith("provider:")) }
             .map { SourceVersion(it.id.key, it.revision) }
     }
 

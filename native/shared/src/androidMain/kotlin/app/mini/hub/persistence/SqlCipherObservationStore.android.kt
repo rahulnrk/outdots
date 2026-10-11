@@ -657,7 +657,7 @@ class SqlCipherObservationStore(
             FROM obs_fts f
             JOIN notification_observations o ON o.id = f.obs_id
             LEFT JOIN conversation_summaries s ON s.conversation_key = o.conversation_key
-            WHERE obs_fts MATCH ? AND o.is_removed = 0$filterClause
+            WHERE obs_fts MATCH ? AND (o.is_removed = 0 OR o.notification_key NOT LIKE 'provider:%')$filterClause
             GROUP BY o.conversation_key
             ORDER BY o.post_time DESC
             LIMIT ?
