@@ -168,6 +168,7 @@ object MiniHubRuntime {
                     if (learned > 0) styleStore.save(styleEngine)
                 },
             )
+            runCatching { connectors.restoreWhatsAppSession() }
 
             val app = context.applicationContext as Application
             app.registerComponentCallbacks(object : ComponentCallbacks2 {

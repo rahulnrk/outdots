@@ -16,6 +16,9 @@ object ConnectRoutePolicy {
         Provider.TEAMS, Provider.SLACK, Provider.GOOGLE_CHAT, Provider.TELEGRAM, Provider.TWITTER,
     )
 
+    /** Debug companion-device pairing. Never a Matrix homeserver. */
+    val DEBUG_PHONE_LOCAL_PROVIDERS: Set<Provider> = setOf(Provider.WHATSAPP)
+
     /**
      * Matrix-homeserver bridge routes route plaintext through a third-party server, which is
      * against product policy. Never offered in any build variant.
@@ -28,12 +31,16 @@ object ConnectRoutePolicy {
 
     fun visible(all: List<ConnectRouteInfo>, isDebugBuild: Boolean): List<ConnectRouteInfo> =
         all.filter { route ->
-            !route.usesMatrixEntry && route.provider !in MATRIX_BRIDGE_PROVIDERS && when (route.provider) {
-                in RELEASE_PROVIDERS -> true
-                in DEBUG_ONLY_PROVIDERS -> isDebugBuild
+            when {
+                route.usesMatrixEntry -> false
+                route.usesPhoneLocalPairing -> isDebugBuild && route.provider in DEBUG_PHONE_LOCAL_PROVIDERS
+                route.provider in MATRIX_BRIDGE_PROVIDERS -> false
+                route.provider in RELEASE_PROVIDERS -> true
+                route.provider in DEBUG_ONLY_PROVIDERS -> isDebugBuild
                 else -> false
             }
         }.map { route ->
-            if (route.provider in DEBUG_ONLY_PROVIDERS) route.copy(title = route.title + NOT_LIVE_QUALIFIED) else route
+            val needsLabel = route.provider in DEBUG_ONLY_PROVIDERS || route.usesPhoneLocalPairing
+            if (needsLabel) route.copy(title = route.title + NOT_LIVE_QUALIFIED) else route
         }
 }

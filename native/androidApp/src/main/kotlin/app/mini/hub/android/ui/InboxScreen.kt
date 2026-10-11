@@ -1,6 +1,7 @@
 package app.mini.hub.android.ui
 
 import android.content.Intent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -41,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -75,6 +77,14 @@ fun InboxScreen(
     capabilities: (ConnectedAccount) -> app.mini.hub.connector.CapabilitySnapshot? = { null },
     onConnectTelegram: (String) -> Unit = {},
     onConnectMatrix: (app.mini.hub.domain.Provider, String, String) -> Unit = { _, _, _ -> },
+    onStartWhatsAppPairing: () -> app.mini.hub.connector.WhatsAppPairing = {
+        app.mini.hub.connector.WhatsAppPairing.Unavailable(app.mini.hub.connector.UnprovisionedWhatsAppClient.RUNTIME_NOT_PACKAGED)
+    },
+    onPollWhatsAppPairing: () -> app.mini.hub.connector.WhatsAppPairing = {
+        app.mini.hub.connector.WhatsAppPairing.Unavailable(app.mini.hub.connector.UnprovisionedWhatsAppClient.RUNTIME_NOT_PACKAGED)
+    },
+    onCancelWhatsAppPairing: () -> Unit = {},
+    onWhatsAppLinked: (app.mini.hub.connector.WhatsAppPairing.Linked) -> Unit = {},
     onDisconnectAccount: (ConnectedAccount) -> Unit = {},
     onSyncNow: () -> Unit = {},
     accountsVersion: Int = 0,
@@ -299,6 +309,10 @@ fun InboxScreen(
             onConnect = onConnect,
             onConnectTelegram = onConnectTelegram,
             onConnectMatrix = onConnectMatrix,
+            onStartWhatsAppPairing = onStartWhatsAppPairing,
+            onPollWhatsAppPairing = onPollWhatsAppPairing,
+            onCancelWhatsAppPairing = onCancelWhatsAppPairing,
+            onWhatsAppLinked = onWhatsAppLinked,
             onDisconnect = onDisconnectAccount,
             onSyncNow = onSyncNow,
             onDismiss = { showAccountSettings = false },
@@ -420,18 +434,34 @@ private fun ConnectedAccountSettingsDialog(
     onConnect: (app.mini.hub.domain.Provider) -> Unit,
     onConnectTelegram: (String) -> Unit,
     onConnectMatrix: (app.mini.hub.domain.Provider, String, String) -> Unit,
+    onStartWhatsAppPairing: () -> app.mini.hub.connector.WhatsAppPairing,
+    onPollWhatsAppPairing: () -> app.mini.hub.connector.WhatsAppPairing,
+    onCancelWhatsAppPairing: () -> Unit,
+    onWhatsAppLinked: (app.mini.hub.connector.WhatsAppPairing.Linked) -> Unit,
     onDisconnect: (ConnectedAccount) -> Unit,
     onSyncNow: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var pendingDisconnect by remember { mutableStateOf<ConnectedAccount?>(null) }
     var showTelegramEntry by remember { mutableStateOf(false) }
+    var showWhatsAppPairing by remember { mutableStateOf(false) }
     var matrixEntryProvider by remember { mutableStateOf<app.mini.hub.domain.Provider?>(null) }
     
     if (showTelegramEntry) {
         TelegramTokenDialog(
             onSubmit = { onConnectTelegram(it); showTelegramEntry = false },
             onDismiss = { showTelegramEntry = false },
+        )
+    }
+    if (showWhatsAppPairing) {
+        WhatsAppPairingDialog(
+            onStart = onStartWhatsAppPairing,
+            onPoll = onPollWhatsAppPairing,
+            onLinked = { onWhatsAppLinked(it); showWhatsAppPairing = false },
+            onDismiss = {
+                onCancelWhatsAppPairing()
+                showWhatsAppPairing = false
+            },
         )
     }
     matrixEntryProvider?.let { provider ->
@@ -512,7 +542,8 @@ private fun ConnectedAccountSettingsDialog(
                     OutlinedButton(
                         onClick = { 
                             if (route.usesMatrixEntry) matrixEntryProvider = route.provider 
-                            else if (route.usesTokenEntry) showTelegramEntry = true 
+                            else if (route.usesTokenEntry) showTelegramEntry = true
+                            else if (route.usesPhoneLocalPairing) showWhatsAppPairing = true
                             else onConnect(route.provider) 
                         },
                         enabled = route.configured,
@@ -522,8 +553,12 @@ private fun ConnectedAccountSettingsDialog(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "WhatsApp, Messenger, Instagram, LinkedIn, Google Messages, Discord, LINE, Signal and personal Telegram have no supported personal API. " +
-                        "MINI reads their notifications (choose them under Sources) and opens the app with your reviewed text. It never sends for you there.",
+                    if (routes.any { it.usesPhoneLocalPairing }) {
+                        "Messenger, Instagram, LinkedIn, Google Messages, Discord, LINE, Signal and personal Telegram have no supported personal API. MINI reads their notifications and opens the app with your reviewed text."
+                    } else {
+                        "WhatsApp, Messenger, Instagram, LinkedIn, Google Messages, Discord, LINE, Signal and personal Telegram have no supported personal API. " +
+                            "MINI reads their notifications (choose them under Sources) and opens the app with your reviewed text. It never sends for you there."
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -541,6 +576,104 @@ private fun capabilitySummary(snapshot: app.mini.hub.connector.CapabilitySnapsho
         reply?.let { append("\nReply via MINI: off (").append(it).append(")") }
     }
 }
+
+@Composable
+private fun WhatsAppPairingDialog(
+    onStart: () -> app.mini.hub.connector.WhatsAppPairing,
+    onPoll: () -> app.mini.hub.connector.WhatsAppPairing,
+    onLinked: (app.mini.hub.connector.WhatsAppPairing.Linked) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var status by remember { mutableStateOf("Starting companion session…") }
+    var qr by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Link WhatsApp on this phone") },
+        text = {
+            Column {
+                Text(
+                    "Debug only. Open WhatsApp > Linked devices and scan this QR. Plaintext stays on the phone. This is not WhatsApp Business Cloud API.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(status, style = MaterialTheme.typography.bodyMedium)
+                qr?.let { payload ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    WhatsAppQrImage(payload)
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        val started = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { onStart() }
+        when (started) {
+            is app.mini.hub.connector.WhatsAppPairing.Linked -> {
+                onLinked(started)
+                return@LaunchedEffect
+            }
+            is app.mini.hub.connector.WhatsAppPairing.QrReady -> {
+                qr = started.qrPayload
+                status = "Scan this QR in WhatsApp"
+            }
+            is app.mini.hub.connector.WhatsAppPairing.Cancelled -> {
+                onDismiss()
+                return@LaunchedEffect
+            }
+            is app.mini.hub.connector.WhatsAppPairing.Unavailable -> {
+                if (started.reason != "qr_pending") {
+                    status = started.reason
+                }
+            }
+        }
+        while (true) {
+            kotlinx.coroutines.delay(500)
+            when (val next = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { onPoll() }) {
+                is app.mini.hub.connector.WhatsAppPairing.Linked -> {
+                    onLinked(next)
+                    return@LaunchedEffect
+                }
+                is app.mini.hub.connector.WhatsAppPairing.QrReady -> {
+                    qr = next.qrPayload
+                    status = "Scan this QR in WhatsApp"
+                }
+                is app.mini.hub.connector.WhatsAppPairing.Cancelled -> {
+                    onDismiss()
+                    return@LaunchedEffect
+                }
+                is app.mini.hub.connector.WhatsAppPairing.Unavailable -> {
+                    if (next.reason != "qr_pending") status = next.reason
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WhatsAppQrImage(payload: String) {
+    val bitmap = remember(payload) { encodeWhatsAppQr(payload) }
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap,
+            contentDescription = "WhatsApp linked-device QR",
+            modifier = Modifier.fillMaxWidth().height(240.dp),
+        )
+    } else {
+        Text(payload, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+private fun encodeWhatsAppQr(payload: String): androidx.compose.ui.graphics.ImageBitmap? = runCatching {
+    val matrix = com.google.zxing.qrcode.QRCodeWriter().encode(payload, com.google.zxing.BarcodeFormat.QR_CODE, 512, 512)
+    val pixels = IntArray(512 * 512) { i ->
+        val x = i % 512
+        val y = i / 512
+        if (matrix.get(x, y)) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
+    }
+    val androidBitmap = android.graphics.Bitmap.createBitmap(pixels, 512, 512, android.graphics.Bitmap.Config.ARGB_8888)
+    androidBitmap.asImageBitmap()
+}.getOrNull()
 
 @Composable
 private fun TelegramTokenDialog(onSubmit: (String) -> Unit, onDismiss: () -> Unit) {

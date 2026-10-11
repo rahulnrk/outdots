@@ -46,6 +46,8 @@ data class ConnectRouteInfo(
     val usesTokenEntry: Boolean = false,
     /** Matrix bridge uses Homeserver URL + Token instead of a browser sign-in. */
     val usesMatrixEntry: Boolean = false,
+    /** Debug WhatsApp companion QR pairing. Not Matrix. */
+    val usesPhoneLocalPairing: Boolean = false,
 )
 
 /**
@@ -63,6 +65,7 @@ class AndroidConnectorRegistry(
     private val accounts = AndroidConnectedAccountStore(appContext)
     private val tokens = AndroidKeystoreAccessTokenStore(appContext)
     private val gateEvidence = GateEvidenceStore(appContext)
+    internal val whatsappHost = WhatsAppAndroidHost(appContext, accounts, tokens)
 
     val gmailOAuth = GmailOAuthClient(appContext)
     val outlookOAuth = OutlookOAuthClient(appContext)
@@ -128,7 +131,7 @@ class AndroidConnectorRegistry(
             Provider.GOOGLE_CHAT to chatConnector,
             Provider.TELEGRAM to telegramConnector,
             Provider.TWITTER to xConnector,
-            Provider.WHATSAPP to whatsappConnector,
+            Provider.WHATSAPP to whatsappHost.connector,
             Provider.WHATSAPP_BUSINESS to whatsappBusinessConnector,
             Provider.INSTAGRAM to instagramConnector,
             Provider.LINKEDIN to linkedinConnector,
@@ -166,7 +169,7 @@ class AndroidConnectorRegistry(
         senders = listOf(
             GmailSender(), OutlookSender(), TeamsChatSender(), SlackSender(),
             GoogleChatSender(), TelegramBotSender(), XDirectMessageSender(),
-            whatsappConnector, whatsappBusinessConnector, instagramConnector, linkedinConnector,
+            whatsappHost.connector, whatsappBusinessConnector, instagramConnector, linkedinConnector,
         ),
         gates = gatePolicy,
         transport = transport,
@@ -200,6 +203,12 @@ class AndroidConnectorRegistry(
             Provider.TELEGRAM, "Telegram bot", "A bot you own; not your personal chats", true,
             "Paste a BotFather token. MINI sees only chats the bot is in. Telegram AI drafting stays off until its content-use terms are qualified.",
             usesTokenEntry = true,
+        ),
+        ConnectRouteInfo(
+            Provider.WHATSAPP, "WhatsApp personal", "Linked device on this phone", whatsappHost.packaged,
+            if (whatsappHost.packaged) "Scan the QR from WhatsApp > Linked devices. Debug companion session; unofficial multi-device protocol."
+            else "WhatsApp runtime is not packaged in this build. Run native/whatsappRuntime/build-android.ps1.",
+            usesPhoneLocalPairing = true,
         ),
         ConnectRouteInfo(
             Provider.WHATSAPP, "WhatsApp (Personal)", "Advanced Matrix bridge; not phone-local", true,
@@ -259,6 +268,7 @@ class AndroidConnectorRegistry(
         val now = System.currentTimeMillis()
         val gmailReports = gmail.syncAllConnected(now, trigger)
         val otherReports = syncEngine.syncAll(now).onEach { Log.i(LOG_TAG, it.logLine(trigger)) }
+        runCatching { whatsappHost.persistIfDirty() }
         val needsAttention = gmailReports.count { it.state != app.mini.hub.connector.ConnectionState.Healthy && it.skippedReason != "disconnected" } +
             otherReports.count { it.state != app.mini.hub.connector.ConnectionState.Healthy && it.skippedReason != "disconnected" }
         return SyncSummary(
@@ -311,6 +321,22 @@ class AndroidConnectorRegistry(
 
     /** Pasted BotFather token; validated with getMe. Network I/O, call off the main thread. */
     fun connectTelegram(botToken: String): ConnectOutcome = telegram.connect(botToken)
+
+    fun startWhatsAppPairing() = whatsappHost.startPairing()
+    fun pollWhatsAppPairing() = whatsappHost.pollPairing()
+    fun cancelWhatsAppPairing() = whatsappHost.cancelPairing()
+    fun completeWhatsAppLink(linked: app.mini.hub.connector.WhatsAppPairing.Linked): ConnectOutcome =
+        ConnectOutcome.Connected(whatsappHost.completeLinked(linked))
+    fun restoreWhatsAppSession() = whatsappHost.restoreOnStart()
+
+    fun disconnectAccount(account: ConnectedAccount) {
+        if (account.id.provider == Provider.WHATSAPP && account.route == app.mini.hub.connector.ConnectorRoute.PhoneLocalBridge) {
+            whatsappHost.logout(account.id)
+        }
+        app.mini.hub.connector.AccountConnectionManager(
+            accounts, tokens, app.mini.hub.domain.IdGenerator { "unused-$it" },
+        ).disconnect(account.id)
+    }
 
     fun connectMatrixBridge(provider: Provider, homeserverUrl: String, token: String): ConnectOutcome {
         if (!app.mini.hub.connector.PhoneLocalBridgePolicy.allowsRemoteHomeserverPlaintext()) {

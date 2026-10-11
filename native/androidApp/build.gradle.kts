@@ -71,16 +71,29 @@ android {
             useLegacyPackaging = false
         }
     }
+    sourceSets {
+        getByName("debug") {
+            val jni = rootProject.file("whatsappRuntime/build/aar-extract/jni")
+            if (jni.exists()) jniLibs.srcDir(jni)
+        }
+    }
 }
 
 dependencies {
     implementation(project(":shared"))
+    implementation(libs.sqlcipher.android)
+    implementation(libs.androidx.sqlite)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.activity.compose)
     implementation(libs.mediapipe.tasks.genai)
+    val whatsappJar = rootProject.file("whatsappRuntime/build/aar-extract/classes.jar")
+    if (whatsappJar.exists()) {
+        debugImplementation(files(whatsappJar))
+    }
+    implementation("com.google.zxing:core:3.5.3")
     testImplementation(kotlin("test"))
     androidTestImplementation(kotlin("test"))
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

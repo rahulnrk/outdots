@@ -13,7 +13,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.mini.hub.android.connector.AndroidConnectedAccountStore
-import app.mini.hub.android.connector.AndroidKeystoreAccessTokenStore
 import app.mini.hub.android.connector.ConnectOutcome
 import app.mini.hub.android.connector.GmailSyncJobService
 import app.mini.hub.android.notification.MiniNotificationListenerService
@@ -109,11 +108,20 @@ class MainActivity : ComponentActivity() {
                     onConnect = { provider -> connect(provider) },
                     onConnectTelegram = { token -> connectTelegram(token) },
                     onConnectMatrix = { provider, url, token -> connectMatrix(provider, url, token) },
+                    onStartWhatsAppPairing = { MiniHubRuntime.connectors.startWhatsAppPairing() },
+                    onPollWhatsAppPairing = { MiniHubRuntime.connectors.pollWhatsAppPairing() },
+                    onCancelWhatsAppPairing = { MiniHubRuntime.connectors.cancelWhatsAppPairing() },
+                    onWhatsAppLinked = { linked ->
+                        val message = when (val outcome = MiniHubRuntime.connectors.completeWhatsAppLink(linked)) {
+                            is ConnectOutcome.Connected -> "WhatsApp linked: ${outcome.account.displayName ?: outcome.account.providerAccountId}."
+                            is ConnectOutcome.Blocked -> outcome.reason
+                            is ConnectOutcome.Started -> "WhatsApp pairing started."
+                        }
+                        connectionStatus.value = message
+                        accountsVersion.value++
+                    },
                     onDisconnectAccount = { account ->
-                        val manager = app.mini.hub.connector.AccountConnectionManager(
-                            accountStore, AndroidKeystoreAccessTokenStore(applicationContext), app.mini.hub.domain.IdGenerator { "unused-$it" },
-                        )
-                        manager.disconnect(account.id)
+                        MiniHubRuntime.connectors.disconnectAccount(account)
                         android.util.Log.i("MiniSync", "account=${account.id.localId} disconnected by user")
                         connectionStatus.value = "Disconnected ${account.displayName ?: account.id.provider.wire}. Messages stay in MINI. Reconnect to resume."
                         accountsVersion.value++

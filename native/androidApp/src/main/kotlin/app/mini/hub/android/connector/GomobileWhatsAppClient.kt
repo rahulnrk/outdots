@@ -1,0 +1,190 @@
+package app.mini.hub.android.connector
+
+import app.mini.hub.action.ExactActionPayload
+import app.mini.hub.connector.MessageDirection
+import app.mini.hub.connector.ProviderMessage
+import app.mini.hub.connector.SendOutcome
+import app.mini.hub.connector.UnprovisionedWhatsAppClient
+import app.mini.hub.connector.WhatsAppPairing
+import app.mini.hub.connector.WhatsAppPhoneClient
+import app.mini.hub.connector.WhatsAppReconnect
+import app.mini.hub.connector.WhatsAppSessionEnvelope
+
+/**
+ * Reflective JNI client for the gomobile `waruntime.Runtime`. Compiles without the AAR;
+ * load() returns null when the native library is not packaged.
+ */
+class GomobileWhatsAppClient private constructor(private val native: Any) : WhatsAppPhoneClient {
+    override fun startPairing(): WhatsAppPairing {
+        return try {
+            invoke("startPairing")
+            pollPairing()
+        } catch (error: Throwable) {
+            WhatsAppPairing.Unavailable(error.message ?: UnprovisionedWhatsAppClient.RUNTIME_NOT_PACKAGED)
+        }
+    }
+
+    override fun pollPairing(): WhatsAppPairing {
+        val state = string("pairingState")
+        return when (state) {
+            "qr" -> {
+                val qr = string("qrPayload")
+                if (qr.isBlank()) WhatsAppPairing.Unavailable("qr_pending")
+                else WhatsAppPairing.QrReady(qr, long("qrExpiresAtMillis"))
+            }
+            "linked" -> {
+                val phone = linkedPhoneE164() ?: return WhatsAppPairing.Unavailable("linked_without_phone")
+                val snap = persistSnapshot() ?: return WhatsAppPairing.Unavailable("linked_without_snapshot")
+                WhatsAppPairing.Linked(phone, WhatsAppSessionEnvelope(snap))
+            }
+            "cancelled" -> WhatsAppPairing.Cancelled
+            "error" -> WhatsAppPairing.Unavailable(string("lastError").ifBlank { "whatsapp_pair_failed" })
+            else -> WhatsAppPairing.Unavailable(UnprovisionedWhatsAppClient.RUNTIME_NOT_PACKAGED)
+        }
+    }
+
+    override fun cancelPairing() {
+        invoke("cancelPairing")
+    }
+
+    override fun restoreAndReconnect(envelope: WhatsAppSessionEnvelope): WhatsAppReconnect {
+        return try {
+            invoke("restore", envelope.ciphertext)
+            invoke("reconnect")
+            val phone = linkedPhoneE164() ?: return WhatsAppReconnect.Unavailable("whatsapp_session_missing")
+            WhatsAppReconnect.Restored(phone)
+        } catch (error: Throwable) {
+            WhatsAppReconnect.Unavailable(error.message ?: "whatsapp_reconnect_failed")
+        }
+    }
+
+    override fun linkedPhoneE164(): String? = string("linkedPhone").ifBlank { null }
+
+    override fun send(payload: ExactActionPayload): SendOutcome {
+        val chat = payload.conversationId.ifBlank { payload.recipients.firstOrNull().orEmpty() }
+        if (chat.isBlank()) return SendOutcome.Rejected("whatsapp_missing_chat")
+        return try {
+            val stanza = invoke("sendText", chat, payload.body) as? String
+                ?: return SendOutcome.Rejected("whatsapp_send_failed")
+            SendOutcome.Accepted("whatsapp:$chat:$stanza")
+        } catch (error: Throwable) {
+            SendOutcome.Rejected(error.message ?: "whatsapp_send_failed")
+        }
+    }
+
+    override fun drainInbound(): List<ProviderMessage> {
+        val raw = try {
+            invoke("drainInboundJSON") as? String ?: "[]"
+        } catch (_: Throwable) {
+            return emptyList()
+        }
+        return parseInbound(raw)
+    }
+
+    override fun persistSnapshot(): ByteArray? = try {
+        invoke("snapshot") as? ByteArray
+    } catch (_: Throwable) {
+        null
+    }
+
+    override fun logout() {
+        runCatching { invoke("logout") }
+    }
+
+    override fun unencryptedSessionFiles(): List<String> =
+        string("unencryptedFiles").lines().map { it.trim() }.filter { it.isNotEmpty() }
+
+    private fun string(method: String): String = (invoke(method) as? String).orEmpty()
+    private fun long(method: String): Long = (invoke(method) as? Long) ?: 0L
+
+    private fun invoke(method: String, vararg args: Any?): Any? {
+        val types = args.map { arg ->
+            when (arg) {
+                is ByteArray -> ByteArray::class.java
+                is String -> String::class.java
+                else -> arg?.javaClass ?: Any::class.java
+            }
+        }.toTypedArray()
+        val fn = native.javaClass.methods.first { it.name == method && it.parameterTypes.size == types.size }
+        return fn.invoke(native, *args)
+    }
+
+    companion object {
+        fun load(watchDir: String): GomobileWhatsAppClient? {
+            return try {
+                val runtimeClass = Class.forName("app.mini.hub.wa.Runtime")
+                val instance = runtimeClass.methods.firstOrNull { it.name == "newRuntime" && it.parameterTypes.size == 1 }
+                    ?.invoke(null, watchDir)
+                    ?: runtimeClass.getConstructor(String::class.java).newInstance(watchDir)
+                GomobileWhatsAppClient(instance)
+            } catch (_: Throwable) {
+                null
+            }
+        }
+
+        internal fun parseInbound(raw: String): List<ProviderMessage> {
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty() || trimmed == "[]") return emptyList()
+            return runCatching { parseWithOrgJson(trimmed) }.getOrElse { parseLoose(trimmed) }
+        }
+
+        private fun parseWithOrgJson(raw: String): List<ProviderMessage> {
+            val array = org.json.JSONArray(raw)
+            val out = ArrayList<ProviderMessage>(array.length())
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                addMessage(
+                    out,
+                    obj.optString("id"),
+                    obj.optString("chat"),
+                    obj.optString("sender"),
+                    obj.optString("body"),
+                    obj.optLong("ts", 0L),
+                )
+            }
+            return out
+        }
+
+        private fun parseLoose(raw: String): List<ProviderMessage> {
+            val out = mutableListOf<ProviderMessage>()
+            val objects = raw.split("},{").map {
+                it.trim().removePrefix("[").removePrefix("{").removeSuffix("]").removeSuffix("}")
+            }
+            for (obj in objects) {
+                if (obj.isBlank()) continue
+                fun field(name: String): String {
+                    val key = "\"$name\""
+                    val start = obj.indexOf(key)
+                    if (start < 0) return ""
+                    val colon = obj.indexOf(':', start + key.length)
+                    val rest = obj.substring(colon + 1).trim()
+                    return if (rest.startsWith('"')) rest.drop(1).substringBefore('"') else rest.substringBefore(',').trim()
+                }
+                addMessage(out, field("id"), field("chat"), field("sender"), field("body"), field("ts").toLongOrNull() ?: 0L)
+            }
+            return out
+        }
+
+        private fun addMessage(
+            out: MutableList<ProviderMessage>,
+            id: String,
+            chat: String,
+            sender: String,
+            body: String,
+            ts: Long,
+        ) {
+            if (id.isBlank() || chat.isBlank() || body.isBlank()) return
+            out += ProviderMessage(
+                providerMessageId = id,
+                conversationId = chat,
+                sender = sender.ifBlank { chat },
+                subject = null,
+                snippet = body.take(240),
+                occurredAtMillis = ts,
+                bodyText = body,
+                direction = MessageDirection.Inbound,
+                replyAnchor = id,
+            )
+        }
+    }
+}

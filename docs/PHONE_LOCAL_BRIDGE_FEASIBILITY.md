@@ -1,6 +1,6 @@
 # Phone-local bridge feasibility
 
-**Date:** 11 October 2026. **Status:** WhatsApp phone-local **contract + encrypted envelope**; runtime **not packaged**.
+**Date:** 11 October 2026. **Status:** WhatsApp phone-local **runtime packaged (debug, arm64)**; **not live-qualified**.
 
 This is not a claim that WhatsApp, Messenger, Instagram or LinkedIn work in MINI.
 
@@ -80,9 +80,9 @@ Success on WhatsApp does not qualify Messenger, Instagram or LinkedIn.
 
 ## Not done
 
-- No whatsmeow/gomobile/JNI binary in the APK.
-- No QR linking UI.
-- No live WhatsApp qualification.
+- No live Linked Devices scan recorded on a phone.
+- No ingested live WhatsApp message.
+- No process-death reconnect evidence from a device.
 - Messenger, Instagram and LinkedIn unchanged.
 
-Next implementation step, if authorized: gomobile (or equivalent) spike of whatsmeow on this machine, record APK size and whether Keystore can wrap its device store, then replace `UnprovisionedWhatsAppClient` behind the existing contract. Do not enable a Matrix homeserver.
+A gomobile arm64 runtime **is** packaged. See [WhatsApp runtime packaging](WHATSAPP_RUNTIME_PACKAGING.md). Rebuild with `native/whatsappRuntime/build-android.ps1`. Do not enable a Matrix homeserver.

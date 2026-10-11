@@ -14,7 +14,7 @@ data class WhatsAppSessionEnvelope(val ciphertext: ByteArray) {
 
 sealed class WhatsAppPairing {
     /** QR payload for WhatsApp Linked Devices. Not a homeserver URL or access token. */
-    data class QrReady(val qrPayload: String) : WhatsAppPairing() {
+    data class QrReady(val qrPayload: String, val expiresAtMillis: Long = 0) : WhatsAppPairing() {
         init {
             require(qrPayload.isNotBlank())
             require(!qrPayload.contains("://", ignoreCase = true)) { "QR payload must not be a URL" }
@@ -26,6 +26,7 @@ sealed class WhatsAppPairing {
         }
     }
     data class Unavailable(val reason: String) : WhatsAppPairing()
+    data object Cancelled : WhatsAppPairing()
 }
 
 sealed class WhatsAppReconnect {
@@ -54,9 +55,15 @@ class InMemoryEncryptedBridgeSessionStore : EncryptedBridgeSessionStore {
 /** Companion-device client. Implementations must keep plaintext on the phone. */
 interface WhatsAppPhoneClient {
     fun startPairing(): WhatsAppPairing
+    fun pollPairing(): WhatsAppPairing = startPairing()
+    fun cancelPairing() {}
     fun restoreAndReconnect(envelope: WhatsAppSessionEnvelope): WhatsAppReconnect
     fun linkedPhoneE164(): String?
     fun send(payload: ExactActionPayload): SendOutcome
+    fun drainInbound(): List<ProviderMessage> = emptyList()
+    fun persistSnapshot(): ByteArray? = null
+    fun logout() {}
+    fun unencryptedSessionFiles(): List<String> = emptyList()
 }
 
 /**
@@ -102,14 +109,38 @@ class WhatsAppPhoneSession(
 
     fun pair(): WhatsAppPairing {
         val result = client.startPairing()
-        if (result is WhatsAppPairing.Linked) store.save(accountId, result.envelope)
+        persistIfLinked(result)
         return result
+    }
+
+    fun pollPairing(): WhatsAppPairing {
+        val result = client.pollPairing()
+        persistIfLinked(result)
+        return result
+    }
+
+    fun cancelPairing() = client.cancelPairing()
+
+    fun logout() {
+        client.logout()
+        store.clear(accountId)
+    }
+
+    fun drainInbound(): List<ProviderMessage> = client.drainInbound().also {
+        client.persistSnapshot()?.let { bytes -> store.save(accountId, WhatsAppSessionEnvelope(bytes)) }
+    }
+
+    private fun persistIfLinked(result: WhatsAppPairing) {
+        if (result is WhatsAppPairing.Linked) store.save(accountId, result.envelope)
+        else client.persistSnapshot()?.takeIf { it.isNotEmpty() }?.let { store.save(accountId, WhatsAppSessionEnvelope(it)) }
     }
 
     fun reconnect(): WhatsAppReconnect {
         val envelope = store.load(accountId)
             ?: return WhatsAppReconnect.Unavailable("whatsapp_session_missing")
-        return client.restoreAndReconnect(envelope)
+        val result = client.restoreAndReconnect(envelope)
+        client.persistSnapshot()?.takeIf { it.isNotEmpty() }?.let { store.save(accountId, WhatsAppSessionEnvelope(it)) }
+        return result
     }
 
     fun proof(): BridgeSessionProof {
