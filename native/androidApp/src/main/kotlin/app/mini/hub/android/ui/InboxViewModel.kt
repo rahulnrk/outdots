@@ -69,7 +69,13 @@ class InboxViewModel(
     private val conversationLoader: ((ConversationObservationSummary) -> List<app.mini.hub.observation.ObservedNotification>?)? = null,
     /** Runs provider sends off the main thread. Tests inject a deterministic runner. */
     private val sendRunner: (Runnable) -> Unit = { r -> Thread(r, "mini-send").start() },
+    /** Runs refresh store reads off the main thread. Tests inject a deterministic runner; null = default. */
+    refreshRunner: ((Runnable) -> Unit)? = null,
 ) {
+    /** Monotonic token: a refresh result older than the latest request is dropped. */
+    private var refreshGeneration = 0L
+    /** Understanding cache keyed by conversation, valid while its change signature is unchanged. */
+    private val understandingCache = HashMap<String, Pair<String, MessageUnderstanding>>()
     /** Main-thread guard: true from the first tap until the send result is applied. */
     private var sendInFlight = false
     private var conversationLoadGeneration = 0L
@@ -83,6 +89,9 @@ class InboxViewModel(
     } catch (_: RuntimeException) {
         null
     }
+    /** Background executor on Android; inline on a plain JVM (no main Looper), like [postToMain]. */
+    private val refreshRunner: (Runnable) -> Unit = refreshRunner
+        ?: if (mainHandler != null) { r -> REFRESH_EXECUTOR.execute(r) } else { r -> r.run() }
 
     init {
         localDraftExperiment?.setReleaseListener { ticket ->
@@ -118,13 +127,34 @@ class InboxViewModel(
     }
 
     fun refresh(isPermissionGranted: Boolean, isListenerConnected: Boolean) {
+        val generation = ++refreshGeneration
+        val previousRecords = _state.value.attentionRecords
+        refreshRunner(Runnable {
+            val result = loadRefresh(previousRecords)
+            postToMain("refresh") {
+                if (generation != refreshGeneration) return@postToMain // a newer refresh superseded this one
+                applyRefresh(result, isPermissionGranted, isListenerConnected)
+            }
+        })
+    }
+
+    private class RefreshResult(
+        val summaries: List<ConversationObservationSummary>,
+        val records: Map<String, app.mini.hub.attention.ConversationAttention>,
+        val failure: String?,
+        val view: AttentionView,
+        val understanding: Map<String, MessageUnderstanding>,
+    )
+
+    /** Store reads and analysis; runs on the refresh worker. */
+    private fun loadRefresh(previousRecords: Map<String, app.mini.hub.attention.ConversationAttention>): RefreshResult {
         val policy = CommunicationSourcePolicy(selectedSources)
         val summaries = observationStore.getConversationSummaries()
             .filter { policy.isVisibleInInbox(it.packageId) }
         val loadResult = attentionStore.loadAll()
-        
+
         var failure: String? = null
-        var records = _state.value.attentionRecords
+        var records = previousRecords
         if (loadResult is AttentionStoreResult.Ok) {
             val rec = AttentionReconciler.reconcile(loadResult.value, summaries, clock.now())
             records = rec.records
@@ -138,19 +168,30 @@ class InboxViewModel(
             failure = loadResult.message
         }
 
-        val entries = summaries.map { 
+        val entries = summaries.map {
             AttentionEntry(it, records[it.conversationId.key] ?: AttentionRules.default(it.conversationId, clock.now()))
         }
         val view = AttentionView.build(entries)
-        val understanding = summaries.associate { summary ->
-            val record = records[summary.conversationId.key] ?: AttentionRules.default(summary.conversationId, clock.now())
-            summary.conversationId.key to MessageUnderstandingEngine.analyze(
-                summary,
-                observationStore.getObservationsForConversation(summary.conversationId),
-                record,
-            )
+        // Re-read a conversation's messages only when its summary or attention record changed.
+        val understanding = synchronized(understandingCache) {
+            understandingCache.keys.retainAll(summaries.map { it.conversationId.key }.toSet())
+            summaries.associate { summary ->
+                val key = summary.conversationId.key
+                val record = records[key] ?: AttentionRules.default(summary.conversationId, clock.now())
+                val signature = "${summary.latestEventAt.epochMillis}|${summary.observationCount}|${summary.latestSnippet.hashCode()}|${summary.isRemoved}|$record"
+                val cached = understandingCache[key]?.takeIf { it.first == signature }?.second
+                key to (cached ?: MessageUnderstandingEngine.analyze(
+                    summary,
+                    observationStore.getObservationsForConversation(summary.conversationId),
+                    record,
+                ).also { understandingCache[key] = signature to it })
+            }
         }
+        return RefreshResult(summaries, records, failure, view, understanding)
+    }
 
+    private fun applyRefresh(result: RefreshResult, isPermissionGranted: Boolean, isListenerConnected: Boolean) {
+        val summaries = result.summaries
         val selected = _state.value.selectedConversation?.takeIf { current ->
             summaries.any { it.conversationId == current.conversationId }
         }
@@ -158,10 +199,10 @@ class InboxViewModel(
             isPermissionGranted = isPermissionGranted,
             isListenerConnected = isListenerConnected,
             conversations = summaries,
-            attentionRecords = records,
-            understanding = understanding,
-            attentionView = view,
-            storageFailure = failure,
+            attentionRecords = result.records,
+            understanding = result.understanding,
+            attentionView = result.view,
+            storageFailure = result.failure,
             selectedConversation = selected,
         )
     }
@@ -599,6 +640,10 @@ class InboxViewModel(
         "${summary.accountId.key}|${summary.senderHint}"
 
     companion object {
+        /** One background thread for inbox reads keeps refreshes ordered and off the main thread. */
+        private val REFRESH_EXECUTOR = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "mini-inbox-refresh").apply { isDaemon = true }
+        }
         private val USABLE_STATES = setOf(
             app.mini.hub.connector.ConnectionState.Authorized,
             app.mini.hub.connector.ConnectionState.Healthy,

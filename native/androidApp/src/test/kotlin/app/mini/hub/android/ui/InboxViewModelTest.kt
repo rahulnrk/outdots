@@ -303,4 +303,35 @@ class InboxViewModelTest {
         vm.approveAndDispatch(HandoffLauncher { _, _ -> true })
         assertEquals(listOf("Thanks, I will review the proposal." to app.mini.hub.style.TextAuthorship.UserAuthoredSentMessage), learned)
     }
+
+    @org.junit.Test(timeout = 30_000)
+    fun staleRefreshResultIsDropped() {
+        val obsStore = InMemoryObservationStore()
+        obsStore.persistObservation(
+            ObservedNotification(
+                id = ScopedId(account, ScopedId.Kind.OBSERVATION, "obs_stale"), accountId = account, conversationId = convId,
+                packageId = "com.whatsapp", notificationKey = "notif_stale", notificationId = 21, tag = null,
+                senderHint = "Alice", title = "Alice", textFragments = listOf("Hi"), rawTextDigest = "digest_stale",
+                observedAt = clock.now(), postTime = clock.now(), revision = 1L, isRemoved = false, isGroupSummary = false,
+                truncationState = TruncationState.Complete, correlationConfidence = CorrelationConfidence.High,
+                provenance = ObservationProvenance.AndroidNotificationListener,
+            ),
+        )
+        var sources: Set<app.mini.hub.observation.CommunicationSource> = emptySet()
+        val queued = mutableListOf<Runnable>()
+        val vm = InboxViewModel(
+            observationStore = obsStore, retrievalEngine = ScopedRetrievalEngine(obsStore), styleEngine = AdaptiveStyleEngine(),
+            actionController = ActionController(clock, digest, DomainActionIdGenerator(idGen)), actionStore = InMemoryActionStore(),
+            clock = clock, attentionStore = InMemoryAttentionStore(), selectedSources = { sources },
+            refreshRunner = { queued += it },
+        )
+
+        vm.refresh(true, true)                                            // older: nothing visible
+        sources = app.mini.hub.observation.CommunicationSource.defaultSelection
+        vm.refresh(true, true)                                            // newer: one conversation
+        queued[1].run()                                                   // newer result arrives first
+        queued[0].run()                                                   // older result arrives late
+
+        assertEquals(1, vm.state.value.conversations.size, "a stale refresh must not overwrite a newer one")
+    }
 }

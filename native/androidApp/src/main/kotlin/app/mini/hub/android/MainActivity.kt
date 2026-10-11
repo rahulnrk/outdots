@@ -60,7 +60,8 @@ class MainActivity : ComponentActivity() {
         handleOAuthIntent(intent)
 
         val accountStore = AndroidConnectedAccountStore(applicationContext)
-        viewModel = InboxViewModel(
+        // Retained across rotation: the same view model (and any draft in it) is reused.
+        viewModel = androidx.lifecycle.ViewModelProvider(this, app.mini.hub.android.ui.InboxViewModelHolder.factory { InboxViewModel(
             observationStore = MiniHubRuntime.observationStore,
             retrievalEngine = MiniHubRuntime.retrievalEngine,
             styleEngine = MiniHubRuntime.styleEngine,
@@ -85,7 +86,7 @@ class MainActivity : ComponentActivity() {
             conversationLoader = { summary ->
                 accountStore.get(summary.accountId)?.let { registry.loadConversation(it, summary.conversationId) }
             },
-        )
+        ) })[app.mini.hub.android.ui.InboxViewModelHolder::class.java].viewModel
 
         handoffLauncher = AndroidNativeHandoffLauncher(this)
 
