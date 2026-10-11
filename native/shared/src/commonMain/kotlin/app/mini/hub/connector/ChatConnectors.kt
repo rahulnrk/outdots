@@ -70,10 +70,25 @@ class SlackConnector(private val apiBase: String = "https://slack.com/api") : Ac
         if (types.isEmpty()) {
             return SyncResult(emptyList(), checkpoint, ConnectionState.AuthorizationRequired, "Slack history permission was not granted.")
         }
-        val conversations = slackCall(
-            transport, accessToken, "conversations.list",
-            mapOf("types" to types.joinToString(","), "exclude_archived" to "true", "limit" to "200"),
-        )["channels"]?.objects.orEmpty()
+        val listed = mutableListOf<JsonValue>()
+        var listCursor: String? = null
+        var listPages = 0
+        while (listPages < MAX_LIST_PAGES) {
+            listPages++
+            val page = slackCall(
+                transport, accessToken, "conversations.list",
+                buildMap {
+                    put("types", types.joinToString(","))
+                    put("exclude_archived", "true")
+                    put("limit", "200")
+                    listCursor?.let { put("cursor", it) }
+                },
+            )
+            listed += page["channels"]?.objects.orEmpty()
+            listCursor = page.path("response_metadata", "next_cursor")?.string?.takeIf { it.isNotBlank() }
+            if (listCursor == null) break
+        }
+        val conversations = listed
             .filter { it["is_member"]?.bool != false }
             .sortedByDescending { it.str("updated")?.toLongOrNull() ?: 0L }
             .take(MAX_CONVERSATIONS)
@@ -158,6 +173,7 @@ class SlackConnector(private val apiBase: String = "https://slack.com/api") : Ac
         private const val MAX_CONVERSATIONS = 20
         private const val PER_CONVERSATION = 20
         private const val MAX_HISTORY_PAGES = 5
+        private const val MAX_LIST_PAGES = 5
         private val SKIPPABLE = setOf("channel_not_found", "not_in_channel", "missing_scope")
         private val IGNORED_SUBTYPES = setOf("channel_join", "channel_leave", "channel_topic", "channel_purpose")
 
@@ -215,7 +231,18 @@ class GoogleChatConnector(private val apiBase: String = "https://chat.googleapis
         val api = ProviderApiClient("Google Chat", transport, accessToken)
         val cursor = ChatCursor.decode(checkpoint.cursor)
         val marks = cursor.perConversation.toMutableMap()
-        val spaces = api.get("$apiBase/spaces?pageSize=$MAX_SPACES")["spaces"]?.objects.orEmpty()
+        val listedSpaces = mutableListOf<JsonValue>()
+        var spaceToken: String? = null
+        var spacePages = 0
+        while (spacePages < MAX_PAGES) {
+            spacePages++
+            val tokenQ = spaceToken?.let { "&pageToken=" + urlEncode(it) } ?: ""
+            val page = api.get("$apiBase/spaces?pageSize=$MAX_SPACES$tokenQ")
+            listedSpaces += page["spaces"]?.objects.orEmpty()
+            spaceToken = page.str("nextPageToken")?.takeIf { it.isNotBlank() }
+            if (spaceToken == null) break
+        }
+        val spaces = listedSpaces
             .sortedByDescending { Rfc3339.parseMillis(it.str("lastActiveTime")) ?: 0L }
         val out = mutableListOf<ProviderMessage>()
         var gaps = 0
@@ -329,7 +356,15 @@ class TeamsChatConnector(private val graphBase: String = "https://graph.microsof
         require(account.id.provider == Provider.TEAMS)
         val api = OutlookGraphConnector(graphBase).client(transport, accessToken)
         val marks = ChatCursor.decode(checkpoint.cursor).perConversation.toMutableMap()
-        val chats = api.get("$graphBase/me/chats?\$top=$MAX_CHATS&\$orderby=${urlEncode("lastMessagePreview/createdDateTime desc")}&\$expand=lastMessagePreview")["value"]?.objects.orEmpty()
+        val chats = mutableListOf<JsonValue>()
+        var chatListUrl: String? = "$graphBase/me/chats?\$top=$MAX_CHATS&\$orderby=${urlEncode("lastMessagePreview/createdDateTime desc")}&\$expand=lastMessagePreview"
+        var chatListPages = 0
+        while (chatListUrl != null && chatListPages < MAX_PAGES) {
+            val page = api.get(chatListUrl)
+            chatListPages++
+            chats += page["value"]?.objects.orEmpty()
+            chatListUrl = page.str("@odata.nextLink")
+        }
         val out = mutableListOf<ProviderMessage>()
         var gaps = 0
         for (chat in chats) {
