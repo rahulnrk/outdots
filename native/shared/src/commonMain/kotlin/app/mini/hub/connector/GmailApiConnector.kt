@@ -161,6 +161,12 @@ class GmailApiConnector(
         return thread["messages"]?.objects.orEmpty().map { parseFull(it, threadId, selfAddress) }
     }
 
+    /** Raw bytes of one attachment. Network I/O. */
+    fun fetchAttachment(messageId: String, attachmentId: String, accessToken: StoredAccessToken, transport: ProviderHttpTransport): ByteArray? {
+        val res = client(transport, accessToken).get("$apiBase/messages/${urlEncode(messageId)}/attachments/${urlEncode(attachmentId)}")
+        return res.str("data")?.let { Base64Url.decode(it) }
+    }
+
     private fun metadata(api: ProviderApiClient, id: String, threadId: String?): ProviderMessage {
         val detail = api.get(
             "$apiBase/messages/${urlEncode(id)}?format=metadata" +
@@ -185,7 +191,11 @@ class GmailApiConnector(
         val payload = message["payload"]
         val headers = headers(message)
         val from = headers["from"] ?: "Unknown sender"
-        val body = payload?.let { MimeText.extractPlainText(it) }
+        val body = payload?.let { p ->
+            val text = MimeText.extractPlainText(p)
+            val markers = MimeText.attachmentMarkers(id, p)
+            if (markers.isEmpty()) text else (markers + listOfNotNull(text)).joinToString("\n")
+        }
         val dir = direction(message).takeIf { it != MessageDirection.Unknown }
             ?: if (selfAddress != null && from.contains(selfAddress, ignoreCase = true)) MessageDirection.Outbound else MessageDirection.Inbound
         return ProviderMessage(
@@ -263,6 +273,30 @@ object MimeText {
     fun extractPlainText(part: JsonValue): String? {
         findPart(part, "text/plain")?.let { return decode(it) }
         return findPart(part, "text/html")?.let { decode(it)?.let(::htmlToText) }
+    }
+
+    /** Attachment markers rendered inline by the chat UI: ⟦gm-image:msgId/attId|name⟧. */
+    fun attachmentMarkers(messageId: String, part: JsonValue): List<String> {
+        val out = mutableListOf<String>()
+        fun walk(p: JsonValue) {
+            val name = p.str("filename").orEmpty()
+            val att = p.path("body", "attachmentId")?.string
+            if (name.isNotEmpty() && att != null) {
+                val mime = p.str("mimeType").orEmpty().lowercase()
+                val kind = when {
+                    mime == "image/gif" -> "gm-gif"
+                    mime.startsWith("image/") -> "gm-image"
+                    mime.startsWith("video/") -> "gm-video"
+                    mime.startsWith("audio/") -> "gm-audio"
+                    else -> "gm-document"
+                }
+                val safe = name.replace('|', '_').replace('\u27e7', '_')
+                out += "\u27e6$kind:$messageId/$att|$safe\u27e7"
+            }
+            p["parts"]?.objects.orEmpty().forEach(::walk)
+        }
+        walk(part)
+        return out
     }
 
     private fun findPart(part: JsonValue, mime: String): JsonValue? {

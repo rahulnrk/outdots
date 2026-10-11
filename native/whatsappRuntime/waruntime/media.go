@@ -2,13 +2,47 @@ package waruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"google.golang.org/protobuf/proto"
 )
+
+func (r *Runtime) attachExtrasLocked(raw []byte) ([]byte, error) {
+	var dump sqliteDump
+	if err := json.Unmarshal(raw, &dump); err != nil {
+		return raw, nil
+	}
+	dump.Media = make(map[string][]byte, len(r.media))
+	for id, msg := range r.media {
+		if b, err := proto.Marshal(msg); err == nil {
+			dump.Media[id] = b
+		}
+	}
+	dump.Names = r.names
+	return json.Marshal(dump)
+}
+
+func (r *Runtime) restoreExtrasLocked(raw []byte) {
+	var dump sqliteDump
+	if err := json.Unmarshal(raw, &dump); err != nil {
+		return
+	}
+	r.media = make(map[string]*waE2E.Message, len(dump.Media))
+	for id, b := range dump.Media {
+		m := &waE2E.Message{}
+		if proto.Unmarshal(b, m) == nil {
+			r.media[id] = m
+		}
+	}
+	if dump.Names != nil {
+		r.names = dump.Names
+	}
+}
 
 const maxMediaRefs = 2000
 

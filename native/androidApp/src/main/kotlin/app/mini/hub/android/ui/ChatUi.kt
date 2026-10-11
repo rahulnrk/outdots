@@ -70,15 +70,22 @@ import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private val MEDIA_MARKER = Regex("\u27e6(\\w+):([^\u27e7]+)\u27e7\\s?")
+private val MEDIA_MARKER = Regex("\u27e6([\\w-]+):([^\u27e7]+)\u27e7\\s?")
 private val URL = Regex("(https?://[^\\s]+|www\\.[^\\s]+)")
 
-internal data class MediaRef(val kind: String, val id: String)
+internal data class MediaRef(val rawKind: String, val id: String) {
+    val isGmail get() = rawKind.startsWith("gm-")
+    val kind get() = rawKind.removePrefix("gm-")
+    val fileName get() = id.substringAfter('|', "")
+}
 
 internal fun splitMedia(text: String): Pair<MediaRef?, String> {
-    val m = MEDIA_MARKER.find(text) ?: return null to text
-    return MediaRef(m.groupValues[1], m.groupValues[2]) to text.removeRange(m.range).trim()
+    val refs = allMedia(text)
+    return refs.firstOrNull() to MEDIA_MARKER.replace(text, "").trim()
 }
+
+internal fun allMedia(text: String): List<MediaRef> =
+    MEDIA_MARKER.findAll(text).map { MediaRef(it.groupValues[1], it.groupValues[2]) }.toList()
 
 internal fun previewText(text: String): String {
     val (media, rest) = splitMedia(text)
@@ -196,11 +203,13 @@ fun ThreadView(
     onCancelDraft: () -> Unit,
     onDraftChanged: (String) -> Unit,
     onApprove: (String) -> Unit,
+    onAttention: (app.mini.hub.attention.AttentionAction) -> Unit = {},
 ) {
     val messages = remember(timeline) { timeline.filterNot { it.isRemoved }.sortedBy { it.postTime.epochMillis } }
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.scrollToItem(messages.size - 1) }
     var showLabels by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -210,6 +219,17 @@ fun ThreadView(
                 Text(SourceAppNames.forPackage(summary.packageId), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
             }
             OutlinedButton(onClick = { showLabels = true }) { Text(label ?: "Category") }
+            Box {
+                TextButton(onClick = { menu = true }) { Text("⋮") }
+                androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Mark done") }, onClick = { onAttention(app.mini.hub.attention.AttentionAction.MarkDone); menu = false })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Waiting for their reply") }, onClick = { onAttention(app.mini.hub.attention.AttentionAction.MarkWaiting); menu = false })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Snooze 4 hours") }, onClick = {
+                        onAttention(app.mini.hub.attention.AttentionAction.Snooze(app.mini.hub.domain.UtcInstant(System.currentTimeMillis() + 4 * 3600_000L))); menu = false
+                    })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Needs my attention") }, onClick = { onAttention(app.mini.hub.attention.AttentionAction.MarkNeedsAttention); menu = false })
+                }
+            }
         }
         if (showLabels) {
             AlertDialog(
@@ -251,7 +271,9 @@ fun ThreadView(
 @Composable
 private fun MessageBubble(obs: ObservedNotification, isGroupish: Boolean) {
     val mine = obs.direction == MessageDirection.Outbound
-    val (media, text) = splitMedia(obs.textFragments.joinToString("\n"))
+    val joined = obs.textFragments.joinToString("\n")
+    val medias = allMedia(joined)
+    val text = splitMedia(joined).second
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Card(
             modifier = Modifier.fillMaxWidth(0.82f),
@@ -264,7 +286,7 @@ private fun MessageBubble(obs: ObservedNotification, isGroupish: Boolean) {
                 if (!mine && isGroupish) {
                     Text(obs.senderHint, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 }
-                media?.let { MediaView(it) }
+                medias.forEach { MediaView(it) }
                 if (text.isNotBlank()) LinkText(text)
                 Text(
                     timeLabel(obs.postTime.epochMillis),
@@ -315,24 +337,42 @@ private fun MediaView(ref: MediaRef) {
     val thumb by produceState<ImageBitmap?>(null, ref.id) {
         value = withContext(Dispatchers.IO) {
             runCatching {
-                MiniHubRuntime.connectors.whatsappMediaThumbnail(ref.id)
-                    ?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
+                if (ref.isGmail) {
+                    if (ref.kind == "image" || ref.kind == "gif") {
+                        MiniHubRuntime.connectors.gmailDownloadAttachment(ref.id)?.let { f ->
+                            val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
+                            BitmapFactory.decodeFile(f.absolutePath, opts)?.asImageBitmap()
+                        }
+                    } else null
+                } else {
+                    MiniHubRuntime.connectors.whatsappMediaThumbnail(ref.id)
+                        ?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
+                }
             }.getOrNull()
         }
     }
     LaunchedEffect(opening) {
         if (!opening) return@LaunchedEffect
         status = "Loading…"
-        val file = withContext(Dispatchers.IO) { runCatching { MiniHubRuntime.connectors.whatsappDownloadMedia(ref.id) }.getOrNull() }
+        val file = withContext(Dispatchers.IO) {
+            runCatching {
+                if (ref.isGmail) MiniHubRuntime.connectors.gmailDownloadAttachment(ref.id)
+                else MiniHubRuntime.connectors.whatsappDownloadMedia(ref.id)
+            }.getOrNull()
+        }
         if (file == null) {
             status = "Couldn't load this ${ref.kind}."
-        } else if (ref.kind == "image" || ref.kind == "sticker") {
+        } else if (ref.kind == "image" || ref.kind == "sticker" || (ref.isGmail && ref.kind == "gif")) {
             full = withContext(Dispatchers.IO) { BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap() }
             status = if (full == null) "Couldn't show this ${ref.kind}." else null
         } else {
             status = null
             val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.media", file)
-            val mime = when (ref.kind) { "video", "gif" -> "video/*"; "audio" -> "audio/*"; else -> "*/*" }
+            val mime = when (ref.kind) {
+                "video", "gif" -> "video/*"; "audio" -> "audio/*"
+                else -> android.webkit.MimeTypeMap.getSingleton()
+                    .getMimeTypeFromExtension(file.extension.lowercase()) ?: "*/*"
+            }
             runCatching {
                 context.startActivity(
                     Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
@@ -343,7 +383,8 @@ private fun MediaView(ref: MediaRef) {
         opening = false
     }
     val label = when (ref.kind) {
-        "video" -> "▶ Video"; "gif" -> "▶ GIF"; "audio" -> "▶ Voice message"; "document" -> "📄 Open document"; "sticker" -> "Sticker"; else -> "Photo"
+        "video" -> "▶ Video"; "gif" -> "▶ GIF"; "audio" -> "▶ Voice message"
+        "document" -> "📄 " + ref.fileName.ifBlank { "Open document" }; "sticker" -> "Sticker"; else -> "Photo"
     }
     Box(
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 220.dp).clip(RoundedCornerShape(10.dp))

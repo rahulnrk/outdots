@@ -186,6 +186,11 @@ class AndroidGmailConnector(
         return connector.fetchThread(threadId, token, transport, account.displayName)
     }
 
+    fun fetchAttachment(account: ConnectedAccount, messageId: String, attachmentId: String): ByteArray? {
+        val token = tokens.get(account.id) ?: return null
+        return connector.fetchAttachment(messageId, attachmentId, token, transport)
+    }
+
     /** Same refresh-and-mark path sync uses; for send and conversation reads. */
     fun refreshForUse(account: ConnectedAccount, token: StoredAccessToken, nowMillis: Long): StoredAccessToken? =
         refreshOrMark(account, token, nowMillis)

@@ -9,8 +9,10 @@ import (
 )
 
 type sqliteDump struct {
-	Version int           `json:"v"`
-	Tables  []sqliteTable `json:"t"`
+	Version int               `json:"v"`
+	Tables  []sqliteTable     `json:"t"`
+	Media   map[string][]byte `json:"m,omitempty"`
+	Names   map[string]string `json:"n,omitempty"`
 }
 
 type sqliteTable struct {

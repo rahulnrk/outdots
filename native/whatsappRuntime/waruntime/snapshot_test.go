@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"go.mau.fi/whatsmeow/proto/waE2E"
 )
 
 func TestSnapshotRoundTripAndNoPlaintextFiles(t *testing.T) {
@@ -25,6 +27,19 @@ func TestSnapshotRoundTripAndNoPlaintextFiles(t *testing.T) {
 	}
 	if files := r.UnencryptedFiles(); files != "" {
 		t.Fatalf("plaintext session files: %s", files)
+	}
+	r.mu.Lock()
+	r.keepMediaLocked("m1", &waE2E.Message{ImageMessage: &waE2E.ImageMessage{JPEGThumbnail: []byte{1, 2}}})
+	r.mu.Unlock()
+	snap2, err := r.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Restore(snap2); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.MediaThumbnail("m1")) != 2 {
+		t.Fatal("media ref lost across restore")
 	}
 	if err := os.WriteFile(filepath.Join(dir, "leak.sqlite"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)

@@ -232,6 +232,7 @@ fun InboxScreen(
                     onCancelDraft = { viewModel.cancelLocalDraft() },
                     onDraftChanged = { text -> viewModel.updateLocalDraftText(text) },
                     onApprove = { body -> viewModel.prepareDraft(body, "") },
+                    onAttention = { a -> viewModel.applyAttentionAction(state.selectedConversation!!.conversationId, a) },
                 )
                 if (false) ConversationDetailView(
                     summary = state.selectedConversation!!,

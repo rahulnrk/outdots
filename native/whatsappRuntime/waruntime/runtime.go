@@ -347,7 +347,11 @@ func (r *Runtime) Snapshot() ([]byte, error) {
 	if r.db == nil {
 		return nil, errors.New("runtime closed")
 	}
-	return dumpSQL(r.db)
+	raw, err := dumpSQL(r.db)
+	if err != nil {
+		return nil, err
+	}
+	return r.attachExtrasLocked(raw)
 }
 
 func (r *Runtime) Restore(snapshot []byte) error {
@@ -361,6 +365,7 @@ func (r *Runtime) Restore(snapshot []byte) error {
 	if err := restoreSQL(r.db, snapshot); err != nil {
 		return err
 	}
+	r.restoreExtrasLocked(snapshot)
 	device, err := r.container.GetFirstDevice(context.Background())
 	if err != nil {
 		return err

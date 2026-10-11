@@ -177,6 +177,9 @@ object MiniHubRuntime {
                 },
             )
             runCatching { connectors.restoreWhatsAppSession() }
+                .getOrNull()
+                ?.takeIf { it is app.mini.hub.connector.WhatsAppReconnect.Restored }
+                ?.let { WhatsAppSyncService.start(context.applicationContext) }
 
             val app = context.applicationContext as Application
             app.registerComponentCallbacks(object : ComponentCallbacks2 {
@@ -252,6 +255,10 @@ object MiniHubRuntime {
             )
         }
         if (learned > 0) styleStore.save(styleEngine)
+    }
+
+    fun notifyInboxChanged() {
+        mainHandler.post { inboxRefresh?.invoke() }
     }
 
     fun setWhatsAppForeground(foreground: Boolean) {

@@ -114,7 +114,10 @@ class MainActivity : ComponentActivity() {
                     onCancelWhatsAppPairing = { MiniHubRuntime.connectors.cancelWhatsAppPairing() },
                     onWhatsAppLinked = { linked ->
                         val message = when (val outcome = MiniHubRuntime.connectors.completeWhatsAppLink(linked)) {
-                            is ConnectOutcome.Connected -> "WhatsApp linked: ${outcome.account.displayName ?: outcome.account.providerAccountId}."
+                            is ConnectOutcome.Connected -> {
+                            WhatsAppSyncService.start(applicationContext)
+                            "WhatsApp linked: ${outcome.account.displayName ?: outcome.account.providerAccountId}."
+                        }
                             is ConnectOutcome.Blocked -> outcome.reason
                             is ConnectOutcome.Started -> "WhatsApp pairing started."
                         }
@@ -123,6 +126,7 @@ class MainActivity : ComponentActivity() {
                     },
                     onDisconnectAccount = { account ->
                         MiniHubRuntime.connectors.disconnectAccount(account)
+                        if (account.id.provider == Provider.WHATSAPP) WhatsAppSyncService.stop(applicationContext)
                         android.util.Log.i("MiniSync", "account=${account.id.localId} disconnected by user")
                         connectionStatus.value = "Disconnected ${account.displayName ?: account.id.provider.wire}. Messages stay in MINI. Reconnect to resume."
                         accountsVersion.value++
@@ -213,6 +217,11 @@ class MainActivity : ComponentActivity() {
             MiniHubRuntime.ingestCoordinator.setUiListener { refreshInbox() }
             MiniHubRuntime.inboxRefresh = { refreshInbox() }
             MiniHubRuntime.setWhatsAppForeground(true)
+            if (MiniHubRuntime.connectors.listAccounts().any {
+                    it.id.provider == Provider.WHATSAPP && it.route == app.mini.hub.connector.ConnectorRoute.PhoneLocalBridge &&
+                        it.state != app.mini.hub.connector.ConnectionState.Disconnected
+                }
+            ) WhatsAppSyncService.start(applicationContext)
         }
     }
 
