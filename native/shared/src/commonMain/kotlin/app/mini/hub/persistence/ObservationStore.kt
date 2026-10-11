@@ -86,6 +86,13 @@ interface ObservationStore {
 
     /** Debug/test lookup by synthetic notification ID, including removed rows. */
     fun getObservationByNotificationIdIncludingRemoved(packageId: String, notificationId: Int): ObservedNotification?
+
+    /**
+     * Unified search across all stored messages.
+     * Searches title and text fragments. Excludes removed messages.
+     * Returns matching conversations with snippet, account and package metadata.
+     */
+    fun search(query: app.mini.hub.search.SearchQuery): List<app.mini.hub.search.SearchResult> = emptyList()
 }
 
 /**
@@ -369,5 +376,40 @@ class InMemoryObservationStore : ObservationStore {
             totalConversations = conversations.size,
             lastCursor = cursors.values.maxByOrNull { it.lastProcessedTimeMillis },
         )
+    }
+
+    override fun search(query: app.mini.hub.search.SearchQuery): List<app.mini.hub.search.SearchResult> = synchronized(lock) {
+        val q = query.queryText.trim().lowercase()
+        if (q.isBlank()) return emptyList()
+
+        val terms = q.split(Regex("\\s+")).filter { it.isNotBlank() }
+
+        // Find matching non-removed observations
+        val matches = observations.values
+            .filter { !it.isRemoved }
+            .filter { query.sourceFilter == null || it.packageId == query.sourceFilter }
+            .filter { obs ->
+                val fullText = (listOfNotNull(obs.title, obs.senderHint) + obs.textFragments).joinToString(" ").lowercase()
+                terms.all { term -> fullText.contains(term) }
+            }
+
+        // Group by conversation
+        val grouped = matches.groupBy { it.conversationId }
+        return grouped.map { (convId, obsList) ->
+            val summary = conversations[convId.key]
+            val newest = obsList.maxByOrNull { it.postTime.epochMillis } ?: obsList.first()
+            val snippet = newest.textFragments.firstOrNull { f -> terms.any { f.lowercase().contains(it) } }
+                ?: newest.textFragments.firstOrNull() ?: newest.title ?: ""
+            app.mini.hub.search.SearchResult(
+                conversationId = convId,
+                accountId = newest.accountId,
+                packageId = newest.packageId,
+                conversationTitle = summary?.title ?: newest.title ?: newest.senderHint,
+                senderHint = newest.senderHint,
+                snippet = snippet,
+                eventAt = newest.postTime,
+                messageCount = summary?.observationCount ?: obsList.size,
+            )
+        }.sortedByDescending { it.eventAt.epochMillis }.take(query.limit)
     }
 }

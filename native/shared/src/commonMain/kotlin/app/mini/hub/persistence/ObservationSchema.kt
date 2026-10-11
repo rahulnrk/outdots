@@ -65,6 +65,24 @@ object ObservationSchema {
         )
     """
 
+    const val CREATE_FTS_OBSERVATIONS = """
+        CREATE VIRTUAL TABLE IF NOT EXISTS obs_fts USING fts5(
+            obs_id UNINDEXED,
+            conversation_key UNINDEXED,
+            account_key UNINDEXED,
+            package_id UNINDEXED,
+            title,
+            body
+        )
+    """
+
+    const val POPULATE_FTS_FROM_EXISTING = """
+        INSERT OR REPLACE INTO obs_fts(obs_id, conversation_key, account_key, package_id, title, body)
+        SELECT id, conversation_key, account_key, package_id, coalesce(title, ''), text_fragments_json
+        FROM notification_observations
+        WHERE is_removed = 0
+    """
+
     const val INDEX_NOTIFICATION_KEY =
         "CREATE INDEX IF NOT EXISTS idx_obs_notif_key ON notification_observations (notification_key)"
 

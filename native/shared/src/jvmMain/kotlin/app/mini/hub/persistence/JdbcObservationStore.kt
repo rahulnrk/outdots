@@ -35,6 +35,10 @@ class JdbcObservationStore(path: String) : ObservationStore {
             s.execute(ObservationSchema.CREATE_CONVERSATIONS_V1)
             s.execute(ObservationSchema.CREATE_CURSORS_V1)
             s.execute(ObservationSchema.INDEX_NOTIFICATION_KEY)
+            runCatching {
+                s.execute(ObservationSchema.CREATE_FTS_OBSERVATIONS)
+                s.execute(ObservationSchema.POPULATE_FTS_FROM_EXISTING)
+            }
         }
         migrate()
     }
@@ -208,6 +212,63 @@ class JdbcObservationStore(path: String) : ObservationStore {
         lastCursor = null,
     )
 
+    @Synchronized
+    override fun search(query: app.mini.hub.search.SearchQuery): List<app.mini.hub.search.SearchResult> {
+        val q = query.queryText.trim()
+        if (q.isBlank()) return emptyList()
+
+        // Clean user query for FTS5: split words, append wildcard to each
+        val ftsQuery = q.split(Regex("[^a-zA-Z0-9_]+"))
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { "\"$it\"*" }
+
+        if (ftsQuery.isBlank()) return emptyList()
+
+        val filterClause = if (query.sourceFilter != null) " AND o.package_id = ?" else ""
+        val args = if (query.sourceFilter != null) arrayOf(ftsQuery, query.sourceFilter, query.limit) else arrayOf(ftsQuery, query.limit)
+
+        val sql = """
+            SELECT o.conversation_key, o.account_key, o.package_id,
+                   coalesce(s.title, o.title, o.sender_hint) AS conv_title,
+                   o.sender_hint,
+                   substr(f.body, 1, 120) AS match_snippet,
+                   o.post_time,
+                   coalesce(s.observation_count, 1) AS msg_count
+            FROM obs_fts f
+            JOIN notification_observations o ON o.id = f.obs_id
+            LEFT JOIN conversation_summaries s ON s.conversation_key = o.conversation_key
+            WHERE obs_fts MATCH ? AND o.is_removed = 0$filterClause
+            GROUP BY o.conversation_key
+            ORDER BY o.post_time DESC
+            LIMIT ?
+        """.trimIndent()
+
+        return try {
+            prepare(sql, *args).use { ps ->
+                ps.executeQuery().use { rs ->
+                    buildList {
+                        while (rs.next()) {
+                            add(
+                                app.mini.hub.search.SearchResult(
+                                    conversationId = ScopedId.parse(rs.getString("conversation_key")),
+                                    accountId = AccountId.parse(rs.getString("account_key")),
+                                    packageId = rs.getString("package_id"),
+                                    conversationTitle = rs.getString("conv_title") ?: "",
+                                    senderHint = rs.getString("sender_hint") ?: "",
+                                    snippet = rs.getString("match_snippet") ?: "",
+                                    eventAt = UtcInstant(rs.getLong("post_time")),
+                                    messageCount = rs.getInt("msg_count"),
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
     /** Exposed for future same-database features (search index) and tests. */
     internal fun connection(): Connection = connection
 
@@ -224,6 +285,18 @@ class JdbcObservationStore(path: String) : ObservationStore {
             ObservationSchema.encodeDirection(obs.direction), ObservationSchema.encodeRecipients(obs.recipients), obs.replyAnchor,
         ).use { it.executeUpdate() }
 
+        // Keep FTS index in sync
+        runCatching {
+            prepare("DELETE FROM obs_fts WHERE obs_id = ?", obs.id.key).use { it.executeUpdate() }
+            if (!obs.isRemoved) {
+                prepare(
+                    "INSERT INTO obs_fts(obs_id, conversation_key, account_key, package_id, title, body) VALUES (?,?,?,?,?,?)",
+                    obs.id.key, obs.conversationId.key, obs.accountId.key, obs.packageId,
+                    obs.title ?: "", obs.textFragments.joinToString(" "),
+                ).use { it.executeUpdate() }
+            }
+        }
+
         val conv = obs.conversationId.key
         prepare(
             """INSERT OR REPLACE INTO conversation_summaries (conversation_key, account_key, title, app_name, sender_hint, package_id,
@@ -238,9 +311,15 @@ class JdbcObservationStore(path: String) : ObservationStore {
         ).use { it.executeUpdate() }
     }
 
-    private fun removeRows(notificationKey: String): Int =
-        prepare("UPDATE notification_observations SET is_removed = 1, revision = revision + 1 WHERE notification_key = ? AND is_removed = 0", notificationKey)
+    private fun removeRows(notificationKey: String): Int {
+        // Also remove from FTS
+        runCatching {
+            prepare("DELETE FROM obs_fts WHERE obs_id IN (SELECT id FROM notification_observations WHERE notification_key = ?)", notificationKey)
+                .use { it.executeUpdate() }
+        }
+        return prepare("UPDATE notification_observations SET is_removed = 1, revision = revision + 1 WHERE notification_key = ? AND is_removed = 0", notificationKey)
             .use { it.executeUpdate() }
+    }
 
     private fun writeCursor(cursor: IngestCursor) {
         prepare(

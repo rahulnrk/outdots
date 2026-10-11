@@ -45,6 +45,14 @@ data class InboxViewState(
     val conversationLoadStatus: String? = null,
     /** An approved API send is in flight; the review dialog shows progress and cannot be re-tapped. */
     val isSending: Boolean = false,
+    /** Unified search query text entered in the inbox search box. */
+    val searchQuery: String = "",
+    /** Unified search results from all enabled sources, grouped by conversation. */
+    val searchResults: List<app.mini.hub.search.SearchResult> = emptyList(),
+    /** Optional source package filter for search results; null = all sources. */
+    val searchSourceFilter: String? = null,
+    /** True while a search query is being processed on the worker thread. */
+    val isSearching: Boolean = false,
 )
 
 data class ReviewContext(

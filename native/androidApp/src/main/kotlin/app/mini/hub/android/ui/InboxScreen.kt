@@ -216,17 +216,68 @@ fun InboxScreen(
                     onAttentionAction = { action -> viewModel.applyAttentionAction(state.selectedConversation!!.conversationId, action) },
                 )
             } else {
-                // Inbox List View
-                LocalUnderstandingDashboard(
-                    conversations = state.conversations,
-                    understanding = state.understanding,
+                // Unified search box across every enabled source
+                androidx.compose.material3.OutlinedTextField(
+                    value = state.searchQuery,
+                    onValueChange = { viewModel.onSearchQueryChanged(it) },
+                    placeholder = { Text("Search messages across all sources…") },
+                    singleLine = true,
+                    trailingIcon = {
+                        if (state.searchQuery.isNotBlank()) {
+                            TextButton(onClick = { viewModel.clearSearch() }) {
+                                Text("✕", style = MaterialTheme.typography.bodyLarge)
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 )
-                ConversationListView(
-                    conversations = state.conversations,
-                    view = state.attentionView,
-                    understanding = state.understanding,
-                    onSelect = { viewModel.selectConversation(it) },
-                )
+
+                if (state.searchQuery.isNotBlank()) {
+                    // Search Results View
+                    if (state.isSearching) {
+                        Text("Searching…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
+                    } else if (state.searchResults.isEmpty()) {
+                        Text("No matching messages found.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
+                    } else {
+                        Text("${state.searchResults.size} result(s) found", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 4.dp))
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(state.searchResults, key = { it.conversationId.key }) { res ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth().clickable { viewModel.selectConversationFromSearch(res) },
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                        ) {
+                                            Text(res.conversationTitle, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                            BadgeLabel(
+                                                text = "${res.accountId.provider.wire} · ${app.mini.hub.observation.SourceAppNames.forPackage(res.packageId)}",
+                                                color = MaterialTheme.colorScheme.secondary,
+                                            )
+                                        }
+                                        Text(res.senderHint, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(res.snippet, style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Inbox List View
+                    LocalUnderstandingDashboard(
+                        conversations = state.conversations,
+                        understanding = state.understanding,
+                    )
+                    ConversationListView(
+                        conversations = state.conversations,
+                        view = state.attentionView,
+                        understanding = state.understanding,
+                        onSelect = { viewModel.selectConversation(it) },
+                    )
+                }
             }
         }
     }

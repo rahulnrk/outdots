@@ -92,6 +92,8 @@ class InboxViewModel(
     /** Background executor on Android; inline on a plain JVM (no main Looper), like [postToMain]. */
     private val refreshRunner: (Runnable) -> Unit = refreshRunner
         ?: if (mainHandler != null) { r -> REFRESH_EXECUTOR.execute(r) } else { r -> r.run() }
+    /** Monotonic token: late search results are dropped when a newer query was typed. */
+    private var searchGeneration = 0L
 
     init {
         localDraftExperiment?.setReleaseListener { ticket ->
@@ -219,6 +221,54 @@ class InboxViewModel(
             }
         } else if (decision is app.mini.hub.attention.AttentionDecision.Rejected) {
             _state.value = _state.value.copy(outboxStatusMessage = decision.reason)
+        }
+    }
+
+    fun onSearchQueryChanged(text: String) {
+        val filter = _state.value.searchSourceFilter
+        _state.value = _state.value.copy(searchQuery = text)
+        executeSearch(text, filter)
+    }
+
+    fun onSearchSourceFilterChanged(packageId: String?) {
+        val query = _state.value.searchQuery
+        _state.value = _state.value.copy(searchSourceFilter = packageId)
+        executeSearch(query, packageId)
+    }
+
+    fun clearSearch() {
+        searchGeneration++
+        _state.value = _state.value.copy(searchQuery = "", searchResults = emptyList(), searchSourceFilter = null, isSearching = false)
+    }
+
+    private fun executeSearch(queryText: String, sourceFilter: String?) {
+        val trimmed = queryText.trim()
+        if (trimmed.isBlank()) {
+            searchGeneration++
+            _state.value = _state.value.copy(searchResults = emptyList(), isSearching = false)
+            return
+        }
+        val gen = ++searchGeneration
+        _state.value = _state.value.copy(isSearching = true)
+        val enabledSources = selectedSources().flatMap { it.packageIds }.toSet()
+        refreshRunner(Runnable {
+            // Search runs off the main thread; logs contain no query text or message content.
+            val query = app.mini.hub.search.SearchQuery(queryText = trimmed, sourceFilter = sourceFilter, limit = 50)
+            val rawResults = observationStore.search(query)
+            // Filter out sources that are disabled in settings
+            val filtered = rawResults.filter { it.packageId in enabledSources || it.packageId.startsWith("provider.") }
+            postToMain("search-result") {
+                if (gen != searchGeneration) return@postToMain
+                _state.value = _state.value.copy(searchResults = filtered, isSearching = false)
+            }
+        })
+    }
+
+    fun selectConversationFromSearch(result: app.mini.hub.search.SearchResult) {
+        val conv = _state.value.conversations.firstOrNull { it.conversationId == result.conversationId }
+            ?: observationStore.getConversationSummaries(result.accountId).firstOrNull { it.conversationId == result.conversationId }
+        if (conv != null) {
+            selectConversation(conv)
         }
     }
 

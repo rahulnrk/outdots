@@ -143,8 +143,8 @@ class SqlCipherObservationStore(
 
         // Probe FTS5 capability safely
         isFts5Supported = try {
-            db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS _fts_probe USING fts5(content);")
-            db.execSQL("DROP TABLE IF EXISTS _fts_probe;")
+            db.execSQL(ObservationSchema.CREATE_FTS_OBSERVATIONS)
+            db.execSQL(ObservationSchema.POPULATE_FTS_FROM_EXISTING)
             true
         } catch (_: Throwable) {
             false
@@ -396,6 +396,24 @@ class SqlCipherObservationStore(
         }
         db.insertWithOnConflict("notification_observations", null, values, SQLiteDatabase.CONFLICT_REPLACE)
 
+        // Keep FTS5 in sync if supported
+        if (isFts5Supported) {
+            runCatching {
+                db.delete("obs_fts", "obs_id = ?", arrayOf(obs.id.key))
+                if (!obs.isRemoved) {
+                    val ftsValues = ContentValues().apply {
+                        put("obs_id", obs.id.key)
+                        put("conversation_key", obs.conversationId.key)
+                        put("account_key", obs.accountId.key)
+                        put("package_id", obs.packageId)
+                        put("title", obs.title ?: "")
+                        put("body", obs.textFragments.joinToString(" "))
+                    }
+                    db.insert("obs_fts", null, ftsValues)
+                }
+            }
+        }
+
         val cursorGap = queryCursorGap(db, obs.packageId)
         val coverageExplanation = coverageExplanationFor(obs.provenance, cursorGap)
 
@@ -535,6 +553,11 @@ class SqlCipherObservationStore(
         notificationKey: String,
         removedAt: UtcInstant,
     ): Int {
+        if (isFts5Supported) {
+            runCatching {
+                db.execSQL("DELETE FROM obs_fts WHERE obs_id IN (SELECT id FROM notification_observations WHERE notification_key = ?)", arrayOf(notificationKey))
+            }
+        }
         val values = ContentValues().apply {
             put("is_removed", 1)
         }
@@ -596,6 +619,64 @@ class SqlCipherObservationStore(
             totalConversations = convCount,
             lastCursor = null,
         )
+    }
+
+    @Synchronized
+    override fun search(query: app.mini.hub.search.SearchQuery): List<app.mini.hub.search.SearchResult> {
+        val q = query.queryText.trim()
+        if (q.isBlank()) return emptyList()
+
+        val ftsQuery = q.split(Regex("[^a-zA-Z0-9_]+"))
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { "\"$it\"*" }
+        if (ftsQuery.isBlank()) return emptyList()
+
+        if (!isFts5Supported) {
+            // Like-based fallback
+            return emptyList()
+        }
+
+        val filterClause = if (query.sourceFilter != null) " AND f.package_id = ?" else ""
+        val args = if (query.sourceFilter != null) arrayOf(ftsQuery, query.sourceFilter, query.limit.toString()) else arrayOf(ftsQuery, query.limit.toString())
+
+        val sql = """
+            SELECT o.conversation_key, o.account_key, o.package_id,
+                   coalesce(s.title, o.title, o.sender_hint) AS conv_title,
+                   o.sender_hint,
+                   snippet(obs_fts, 5, '', '', '…', 15) AS match_snippet,
+                   o.post_time,
+                   coalesce(s.observation_count, 1) AS msg_count
+            FROM obs_fts f
+            JOIN notification_observations o ON o.id = f.obs_id
+            LEFT JOIN conversation_summaries s ON s.conversation_key = o.conversation_key
+            WHERE obs_fts MATCH ? AND o.is_removed = 0$filterClause
+            GROUP BY o.conversation_key
+            ORDER BY o.post_time DESC
+            LIMIT ?
+        """.trimIndent()
+
+        return try {
+            database.rawQuery(sql, args).use { cursor ->
+                buildList {
+                    while (cursor.moveToNext()) {
+                        add(
+                            app.mini.hub.search.SearchResult(
+                                conversationId = ScopedId.parse(cursor.getString(cursor.getColumnIndexOrThrow("conversation_key"))),
+                                accountId = AccountId.parse(cursor.getString(cursor.getColumnIndexOrThrow("account_key"))),
+                                packageId = cursor.getString(cursor.getColumnIndexOrThrow("package_id")),
+                                conversationTitle = cursor.getString(cursor.getColumnIndexOrThrow("conv_title")) ?: "",
+                                senderHint = cursor.getString(cursor.getColumnIndexOrThrow("sender_hint")) ?: "",
+                                snippet = cursor.getString(cursor.getColumnIndexOrThrow("match_snippet")) ?: "",
+                                eventAt = UtcInstant(cursor.getLong(cursor.getColumnIndexOrThrow("post_time"))),
+                                messageCount = cursor.getInt(cursor.getColumnIndexOrThrow("msg_count")),
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (_: Throwable) {
+            emptyList()
+        }
     }
 
     private fun queryCursorGap(db: SQLiteDatabase, source: String): Long {
