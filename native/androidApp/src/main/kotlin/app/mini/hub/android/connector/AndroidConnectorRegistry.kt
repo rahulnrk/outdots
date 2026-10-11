@@ -313,9 +313,10 @@ class AndroidConnectorRegistry(
     fun connectTelegram(botToken: String): ConnectOutcome = telegram.connect(botToken)
 
     fun connectMatrixBridge(provider: Provider, homeserverUrl: String, token: String): ConnectOutcome {
-        // Not offered from any UI (ConnectRoutePolicy); refuse defensively if reached anyway.
-        if (provider in ConnectRoutePolicy.MATRIX_BRIDGE_PROVIDERS) {
-            return ConnectOutcome.Blocked("Matrix bridge connections are not available in MINI.")
+        if (!app.mini.hub.connector.PhoneLocalBridgePolicy.allowsRemoteHomeserverPlaintext()) {
+            return ConnectOutcome.Blocked(
+                "Remote Matrix homeserver bridges are not available. WhatsApp, Messenger, Instagram and LinkedIn require a phone-local session.",
+            )
         }
         val hsUrlClean = homeserverUrl.trim().removeSuffix("/")
         val matrixBridge = matrixBridges[provider] ?: return ConnectOutcome.Blocked("Bridge not supported")

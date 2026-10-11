@@ -54,6 +54,9 @@ class ConnectorProviderGateway(
         val accountId = runCatching { AccountId.parse(payload.accountId) }.getOrNull()
             ?: return GatewayResult.Rejected("account_id_invalid")
         val account = accounts.get(accountId) ?: return GatewayResult.Rejected("account_not_connected")
+        if (account.route == ConnectorRoute.ThirdPartyBridge && !PhoneLocalBridgePolicy.allowsRemoteHomeserverPlaintext()) {
+            return GatewayResult.Rejected("remote_bridge_plaintext_forbidden")
+        }
         val descriptor = ConnectorCatalog.apiRouteFor(accountId.provider)
             ?: return GatewayResult.Rejected("no_api_route_for_provider")
         val sender = senders.firstOrNull { it.provider == accountId.provider }

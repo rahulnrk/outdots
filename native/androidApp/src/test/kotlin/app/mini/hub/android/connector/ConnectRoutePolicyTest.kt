@@ -16,6 +16,7 @@ class ConnectRoutePolicyTest {
         route(Provider.GOOGLE_CHAT), route(Provider.TWITTER), route(Provider.TELEGRAM, token = true),
         route(Provider.WHATSAPP, matrix = true), route(Provider.WHATSAPP_BUSINESS, matrix = true),
         route(Provider.INSTAGRAM, matrix = true), route(Provider.LINKEDIN, matrix = true),
+        route(Provider.FACEBOOK),
     )
 
     @Test(timeout = 30_000)
@@ -45,6 +46,7 @@ class ConnectRoutePolicyTest {
             val offered = ConnectRoutePolicy.visible(all, isDebugBuild = debug)
             assertTrue(offered.none { it.usesMatrixEntry }, "debug=$debug")
             assertTrue(offered.none { it.provider in ConnectRoutePolicy.MATRIX_BRIDGE_PROVIDERS }, "debug=$debug")
+            assertTrue(offered.none { it.provider == Provider.FACEBOOK }, "debug=$debug")
         }
     }
 }

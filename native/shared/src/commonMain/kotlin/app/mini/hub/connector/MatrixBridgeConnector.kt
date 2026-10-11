@@ -6,13 +6,11 @@ import app.mini.hub.domain.IdGenerator
 import kotlin.random.Random
 
 /**
- * Connects to a standard Matrix Client-Server API homeserver.
- * Used for mautrix/Beeper user-session bridges (WhatsApp, Instagram, LinkedIn, Facebook).
- * The user provides their homeserver URL and access token. 
+ * Matrix Client-Server adapter kept as foundation code only.
  *
- * Bridge sessions (like WhatsApp Web devices) run entirely on the homeserver. Message
- * content is processed by the bridge and stored unencrypted in the homeserver's database.
- * MINI acts as a standard Matrix client.
+ * It authenticates a Matrix user on a remote homeserver. That is not a WhatsApp, Instagram,
+ * LinkedIn or Messenger session, and plaintext is processed on the homeserver. Product policy
+ * forbids offering or dispatching this route; see [PhoneLocalBridgePolicy].
  */
 class MatrixBridgeConnector(
     override val provider: Provider,
