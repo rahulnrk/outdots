@@ -59,7 +59,9 @@ class ConnectorProviderGateway(
         val sender = senders.firstOrNull { it.provider == accountId.provider }
             ?: return GatewayResult.Rejected("sender_not_implemented")
         if (payload.attachments.isNotEmpty()) return GatewayResult.Rejected("attachments_not_supported_yet")
-        val capability = if (payload.replyTarget != null) Capability.Reply else Capability.SendNew
+        // Replying in an existing conversation (either with a specific message anchor or to a conversation thread) requires Reply capability.
+        // Providers like Teams, Google Chat, and X DM reply to the conversation directly without a separate message anchor.
+        val capability = if (payload.replyTarget != null || payload.conversationId.isNotBlank()) Capability.Reply else Capability.SendNew
         val snapshot = CapabilityResolver.resolve(descriptor, account.grantedScopes, gates.cleared(account), account.state)
         if (capability !in snapshot.enabled) {
             return GatewayResult.Rejected("capability_disabled:${capability.name}:${snapshot.disabled[capability] ?: "unknown"}")
