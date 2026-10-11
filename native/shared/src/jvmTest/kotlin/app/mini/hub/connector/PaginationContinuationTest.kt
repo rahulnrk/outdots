@@ -77,6 +77,19 @@ class PaginationContinuationTest {
         assertEquals(1, result.messages.size)
         // Revision must be derived from edited timestamp or counter (> 1)
         assertTrue(result.messages.first().revision >= 2L, "Edited Slack message must have revision >= 2")
+        val firstEdit = result.messages.first().revision
+        val secondTransport = ProviderHttpTransport.of { req ->
+            when {
+                req.url.contains("conversations.list") -> ProviderHttpResponse(200, "{\"ok\":true,\"channels\":[{\"id\":\"C1\",\"is_member\":true}]}")
+                req.url.contains("conversations.history") -> ProviderHttpResponse(
+                    200,
+                    """{"ok":true,"messages":[{"ts":"1700000000.000100","text":"Second edit","edited":{"ts":"1700000009.000000"}}]}""",
+                )
+                else -> ProviderHttpResponse(200, "{\"ok\":true}")
+            }
+        }
+        val second = connector.sync(account, StoredAccessToken("tok", null), SyncCheckpoint(), secondTransport, 50)
+        assertTrue(second.messages.first().revision > firstEdit, "A later Slack edit must have a higher revision than the first edit")
     }
 
     @Test(timeout = 30_000)

@@ -20,6 +20,22 @@ data class ChatCursor(val perConversation: Map<String, String> = emptyMap(), val
     }
 }
 
+/** Monotonic per-message revision from provider edit metadata. Unedited messages stay at 1. */
+internal object MessageRevision {
+    fun slack(message: JsonValue): Long {
+        val editedTs = message.path("edited", "ts")?.string ?: message["edited"]?.str("ts")
+        if (editedTs.isNullOrBlank()) return 1L
+        val seconds = editedTs.substringBefore('.').toLongOrNull() ?: return 2L
+        val frac = editedTs.substringAfter('.', "0").padEnd(6, '0').take(6).toLongOrNull() ?: 0L
+        return maxOf(seconds * 1_000_000L + frac, 2L)
+    }
+
+    fun rfc3339(value: String?): Long {
+        val millis = value?.let(Rfc3339::parseMillis) ?: return 1L
+        return if (millis > 1L) millis else 2L
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Slack (Web API, user token from the PKCE public-client flow)
 // ---------------------------------------------------------------------------------------------
@@ -110,7 +126,7 @@ class SlackConnector(private val apiBase: String = "https://slack.com/api") : Ac
                     bodyText = text,
                     direction = if (user == selfUser) MessageDirection.Outbound else MessageDirection.Inbound,
                     isDeleted = m.str("subtype") == "message_deleted",
-                    revision = if (m["edited"] != null) 2L else 1L,
+                    revision = MessageRevision.slack(m),
                     replyAnchor = m.str("thread_ts") ?: ts,
                 )
             }
@@ -243,7 +259,7 @@ class GoogleChatConnector(private val apiBase: String = "https://chat.googleapis
                     bodyText = text,
                     direction = MessageDirection.Unknown,
                     isDeleted = m["deletionMetadata"] != null,
-                    revision = if (m.str("lastUpdateTime") != null) 2L else 1L,
+                    revision = MessageRevision.rfc3339(m.str("lastUpdateTime")),
                     replyAnchor = m.path("thread", "name")?.string,
                 )
             }
@@ -359,7 +375,7 @@ class TeamsChatConnector(private val graphBase: String = "https://graph.microsof
                     bodyText = text,
                     direction = if (fromUser?.str("id") == account.providerAccountId) MessageDirection.Outbound else MessageDirection.Inbound,
                     isDeleted = m.str("deletedDateTime") != null,
-                    revision = if (modified > created) 2L else 1L,
+                    revision = if (modified > created) modified else 1L,
                     replyAnchor = id,
                 )
             }
