@@ -1,5 +1,6 @@
 package app.mini.hub.style
 
+import app.mini.hub.domain.AccountId
 import app.mini.hub.domain.UtcInstant
 
 enum class ContextCategory {
@@ -93,6 +94,7 @@ class AdaptiveStyleEngine(
         recipientId: String?,
         now: UtcInstant,
         sampleId: String? = null,
+        account: AccountId? = null,
     ): Boolean = synchronized(lock) {
         if (!consent.isEnabled) return false
         if (category !in consent.grantedCategories) return false
@@ -106,7 +108,18 @@ class AdaptiveStyleEngine(
         val sanitized = redactSensitiveData(text)
         if (isAdversarialInjection(sanitized)) return false
 
-        val profileKey = if (recipientId != null) "recip:$category:$recipientId" else "cat:$category"
+        val accountPrefix = account?.key ?: recipientId?.substringBefore('|')?.takeIf { '|' in recipientId }
+        val effectiveRecipient = recipientId
+        val profileKey = when {
+            effectiveRecipient != null -> {
+                val fullRecipientKey = if (accountPrefix != null && !effectiveRecipient.startsWith("$accountPrefix|")) {
+                    "$accountPrefix|$effectiveRecipient"
+                } else effectiveRecipient
+                "recip:$category:$fullRecipientKey"
+            }
+            accountPrefix != null -> "cat:$accountPrefix:$category"
+            else -> "cat:$category"
+        }
         val existing = profiles[profileKey]
 
         val emojiCount = countEmojis(sanitized)
@@ -163,7 +176,9 @@ class AdaptiveStyleEngine(
         val updatedProfile = CompactStyleProfile(
             id = profileKey,
             category = category,
-            recipientId = recipientId,
+            recipientId = if (effectiveRecipient != null && accountPrefix != null && !effectiveRecipient.startsWith("$accountPrefix|")) {
+                "$accountPrefix|$effectiveRecipient"
+            } else effectiveRecipient,
             traits = updatedTraits,
             exampleSnippets = examples,
             observationCount = updatedCount,
@@ -182,24 +197,47 @@ class AdaptiveStyleEngine(
         return true
     }
 
-    fun resolveProfile(category: ContextCategory, recipientId: String?, now: UtcInstant = UtcInstant(0L)): CompactStyleProfile = synchronized(lock) {
+    fun resolveProfile(
+        category: ContextCategory,
+        recipientId: String?,
+        now: UtcInstant = UtcInstant(0L),
+        account: AccountId? = null,
+    ): CompactStyleProfile = synchronized(lock) {
         if (!consent.isEnabled) {
             return defaultNeutralProfile(category, recipientId, now)
         }
 
+        val accountPrefix = account?.key ?: recipientId?.substringBefore('|')?.takeIf { '|' in recipientId }
+
         // Recipient profile requires sufficient evidence (confidence >= 0.40 / 2+ samples)
+        // If evidence is insufficient for recipient personalization, fall back to account category profile,
+        // but if recipient profile exists (>= 1 sample) and no category profile has observations, return it.
+        var lowConfidenceRecip: CompactStyleProfile? = null
         if (recipientId != null) {
-            val recipKey = "recip:$category:$recipientId"
+            val fullRecipientKey = if (accountPrefix != null && !recipientId.startsWith("$accountPrefix|")) {
+                "$accountPrefix|$recipientId"
+            } else recipientId
+            val recipKey = "recip:$category:$fullRecipientKey"
             val recipProfile = profiles[recipKey]
-            if (recipProfile != null && recipProfile.confidence >= MIN_RECIPIENT_CONFIDENCE) {
-                return recipProfile
+            if (recipProfile != null) {
+                if (recipProfile.confidence >= MIN_RECIPIENT_CONFIDENCE) {
+                    return recipProfile
+                }
+                lowConfidenceRecip = recipProfile
             }
         }
 
-        val catKey = "cat:$category"
-        val catProfile = profiles[catKey]
-        if (catProfile != null) {
-            return catProfile
+        if (accountPrefix != null) {
+            val accountCatKey = "cat:$accountPrefix:$category"
+            val accountCatProfile = profiles[accountCatKey]
+            if (accountCatProfile != null && accountCatProfile.observationCount > 0) {
+                return accountCatProfile
+            }
+        }
+
+        // If the query was specific to a recipient that exists in this account, return its profile
+        if (lowConfidenceRecip != null && accountPrefix != null) {
+            return lowConfidenceRecip
         }
 
         return defaultNeutralProfile(category, recipientId, now)
@@ -284,6 +322,12 @@ class AdaptiveStyleEngine(
                 }
                 "p" -> {
                     if (parts.size < 16) return false
+                    val decodedId = StyleStateCodec.decode(parts[1])
+                    // Discard old accountless category profiles (e.g. "cat:Professional"), which have no account prefix.
+                    // An accounted category profile has format "cat:<provider>|<localId>:<category>".
+                    if (decodedId.startsWith("cat:") && decodedId.count { it == ':' } < 2) {
+                        continue
+                    }
                     val profile = runCatching {
                         CompactStyleProfile(
                             id = StyleStateCodec.decode(parts[1]),

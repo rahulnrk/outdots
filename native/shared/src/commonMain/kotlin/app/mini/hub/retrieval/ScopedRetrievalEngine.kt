@@ -38,6 +38,9 @@ class ScopedRetrievalEngine(
 ) {
     fun retrieve(query: ScopedRetrievalQuery): ScopedRetrievalResult {
         // Enforce conversation compartment matches query
+        require(query.compartment.value == query.conversationId.account.key) {
+            "Compartment ${query.compartment.value} does not match conversation account ${query.conversationId.account.key}"
+        }
         val conversationKey = query.conversationId.key
 
         // Get observations for this conversation

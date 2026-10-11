@@ -239,6 +239,7 @@ class InboxViewModel(
             category = styleCategory,
             recipientId = styleRecipient(summary),
             now = clock.now(),
+            account = summary.accountId,
         )
 
         abandonLocalDraft()
@@ -474,9 +475,11 @@ class InboxViewModel(
             connectedAccount.state in USABLE_STATES
         val isEmail = app.mini.hub.connector.ReplyTargets.usesSubject(provider)
 
-        // Reply to the newest message from the other side; fall back to the newest message.
+        // Reply to the newest inbound message; fall back to the newest non-own message, then newest overall.
+        // Timeline is ordered newest-first (TIMELINE_ORDER: post_time DESC, observed_at DESC, id DESC),
+        // so firstOrNull gives the newest message matching the condition.
         val live = _state.value.selectedTimeline.filter { !it.isRemoved }
-        val anchor = live.lastOrNull { !isOwnMessage(it, connectedAccount) } ?: live.lastOrNull()
+        val anchor = live.firstOrNull { isInboundMessage(it, connectedAccount) } ?: live.firstOrNull()
         val providerMessageId = anchor?.notificationKey
             ?.takeIf { it.startsWith("provider:${selected.accountId.key}:") }
             ?.removePrefix("provider:${selected.accountId.key}:")
@@ -525,6 +528,12 @@ class InboxViewModel(
                 note = note,
             ),
         )
+    }
+
+    private fun isInboundMessage(obs: app.mini.hub.observation.ObservedNotification, account: app.mini.hub.connector.ConnectedAccount?): Boolean = when (obs.direction) {
+        app.mini.hub.connector.MessageDirection.Inbound -> true
+        app.mini.hub.connector.MessageDirection.Outbound -> false
+        null, app.mini.hub.connector.MessageDirection.Unknown -> !isOwnMessage(obs, account)
     }
 
     private fun isOwnMessage(obs: app.mini.hub.observation.ObservedNotification, account: app.mini.hub.connector.ConnectedAccount?): Boolean {

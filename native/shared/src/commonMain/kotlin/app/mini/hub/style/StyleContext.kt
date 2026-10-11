@@ -76,10 +76,10 @@ object StyleContext {
             val category = forMessage(account.id.provider, message.subject, text)
             val recipient = recipientFor(account, message)
             val id = sampleId(account.id.key, message.providerMessageId)
-            if (engine.learnFromText(text, TextAuthorship.UserAuthoredSentMessage, category, recipient, now, id)) {
+            if (engine.learnFromText(text, TextAuthorship.UserAuthoredSentMessage, category, recipient, now, id, account = account.id)) {
                 learned++
             }
-            engine.learnFromText(text, TextAuthorship.UserAuthoredSentMessage, category, null, now, "cat:$id")
+            engine.learnFromText(text, TextAuthorship.UserAuthoredSentMessage, category, null, now, "cat:$id", account = account.id)
         }
         return learned
     }
@@ -107,10 +107,10 @@ object StyleContext {
                 val category = forMessage(account.id.provider, observation.title, text)
                 val recipient = "${account.id.key}|${counterparty(account, observation)}"
                 val id = sampleId(account.id.key, observation.notificationKey)
-                if (engine.learnFromText(text, TextAuthorship.UserAuthoredSentMessage, category, recipient, now, id)) {
+                if (engine.learnFromText(text, TextAuthorship.UserAuthoredSentMessage, category, recipient, now, id, account = account.id)) {
                     learned++
                 }
-                engine.learnFromText(text, TextAuthorship.UserAuthoredSentMessage, category, null, now, "cat:$id")
+                engine.learnFromText(text, TextAuthorship.UserAuthoredSentMessage, category, null, now, "cat:$id", account = account.id)
             }
         return learned
     }

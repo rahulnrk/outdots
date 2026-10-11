@@ -78,8 +78,8 @@ class MainActivity : ComponentActivity() {
                 val category = StyleContext.forMessage(summary.accountId.provider, summary.title, body)
                 val recipientId = "${summary.accountId.key}|${recipient.ifBlank { summary.senderHint }}"
                 val sampleId = "approved:${summary.conversationId.key}:${body.hashCode()}"
-                if (MiniHubRuntime.styleEngine.learnFromText(body, authorship, category, recipientId, MiniHubRuntime.clock.now(), sampleId)) {
-                    MiniHubRuntime.styleEngine.learnFromText(body, authorship, category, null, MiniHubRuntime.clock.now(), "cat:$sampleId")
+                if (MiniHubRuntime.styleEngine.learnFromText(body, authorship, category, recipientId, MiniHubRuntime.clock.now(), sampleId, account = summary.accountId)) {
+                    MiniHubRuntime.styleEngine.learnFromText(body, authorship, category, null, MiniHubRuntime.clock.now(), "cat:$sampleId", account = summary.accountId)
                     MiniHubRuntime.styleStore.save(MiniHubRuntime.styleEngine)
                 }
             },

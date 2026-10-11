@@ -18,7 +18,7 @@ import kotlin.test.assertTrue
 class ScopedRetrievalEngineTest {
     private val account = AccountId(Provider.WHATSAPP, "user_1")
     private val convId = ScopedId(account, ScopedId.Kind.CONVERSATION, "client_project")
-    private val scope = CompartmentId("client:project")
+    private val scope = CompartmentId(account.key)
 
     @Test
     fun testRetrievalWithinBudget() {
