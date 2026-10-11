@@ -1,6 +1,6 @@
 # Phone-local bridge feasibility
 
-**Date:** 11 October 2026. **Status:** contract + refusal tests; no on-device runtime packaged.
+**Date:** 11 October 2026. **Status:** WhatsApp phone-local **contract + encrypted envelope**; runtime **not packaged**.
 
 This is not a claim that WhatsApp, Messenger, Instagram or LinkedIn work in MINI.
 
@@ -20,6 +20,36 @@ Pilot plaintext for those four networks (plus WhatsApp Business *mobile app*, no
 | Messenger | No Matrix route; notification-only plus a deferred Page API | `PhoneLocalBridgePolicyTest.messengerHasNoMatrixRouteAndIsStillAPilotBridgeNetwork` |
 
 The Matrix Client-Server adapter remains in the tree as foundation code. It is not a product path.
+
+## WhatsApp personal: inspection (this milestone)
+
+Chosen candidate to inspect, **not packaged:** [whatsmeow](https://github.com/tulir/whatsmeow) (`go.mau.fi/whatsmeow`).
+
+| Fact | Evidence | MINI implication |
+|---|---|---|
+| License | [MPL-2.0 LICENSE](https://github.com/tulir/whatsmeow/blob/main/LICENSE) fetched 2026-10-11 | Source of modified files must stay MPL-2.0; the rest of MINI can remain separately licensed |
+| Protocol | Unofficial WhatsApp **web multi-device** client (QR / `GetQRChannel`, `PairPhone`, SQLite device store) | Same class of companion-device linking as WhatsApp Linked Devices, not Cloud API |
+| Android packaging | Library is **Go**. No first-party AAR. Would need gomobile, a sidecar, or a rewrite | APK size, Play policy, JNI, battery and SQLCipher coexistence **not measured** |
+| Session | Device keys live in a local SQL store in the example | MINI must wrap that blob in Keystore/SQLCipher; never paste a Matrix token |
+| Identity | Linked device has a WhatsApp JID / phone | Required identity is E.164 (`+15551234567`), never `@user:homeserver` |
+| Send proof | WhatsApp stanza id after protocol ack | Receipt prefix `whatsapp:` means provider forwarding, `matrix:` does not |
+
+Official complementary doc: [WhatsApp Linked Devices](https://faq.whatsapp.com/1317564962315842). This is not an SDK and does not authorize an unofficial client.
+
+### What landed in code
+
+| Piece | Behavior |
+|---|---|
+| `WhatsAppPhoneSession` | Phone-local hosting; pairing/send fail with `whatsapp_runtime_not_packaged` until a client is injected |
+| `InMemoryEncryptedBridgeSessionStore` | Opaque envelope copies; JVM tests |
+| `AndroidKeystoreBridgeSessionStore` | AES-GCM Keystore envelope, no content logging |
+| Catalog | `whatsappPhoneLocal` preferred over Matrix; status `DeferredExternalRequirement` |
+| Accounts UI | WhatsApp still **not offered** |
+| Dispatch | `PhoneLocalBridge` may use the exact-review API path; unprovisioned sender still rejects; remote Matrix still forbidden |
+
+Tests: `WhatsAppPhoneSessionTest`. A fake linked client proves the **policy can be met**; the default client proves the **runtime is absent**.
+
+No Go module, gomobile bind, JNI, or Gradle dependency was added.
 
 ## Candidates inspected from public docs, not packaged
 
@@ -50,9 +80,9 @@ Success on WhatsApp does not qualify Messenger, Instagram or LinkedIn.
 
 ## Not done
 
-- No bridge binary, JNI, or Go/Python runtime in the APK.
-- No UI for provider QR/device linking.
-- No encrypted bridge session store.
-- No live qualification.
+- No whatsmeow/gomobile/JNI binary in the APK.
+- No QR linking UI.
+- No live WhatsApp qualification.
+- Messenger, Instagram and LinkedIn unchanged.
 
-Next implementation step, if authorized: pick **one** network, inspect a specific library's license and Android packaging on this machine, then add a failing device-session test before any dependency.
+Next implementation step, if authorized: gomobile (or equivalent) spike of whatsmeow on this machine, record APK size and whether Keystore can wrap its device store, then replace `UnprovisionedWhatsAppClient` behind the existing contract. Do not enable a Matrix homeserver.
