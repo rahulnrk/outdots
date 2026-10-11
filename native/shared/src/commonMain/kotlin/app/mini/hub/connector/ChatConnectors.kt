@@ -63,20 +63,39 @@ class SlackConnector(private val apiBase: String = "https://slack.com/api") : Ac
             .take(MAX_CONVERSATIONS)
         val marks = cursor.perConversation.toMutableMap()
         val out = mutableListOf<ProviderMessage>()
+        var gaps = 0
         for (conv in conversations) {
             if (out.size >= maxMessages) break
             val id = conv.str("id") ?: continue
-            val params = buildMap {
-                put("channel", id); put("limit", "${minOf(PER_CONVERSATION, maxMessages - out.size)}")
-                marks[id]?.let { put("oldest", it) }
+            val pageMessages = mutableListOf<JsonValue>()
+            var historyCursor: String? = null
+            var historyComplete = false
+            var pages = 0
+            while (pages < MAX_HISTORY_PAGES) {
+                pages++
+                val params = buildMap {
+                    put("channel", id)
+                    put("limit", "$PER_CONVERSATION")
+                    marks[id]?.let { put("oldest", it) }
+                    historyCursor?.let { put("cursor", it) }
+                }
+                val history = try {
+                    slackCall(transport, accessToken, "conversations.history", params)
+                } catch (e: ConnectorHttpException) {
+                    if (e.reason in SKIPPABLE) {
+                        historyComplete = true
+                        break
+                    } else throw e
+                }
+                pageMessages += history["messages"]?.objects.orEmpty()
+                val hasMore = history["has_more"]?.bool == true
+                historyCursor = history.path("response_metadata", "next_cursor")?.string?.takeIf { it.isNotBlank() }
+                if (!hasMore || historyCursor == null) {
+                    historyComplete = true
+                    break
+                }
             }
-            val history = try {
-                slackCall(transport, accessToken, "conversations.history", params)
-            } catch (e: ConnectorHttpException) {
-                if (e.reason in SKIPPABLE) continue else throw e
-            }
-            val messages = history["messages"]?.objects.orEmpty()
-            messages.forEach { m ->
+            pageMessages.forEach { m ->
                 val ts = m.str("ts") ?: return@forEach
                 if (m.str("subtype") in IGNORED_SUBTYPES) return@forEach
                 val user = m.str("user") ?: m.str("bot_id") ?: "unknown"
@@ -95,9 +114,13 @@ class SlackConnector(private val apiBase: String = "https://slack.com/api") : Ac
                     replyAnchor = m.str("thread_ts") ?: ts,
                 )
             }
-            messages.mapNotNull { it.str("ts") }.maxByOrNull { it.toDoubleOrNull() ?: 0.0 }?.let { marks[id] = it }
+            if (historyComplete) {
+                pageMessages.mapNotNull { it.str("ts") }.maxByOrNull { it.toDoubleOrNull() ?: 0.0 }?.let { marks[id] = it }
+            } else {
+                gaps++
+            }
         }
-        return SyncResult(out, SyncCheckpoint(ChatCursor(marks).encode(), checkpoint.processedCount + out.size, checkpoint.gapCount), ConnectionState.Healthy)
+        return SyncResult(out, SyncCheckpoint(ChatCursor(marks).encode(), checkpoint.processedCount + out.size, checkpoint.gapCount + gaps), ConnectionState.Healthy)
     }
 
     internal fun slackCall(transport: ProviderHttpTransport, token: StoredAccessToken, method: String, form: Map<String, String>): JsonValue {
@@ -118,6 +141,7 @@ class SlackConnector(private val apiBase: String = "https://slack.com/api") : Ac
     companion object {
         private const val MAX_CONVERSATIONS = 20
         private const val PER_CONVERSATION = 20
+        private const val MAX_HISTORY_PAGES = 5
         private val SKIPPABLE = setOf("channel_not_found", "not_in_channel", "missing_scope")
         private val IGNORED_SUBTYPES = setOf("channel_join", "channel_leave", "channel_topic", "channel_purpose")
 
@@ -178,18 +202,35 @@ class GoogleChatConnector(private val apiBase: String = "https://chat.googleapis
         val spaces = api.get("$apiBase/spaces?pageSize=$MAX_SPACES")["spaces"]?.objects.orEmpty()
             .sortedByDescending { Rfc3339.parseMillis(it.str("lastActiveTime")) ?: 0L }
         val out = mutableListOf<ProviderMessage>()
+        var gaps = 0
         for (space in spaces) {
             if (out.size >= maxMessages) break
             val name = space.str("name") ?: continue
             val since = marks[name]
             val filter = since?.let { "&filter=" + urlEncode("createTime > \"$it\"") } ?: ""
-            val page = try {
-                api.get("$apiBase/$name/messages?pageSize=${minOf(PER_SPACE, maxMessages - out.size)}&orderBy=${urlEncode("createTime desc")}$filter")
-            } catch (e: ConnectorHttpException) {
-                if (e.kind == ProviderErrorKind.NotFound || e.kind == ProviderErrorKind.PermissionMissing) continue else throw e
+            val pageMessages = mutableListOf<JsonValue>()
+            var pageToken: String? = null
+            var pages = 0
+            var complete = false
+            while (pages < MAX_PAGES) {
+                pages++
+                val tokenQ = pageToken?.let { "&pageToken=" + urlEncode(it) } ?: ""
+                val page = try {
+                    api.get("$apiBase/$name/messages?pageSize=$PER_SPACE&orderBy=${urlEncode("createTime desc")}$filter$tokenQ")
+                } catch (e: ConnectorHttpException) {
+                    if (e.kind == ProviderErrorKind.NotFound || e.kind == ProviderErrorKind.PermissionMissing) {
+                        complete = true
+                        break
+                    } else throw e
+                }
+                pageMessages += page["messages"]?.objects.orEmpty()
+                pageToken = page.str("nextPageToken")?.takeIf { it.isNotBlank() }
+                if (pageToken == null) {
+                    complete = true
+                    break
+                }
             }
-            val messages = page["messages"]?.objects.orEmpty()
-            messages.forEach { m ->
+            pageMessages.forEach { m ->
                 val id = m.str("name") ?: return@forEach
                 val text = m.str("text").orEmpty()
                 out += ProviderMessage(
@@ -206,14 +247,19 @@ class GoogleChatConnector(private val apiBase: String = "https://chat.googleapis
                     replyAnchor = m.path("thread", "name")?.string,
                 )
             }
-            messages.mapNotNull { it.str("createTime") }.maxByOrNull { Rfc3339.parseMillis(it) ?: 0L }?.let { marks[name] = it }
+            if (complete) {
+                pageMessages.mapNotNull { it.str("createTime") }.maxByOrNull { Rfc3339.parseMillis(it) ?: 0L }?.let { marks[name] = it }
+            } else {
+                gaps++
+            }
         }
-        return SyncResult(out, SyncCheckpoint(ChatCursor(marks).encode(), checkpoint.processedCount + out.size, checkpoint.gapCount), ConnectionState.Healthy)
+        return SyncResult(out, SyncCheckpoint(ChatCursor(marks).encode(), checkpoint.processedCount + out.size, checkpoint.gapCount + gaps), ConnectionState.Healthy)
     }
 
     companion object {
         private const val MAX_SPACES = 30
         private const val PER_SPACE = 20
+        private const val MAX_PAGES = 5
     }
 }
 
@@ -269,20 +315,32 @@ class TeamsChatConnector(private val graphBase: String = "https://graph.microsof
         val marks = ChatCursor.decode(checkpoint.cursor).perConversation.toMutableMap()
         val chats = api.get("$graphBase/me/chats?\$top=$MAX_CHATS&\$orderby=${urlEncode("lastMessagePreview/createdDateTime desc")}&\$expand=lastMessagePreview")["value"]?.objects.orEmpty()
         val out = mutableListOf<ProviderMessage>()
+        var gaps = 0
         for (chat in chats) {
             if (out.size >= maxMessages) break
             val chatId = chat.str("id") ?: continue
             val lastPreview = chat.path("lastMessagePreview", "createdDateTime")?.string
             val mark = marks[chatId]
             if (mark != null && lastPreview != null && (Rfc3339.parseMillis(lastPreview) ?: 0L) <= (Rfc3339.parseMillis(mark) ?: 0L)) continue
-            val page = try {
-                api.get("$graphBase/chats/${urlEncode(chatId)}/messages?\$top=$PER_CHAT")
-            } catch (e: ConnectorHttpException) {
-                if (e.kind == ProviderErrorKind.NotFound || e.kind == ProviderErrorKind.PermissionMissing) continue else throw e
+            val pageMessages = mutableListOf<JsonValue>()
+            var nextUrl: String? = "$graphBase/chats/${urlEncode(chatId)}/messages?\$top=$PER_CHAT"
+            var pages = 0
+            while (nextUrl != null && pages < MAX_PAGES) {
+                val page = try {
+                    api.get(nextUrl)
+                } catch (e: ConnectorHttpException) {
+                    if (e.kind == ProviderErrorKind.NotFound || e.kind == ProviderErrorKind.PermissionMissing) {
+                        nextUrl = null
+                        break
+                    } else throw e
+                }
+                pages++
+                pageMessages += page["value"]?.objects.orEmpty().filter { it.str("messageType") == "message" }
+                nextUrl = page.str("@odata.nextLink")
             }
+            val complete = nextUrl == null
             val markMillis = mark?.let(Rfc3339::parseMillis) ?: Long.MIN_VALUE
-            val messages = page["value"]?.objects.orEmpty().filter { it.str("messageType") == "message" }
-            messages.forEach { m ->
+            pageMessages.forEach { m ->
                 val id = m.str("id") ?: return@forEach
                 val created = Rfc3339.parseMillis(m.str("createdDateTime")) ?: 0L
                 val modified = Rfc3339.parseMillis(m.str("lastModifiedDateTime")) ?: created
@@ -305,15 +363,20 @@ class TeamsChatConnector(private val graphBase: String = "https://graph.microsof
                     replyAnchor = id,
                 )
             }
-            messages.mapNotNull { m -> listOfNotNull(m.str("lastModifiedDateTime"), m.str("createdDateTime")).maxByOrNull { Rfc3339.parseMillis(it) ?: 0L } }
-                .maxByOrNull { Rfc3339.parseMillis(it) ?: 0L }?.let { marks[chatId] = it }
+            if (complete) {
+                pageMessages.mapNotNull { m -> listOfNotNull(m.str("lastModifiedDateTime"), m.str("createdDateTime")).maxByOrNull { Rfc3339.parseMillis(it) ?: 0L } }
+                    .maxByOrNull { Rfc3339.parseMillis(it) ?: 0L }?.let { marks[chatId] = it }
+            } else {
+                gaps++
+            }
         }
-        return SyncResult(out, SyncCheckpoint(ChatCursor(marks).encode(), checkpoint.processedCount + out.size, checkpoint.gapCount), ConnectionState.Healthy)
+        return SyncResult(out, SyncCheckpoint(ChatCursor(marks).encode(), checkpoint.processedCount + out.size, checkpoint.gapCount + gaps), ConnectionState.Healthy)
     }
 
     companion object {
         private const val MAX_CHATS = 20
         private const val PER_CHAT = 20
+        private const val MAX_PAGES = 5
     }
 }
 
