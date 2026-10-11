@@ -67,7 +67,11 @@ class InboxViewModel(
      * Network I/O: always invoked off the main thread. Null when the provider has no reader.
      */
     private val conversationLoader: ((ConversationObservationSummary) -> List<app.mini.hub.observation.ObservedNotification>?)? = null,
+    /** Runs provider sends off the main thread. Tests inject a deterministic runner. */
+    private val sendRunner: (Runnable) -> Unit = { r -> Thread(r, "mini-send").start() },
 ) {
+    /** Main-thread guard: true from the first tap until the send result is applied. */
+    private var sendInFlight = false
     private var conversationLoadGeneration = 0L
     // Monotonic token so a late callback from a cancelled or superseded request cannot overwrite
     // the cancellation state or a newer draft.
@@ -500,6 +504,7 @@ class InboxViewModel(
     }
 
     fun approveAndDispatch(handoffLauncher: HandoffLauncher) {
+        if (sendInFlight) return // a second tap while a send is in flight does nothing
         val payload = _state.value.activeReviewPayload ?: return
         val context = _state.value.reviewContext
         val launcher = (handoffLauncher as? AndroidNativeHandoffLauncher)?.forPackage(context?.handoffPackage) ?: handoffLauncher
@@ -510,20 +515,41 @@ class InboxViewModel(
             outboxCmdId = command.id
             approvedState
         }
+        val cmdId = outboxCmdId ?: return
 
-        val cmdId = outboxCmdId
-        if (cmdId != null) {
-            val finalActionState = actionStore.transaction { currentActionState ->
-                actionController.dispatch(
-                    state = currentActionState,
-                    commandId = cmdId,
-                    payload = payload,
-                    gateway = gateway,
-                    handoff = launcher,
-                )
+        if (payload.route == ActionRoute.NativeHandoff) {
+            // Handoff opens an activity: it must stay on the main thread and makes no network call.
+            val finalState = actionStore.transaction { actionController.dispatch(it, cmdId, payload, gateway, launcher) }
+            applyDispatchResult(payload, context, finalState.outbox.find { it.id == cmdId })
+            return
+        }
+
+        // API send in three durable steps. The provider call runs off the main thread and outside
+        // any database transaction; Dispatching and the consumed approval are committed first, so a
+        // crash mid-call is recovered at startup as OutcomeUnknown and never re-sent.
+        sendInFlight = true
+        _state.value = _state.value.copy(isSending = true, outboxStatusMessage = "Sending through ${context?.providerName ?: "the provider"}…")
+        sendRunner(Runnable {
+            val finalCommand = runCatching {
+                val begun = actionStore.transaction { actionController.beginDispatch(it, cmdId, payload) }
+                val command = begun.outbox.first { it.id == cmdId }
+                if (command.state != OutboxState.Dispatching) {
+                    command
+                } else {
+                    val result = actionController.executeGateway(command, payload, gateway)
+                    actionStore.transaction { actionController.completeDispatch(it, cmdId, result) }
+                        .outbox.find { it.id == cmdId }
+                }
+            }.getOrNull() ?: actionStore.snapshot().outbox.find { it.id == cmdId }
+            postToMain("send-result") {
+                sendInFlight = false
+                applyDispatchResult(payload, context, finalCommand)
             }
+        })
+    }
 
-            val finalCommand = finalActionState.outbox.find { it.id == cmdId }
+    private fun applyDispatchResult(payload: ExactActionPayload, context: ReviewContext?, finalCommand: app.mini.hub.action.OutboxCommand?) {
+        run {
             val statusMessage = when (finalCommand?.state) {
                 OutboxState.HandoffOpened -> "Draft opened in ${context?.handoffPackage?.let { app.mini.hub.observation.SourceAppNames.forPackage(it) } ?: "another app"}. Nothing is sent until you send it there."
                 OutboxState.AcceptedByProvider -> "${context?.providerName ?: "Provider"} accepted the ${if (context?.isReply == true) "reply" else "message"} (receipt ${finalCommand.receipt ?: "accepted"}). Accepted means the provider took it; it does not confirm the recipient received it."
@@ -547,8 +573,14 @@ class InboxViewModel(
                 activeReviewPayload = null,
                 reviewContext = null,
                 outboxStatusMessage = statusMessage,
+                isSending = false,
             )
         }
+    }
+
+    /** Test hook: puts an exact payload under review without going through route selection. */
+    internal fun setReviewPayloadForTest(payload: ExactActionPayload, context: ReviewContext? = null) {
+        _state.value = _state.value.copy(activeReviewPayload = payload, reviewContext = context)
     }
 
     private fun selectedConversationForLearning(): ConversationObservationSummary =

@@ -138,6 +138,10 @@ class ConnectorSyncEngine(
         return AccountSyncReport(key, result.listedCount, inserted, updated, ConnectionState.Healthy, refreshed, gap)
     }
 
+    /** Same refresh-and-mark path sync uses; for callers that need a usable token now (send, reads). */
+    fun refreshForUse(account: ConnectedAccount, token: StoredAccessToken, nowMillis: Long): StoredAccessToken? =
+        refresh(account, token, nowMillis)
+
     private fun refresh(account: ConnectedAccount, token: StoredAccessToken, nowMillis: Long): StoredAccessToken? {
         val refresher = refreshers[account.id.provider]
         if (refresher == null || token.refreshToken == null) {

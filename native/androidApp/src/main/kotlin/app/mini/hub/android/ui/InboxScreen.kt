@@ -284,8 +284,9 @@ fun InboxScreen(
         ExactActionReviewDialog(
             payload = payload,
             context = state.reviewContext,
+            isSending = state.isSending,
             onConfirm = { viewModel.approveAndDispatch(handoffLauncher) },
-            onDismiss = { viewModel.clearDraftReview() },
+            onDismiss = { if (!state.isSending) viewModel.clearDraftReview() },
         )
     }
 }
@@ -1048,6 +1049,7 @@ fun ConversationDetailView(
 fun ExactActionReviewDialog(
     payload: app.mini.hub.action.ExactActionPayload,
     context: ReviewContext? = null,
+    isSending: Boolean = false,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -1103,12 +1105,18 @@ fun ExactActionReviewDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onConfirm) {
-                Text(if (isApi) "Approve & send via $provider" else "Approve & open ${handoffApp ?: "app"}")
+            Button(onClick = onConfirm, enabled = !isSending) {
+                Text(
+                    when {
+                        isSending -> "Sending…"
+                        isApi -> "Approve & send via $provider"
+                        else -> "Approve & open ${handoffApp ?: "app"}"
+                    },
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = onDismiss, enabled = !isSending) {
                 Text("Cancel")
             }
         },

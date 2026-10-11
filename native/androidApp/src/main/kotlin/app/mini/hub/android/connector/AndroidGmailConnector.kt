@@ -186,6 +186,10 @@ class AndroidGmailConnector(
         return connector.fetchThread(threadId, token, transport, account.displayName)
     }
 
+    /** Same refresh-and-mark path sync uses; for send and conversation reads. */
+    fun refreshForUse(account: ConnectedAccount, token: StoredAccessToken, nowMillis: Long): StoredAccessToken? =
+        refreshOrMark(account, token, nowMillis)
+
     private fun refreshOrMark(account: ConnectedAccount, token: StoredAccessToken, nowMillis: Long): StoredAccessToken? =
         when (val outcome = refresher.refresh(token, nowMillis)) {
             is TokenRefreshOutcome.Refreshed -> {

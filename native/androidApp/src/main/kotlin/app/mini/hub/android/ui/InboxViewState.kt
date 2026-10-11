@@ -43,6 +43,8 @@ data class InboxViewState(
     val reviewContext: ReviewContext? = null,
     /** Progress or failure of loading the full provider conversation. */
     val conversationLoadStatus: String? = null,
+    /** An approved API send is in flight; the review dialog shows progress and cannot be re-tapped. */
+    val isSending: Boolean = false,
 )
 
 data class ReviewContext(

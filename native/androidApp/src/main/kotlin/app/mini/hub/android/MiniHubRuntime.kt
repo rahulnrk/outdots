@@ -74,7 +74,7 @@ object MiniHubRuntime {
     /** Every API route: connect, refresh, sync, conversation reads, gated sending. */
     lateinit var connectors: app.mini.hub.android.connector.AndroidConnectorRegistry
         private set
-    val connectorGateway: app.mini.hub.connector.ConnectorProviderGateway get() = connectors.gateway
+    val connectorGateway: app.mini.hub.action.ProviderGateway get() = connectors.gateway
     val gmailOAuth: app.mini.hub.android.connector.GmailOAuthClient get() = connectors.gmailOAuth
     val outlookOAuth: app.mini.hub.android.connector.OutlookOAuthClient get() = connectors.outlookOAuth
 
@@ -155,6 +155,8 @@ object MiniHubRuntime {
                 digest = digest,
                 ids = DomainActionIdGenerator(idGen),
             )
+            // Before any UI can dispatch: an interrupted send becomes OutcomeUnknown, never re-sent.
+            StartupRecovery.recoverOutbox(actionStore, actionController, ::logState)
             localDraftExperiment = LocalDraftExperiment(context.applicationContext)
             httpTransport = app.mini.hub.android.connector.AndroidProviderHttpTransport()
             // Gates are cleared only by real configuration and owner-recorded evidence (GatePolicy),

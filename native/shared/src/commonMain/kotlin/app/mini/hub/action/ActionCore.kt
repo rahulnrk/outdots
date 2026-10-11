@@ -114,28 +114,53 @@ class ActionController(
     fun dispatch(state: ActionState, commandId: String, payload: ExactActionPayload, gateway: ProviderGateway?, handoff: HandoffLauncher?): ActionState {
         val command = state.outbox.find { it.id == commandId } ?: error("command not found")
         if (command.state != OutboxState.Ready) return state
+        val consumed = beginDispatch(state, commandId, payload)
+        val begun = consumed.outbox.first { it.id == commandId }
+        if (begun.state != OutboxState.Dispatching) return consumed
+        val now = begun.lastAttemptAt ?: clock.now()
+        if (command.route == ActionRoute.NativeHandoff) {
+            if (handoff == null) return fail(consumed, commandId, OutboxState.OutcomeUnknown, "handoff_unavailable", now)
+            return if (handoff.open(command, payload)) update(consumed, commandId, OutboxState.HandoffOpened, now)
+            else fail(consumed, commandId, OutboxState.Rejected, "handoff_rejected", now)
+        }
+        return completeDispatch(consumed, commandId, executeGateway(command, payload, gateway))
+    }
+
+    /**
+     * Phase 1 of a split dispatch. Runs every approval, expiry, clock and digest check; on success
+     * consumes the approval and moves the command to [OutboxState.Dispatching]. Callers must commit
+     * this state durably before any provider I/O so a crash can only ever end in OutcomeUnknown.
+     * A command that is not Ready is returned unchanged.
+     */
+    fun beginDispatch(state: ActionState, commandId: String, payload: ExactActionPayload): ActionState {
+        val command = state.outbox.find { it.id == commandId } ?: error("command not found")
+        if (command.state != OutboxState.Ready) return state
         val now = clock.now()
         val approval = state.approvals.find { it.id == command.approvalId }
             ?: return fail(state, commandId, OutboxState.ExpiredOrInvalidated, "approval_missing", now)
         if (now < approval.approvedAt) return fail(state, commandId, OutboxState.ExpiredOrInvalidated, "clock_skew_detected", now)
         if (now > approval.expiresAt || approval.consumed) return fail(state, commandId, OutboxState.ExpiredOrInvalidated, "approval_expired_or_consumed", now)
         if (digest.sha256(payload.canonical()) != command.payloadDigest) return fail(state, commandId, OutboxState.ExpiredOrInvalidated, "payload_changed_since_approval", now)
-
-        val consumed = state.copy(
+        return state.copy(
             approvals = state.approvals.map { if (it.id == approval.id) it.copy(consumed = true) else it },
             outbox = state.outbox.map { if (it.id == commandId) it.copy(state = OutboxState.Dispatching, lastAttemptAt = now) else it },
         )
-        if (command.route == ActionRoute.NativeHandoff) {
-            if (handoff == null) return fail(consumed, commandId, OutboxState.OutcomeUnknown, "handoff_unavailable", now)
-            return if (handoff.open(command, payload)) update(consumed, commandId, OutboxState.HandoffOpened, now)
-            else fail(consumed, commandId, OutboxState.Rejected, "handoff_rejected", now)
-        }
-        val result = try { gateway?.execute(command, payload) ?: GatewayResult.Rejected("gateway_unconfigured") }
+    }
+
+    /** Phase 2: the provider call. No state access, so it can run outside any transaction. */
+    fun executeGateway(command: OutboxCommand, payload: ExactActionPayload, gateway: ProviderGateway?): GatewayResult =
+        try { gateway?.execute(command, payload) ?: GatewayResult.Rejected("gateway_unconfigured") }
         catch (_: Throwable) { GatewayResult.Unknown("gateway_call_failed") }
+
+    /** Phase 3: records the provider result. Applies only to a command still in Dispatching. */
+    fun completeDispatch(state: ActionState, commandId: String, result: GatewayResult): ActionState {
+        val command = state.outbox.find { it.id == commandId } ?: error("command not found")
+        if (command.state != OutboxState.Dispatching) return state
+        val now = command.lastAttemptAt ?: clock.now()
         return when (result) {
-            is GatewayResult.Accepted -> if (result.receipt.isNotBlank()) update(consumed, commandId, OutboxState.AcceptedByProvider, now, result.receipt) else fail(consumed, commandId, OutboxState.OutcomeUnknown, "provider_receipt_missing", now)
-            is GatewayResult.Rejected -> fail(consumed, commandId, OutboxState.Rejected, result.reason, now)
-            is GatewayResult.Unknown -> fail(consumed, commandId, OutboxState.OutcomeUnknown, result.reason, now)
+            is GatewayResult.Accepted -> if (result.receipt.isNotBlank()) update(state, commandId, OutboxState.AcceptedByProvider, now, result.receipt) else fail(state, commandId, OutboxState.OutcomeUnknown, "provider_receipt_missing", now)
+            is GatewayResult.Rejected -> fail(state, commandId, OutboxState.Rejected, result.reason, now)
+            is GatewayResult.Unknown -> fail(state, commandId, OutboxState.OutcomeUnknown, result.reason, now)
         }
     }
 

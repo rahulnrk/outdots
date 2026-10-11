@@ -160,7 +160,7 @@ class AndroidConnectorRegistry(
 
     val gatePolicy = GatePolicy(configuredClients(), gateEvidence::evidenceFor)
 
-    val gateway = ConnectorProviderGateway(
+    private val directGateway = ConnectorProviderGateway(
         accounts = accounts,
         tokens = tokens,
         senders = listOf(
@@ -172,6 +172,18 @@ class AndroidConnectorRegistry(
         transport = transport,
         nowMillis = { System.currentTimeMillis() },
     )
+
+    /** Refreshes an expired token through the provider's existing refresher before any send. */
+    val gateway: app.mini.hub.action.ProviderGateway = RefreshingGateway(
+        accounts, tokens, { account, token -> refreshForUse(account, token) }, directGateway,
+    ) { System.currentTimeMillis() }
+
+    /** Gmail uses its Google refresher; every other route uses the sync engine's refreshers. */
+    private fun refreshForUse(account: ConnectedAccount, token: app.mini.hub.connector.StoredAccessToken): app.mini.hub.connector.StoredAccessToken? {
+        val now = System.currentTimeMillis()
+        return if (account.id.provider == Provider.GMAIL) gmail.refreshForUse(account, token, now)
+        else syncEngine.refreshForUse(account, token, now)
+    }
 
     fun routes(): List<ConnectRouteInfo> = listOf(
         ConnectRouteInfo(Provider.GMAIL, "Gmail", "Personal Gmail or Google Workspace", gmailOAuth.isConfigured, gmailOAuth.setupStatus),
@@ -259,8 +271,10 @@ class AndroidConnectorRegistry(
      * provider has no conversation reader, so the caller keeps the stored timeline.
      */
     fun fetchConversation(account: ConnectedAccount, conversationId: String): List<ProviderMessage>? {
-        val token = tokens.get(account.id) ?: return null
-        if (token.isExpired(System.currentTimeMillis())) return null
+        var token = tokens.get(account.id) ?: return null
+        if (token.isExpired(System.currentTimeMillis() + RefreshingGateway.EXPIRY_SKEW_MILLIS)) {
+            token = refreshForUse(account, token) ?: return null
+        }
         return when (account.id.provider) {
             Provider.GMAIL -> gmail.fetchThread(conversationId, account)
             Provider.OUTLOOK -> outlookConnector.fetchConversation(conversationId, token, transport)
