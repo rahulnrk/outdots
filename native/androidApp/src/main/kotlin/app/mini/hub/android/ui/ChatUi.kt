@@ -80,7 +80,8 @@ internal fun isHiddenWhatsAppChat(chatId: String): Boolean {
 
 internal data class MediaRef(val rawKind: String, val id: String) {
     val isGmail get() = rawKind.startsWith("gm-")
-    val kind get() = rawKind.removePrefix("gm-")
+    val isUrl get() = rawKind.startsWith("ig-")
+    val kind get() = rawKind.removePrefix("gm-").removePrefix("ig-")
     val fileName get() = id.substringAfter('|', "")
 }
 
@@ -440,6 +441,13 @@ internal fun formatChatText(text: String): androidx.compose.ui.text.AnnotatedStr
 
 @Composable
 private fun MediaView(ref: MediaRef) {
+    if (ref.isUrl) {
+        val ctx = LocalContext.current
+        OutlinedButton(onClick = {
+            runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ref.id)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }) { Text(if (ref.kind == "video") "▶ Open video" else "📷 Open photo") }
+        return
+    }
     val context = LocalContext.current
     var status by remember { mutableStateOf<String?>(null) }
     var full by remember { mutableStateOf<ImageBitmap?>(null) }

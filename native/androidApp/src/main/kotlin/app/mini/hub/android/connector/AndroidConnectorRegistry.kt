@@ -48,6 +48,8 @@ data class ConnectRouteInfo(
     val usesMatrixEntry: Boolean = false,
     /** Debug WhatsApp companion QR pairing. Not Matrix. */
     val usesPhoneLocalPairing: Boolean = false,
+    /** Instagram official API with a pasted long-lived token. */
+    val usesInstagramToken: Boolean = false,
 )
 
 /**
@@ -79,6 +81,8 @@ class AndroidConnectorRegistry(
     private val whatsappConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.WHATSAPP, "whatsapp")
     private val whatsappBusinessConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.WHATSAPP_BUSINESS, "whatsapp")
     private val instagramConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.INSTAGRAM, "instagram")
+    private val instagramOfficial = app.mini.hub.connector.InstagramApiConnector()
+    val instagram = InstagramAccountConnector(appContext, instagramOfficial, transport)
     private val linkedinConnector = app.mini.hub.connector.MatrixBridgeConnector(Provider.LINKEDIN, "linkedin")
     private val xConnector = XDirectMessageConnector()
 
@@ -133,7 +137,7 @@ class AndroidConnectorRegistry(
             Provider.TWITTER to xConnector,
             Provider.WHATSAPP to whatsappHost.connector,
             Provider.WHATSAPP_BUSINESS to whatsappBusinessConnector,
-            Provider.INSTAGRAM to instagramConnector,
+            Provider.INSTAGRAM to instagramOfficial,
             Provider.LINKEDIN to linkedinConnector,
         ),
         refreshers = mapOf(
@@ -169,7 +173,7 @@ class AndroidConnectorRegistry(
         senders = listOf(
             GmailSender(), OutlookSender(), TeamsChatSender(), SlackSender(),
             GoogleChatSender(), TelegramBotSender(), XDirectMessageSender(),
-            whatsappHost.connector, whatsappBusinessConnector, instagramConnector, linkedinConnector,
+            whatsappHost.connector, whatsappBusinessConnector, app.mini.hub.connector.InstagramApiSender(), linkedinConnector,
         ),
         gates = gatePolicy,
         transport = transport,
@@ -203,6 +207,11 @@ class AndroidConnectorRegistry(
             Provider.TELEGRAM, "Telegram bot", "A bot you own; not your personal chats", true,
             "Paste a BotFather token. MINI sees only chats the bot is in. Telegram AI drafting stays off until its content-use terms are qualified.",
             usesTokenEntry = true,
+        ),
+        ConnectRouteInfo(
+            Provider.INSTAGRAM, "Instagram (Business/Creator)", "Official API · paste your token", true,
+            "Official Meta API. Reads your 20 latest messages per chat and replies within 24h; later replies open Instagram with your text.",
+            usesInstagramToken = true,
         ),
         ConnectRouteInfo(
             Provider.WHATSAPP, "WhatsApp personal", "Linked device on this phone", whatsappHost.packaged,
@@ -302,6 +311,9 @@ class AndroidConnectorRegistry(
         return when (account.id.provider) {
             Provider.GMAIL -> gmail.fetchThread(conversationId, account)
             Provider.OUTLOOK -> outlookConnector.fetchConversation(conversationId, token, transport)
+            Provider.INSTAGRAM -> if (account.route == app.mini.hub.connector.ConnectorRoute.OfficialProviderApi) {
+                runCatching { instagramOfficial.fetchConversationWith(transport, token, conversationId, account.providerAccountId) }.getOrNull()
+            } else null
             Provider.WHATSAPP -> if (account.route == app.mini.hub.connector.ConnectorRoute.PhoneLocalBridge) {
                 whatsappHost.conversation(conversationId)
             } else null

@@ -228,6 +228,26 @@ object ConnectorCatalog {
         ),
     )
 
+    val instagramOfficial = ConnectorDescriptor(
+        provider = Provider.INSTAGRAM, routeName = "Instagram API with Instagram Login (Business/Creator)",
+        accountKind = RouteAccountKind.BusinessAccount,
+        route = ConnectorRoute.OfficialProviderApi, status = ImplementationStatus.AdapterImplemented,
+        grants = listOf(
+            CapabilityGrant(Capability.ListHistory, listOf(setOf(InstagramApiConnector.SCOPE))),
+            CapabilityGrant(Capability.ReadBody, listOf(setOf(InstagramApiConnector.SCOPE))),
+            CapabilityGrant(Capability.IncrementalSync, listOf(setOf(InstagramApiConnector.SCOPE))),
+            CapabilityGrant(Capability.Reply, listOf(setOf(InstagramApiConnector.SCOPE))),
+            CapabilityGrant(Capability.LocalAiDrafting, listOf(setOf(InstagramApiConnector.SCOPE))),
+        ),
+        gates = emptyMap(),
+        routeGates = emptySet(),
+        coverageNote = "Professional (Business/Creator) accounts only. 20 most recent messages per conversation. Replies within 24h of their last message; after that MINI opens Instagram with your text.",
+        officialDocs = listOf(
+            "https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api/",
+            "https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/conversations-api",
+        ),
+    )
+
     val telegramBot = ConnectorDescriptor(
         provider = Provider.TELEGRAM, routeName = "Telegram Bot API", accountKind = RouteAccountKind.Bot,
         route = ConnectorRoute.OfficialProviderApi, status = ImplementationStatus.AdapterImplemented,
@@ -379,7 +399,7 @@ object ConnectorCatalog {
 
     val apiRoutes = listOf(
         gmail, outlook, teams, slack, googleChat, telegramBot, xDirectMessages,
-        whatsappPhoneLocal,
+        whatsappPhoneLocal, instagramOfficial,
         whatsappPersonalBridge, whatsappBusinessBridge, instagramBridge, linkedinBridge
     )
     val all: List<ConnectorDescriptor> = apiRoutes + personalFallbacks + businessRoutes

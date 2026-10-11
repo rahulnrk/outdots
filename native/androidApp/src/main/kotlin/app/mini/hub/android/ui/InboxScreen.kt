@@ -512,6 +512,7 @@ private fun ConnectedAccountSettingsDialog(
 ) {
     var pendingDisconnect by remember { mutableStateOf<ConnectedAccount?>(null) }
     var showTelegramEntry by remember { mutableStateOf(false) }
+    var showInstagramEntry by remember { mutableStateOf(false) }
     var showWhatsAppPairing by remember { mutableStateOf(false) }
     var matrixEntryProvider by remember { mutableStateOf<app.mini.hub.domain.Provider?>(null) }
     
@@ -519,6 +520,12 @@ private fun ConnectedAccountSettingsDialog(
         TelegramTokenDialog(
             onSubmit = { onConnectTelegram(it); showTelegramEntry = false },
             onDismiss = { showTelegramEntry = false },
+        )
+    }
+    if (showInstagramEntry) {
+        InstagramTokenDialog(
+            onSubmit = { onConnectTelegram(INSTAGRAM_TOKEN_PREFIX + it); showInstagramEntry = false },
+            onDismiss = { showInstagramEntry = false },
         )
     }
     if (showWhatsAppPairing) {
@@ -610,6 +617,7 @@ private fun ConnectedAccountSettingsDialog(
                     OutlinedButton(
                         onClick = { 
                             if (route.usesMatrixEntry) matrixEntryProvider = route.provider 
+                            else if (route.usesInstagramToken) showInstagramEntry = true
                             else if (route.usesTokenEntry) showTelegramEntry = true
                             else if (route.usesPhoneLocalPairing) showWhatsAppPairing = true
                             else onConnect(route.provider) 
@@ -763,6 +771,41 @@ private fun encodeWhatsAppQr(payload: String): androidx.compose.ui.graphics.Imag
     val androidBitmap = android.graphics.Bitmap.createBitmap(pixels, 512, 512, android.graphics.Bitmap.Config.ARGB_8888)
     androidBitmap.asImageBitmap()
 }.getOrNull()
+
+const val INSTAGRAM_TOKEN_PREFIX = "instagram:"
+
+@Composable
+private fun InstagramTokenDialog(onSubmit: (String) -> Unit, onDismiss: () -> Unit) {
+    var token by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Connect Instagram (official)") },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "Works for Business or Creator accounts. In your Meta app: Instagram → API setup with Instagram login → Add account → Generate token. Paste it here. MINI checks it with Instagram and stores it in Android Keystore.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Meta limits: 20 latest messages per chat; replies within 24h of their last message. After that, Send opens Instagram with your text.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = token,
+                    onValueChange = { token = it.trim() },
+                    label = { Text("Instagram access token") },
+                    singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSubmit(token) }, enabled = token.length > 40) { Text("Connect") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
 
 @Composable
 private fun TelegramTokenDialog(onSubmit: (String) -> Unit, onDismiss: () -> Unit) {

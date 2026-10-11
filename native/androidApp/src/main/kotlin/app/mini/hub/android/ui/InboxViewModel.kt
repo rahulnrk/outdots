@@ -620,7 +620,9 @@ class InboxViewModel(
             listOfNotNull(typed.ifBlank { selected.title.ifBlank { selected.senderHint } }.takeIf { it.isNotBlank() })
         }
 
-        val apiAllowed = isApiAccount && apiReplyAllowed(connectedAccount!!) && (!isEmail || recipients.isNotEmpty())
+        val apiAllowed = isApiAccount && apiReplyAllowed(connectedAccount!!) && (!isEmail || recipients.isNotEmpty()) &&
+            instagramWindowOpen(provider, live, connectedAccount)
+        val outsideIgWindow = provider == app.mini.hub.domain.Provider.INSTAGRAM && isApiAccount && !instagramWindowOpen(provider, live, connectedAccount)
         val route = if (apiAllowed) ActionRoute.Api else ActionRoute.NativeHandoff
         val subject = if (isEmail) selected.title.takeIf { it.isNotBlank() }?.let { s ->
             if (replyTarget != null && !s.startsWith("Re:", ignoreCase = true)) "Re: $s" else s
@@ -647,6 +649,7 @@ class InboxViewModel(
 
         val note = when {
             route == ActionRoute.Api -> null
+            outsideIgWindow -> "Instagram only allows apps to reply within 24 hours of their last message. MINI will open this chat in Instagram with your text so you can send it there."
             isApiAccount -> "API sending is not enabled for this account yet (permission not granted or send qualification not recorded). " +
                 "MINI will open ${app.mini.hub.observation.SourceAppNames.forPackage(selected.packageId)} with your text so you send it yourself."
             else -> null
@@ -689,6 +692,17 @@ class InboxViewModel(
                 note = if (route == ActionRoute.Api) null else "Sending new email is not enabled for this account; MINI will open the mail app.",
             ),
         )
+    }
+
+    /** Meta's 24h standard messaging window for Instagram; other providers always open. */
+    private fun instagramWindowOpen(
+        provider: app.mini.hub.domain.Provider,
+        live: List<app.mini.hub.observation.ObservedNotification>,
+        account: app.mini.hub.connector.ConnectedAccount?,
+    ): Boolean {
+        if (provider != app.mini.hub.domain.Provider.INSTAGRAM) return true
+        val lastInbound = live.filter { isInboundMessage(it, account) }.maxOfOrNull { it.postTime.epochMillis }
+        return app.mini.hub.connector.InstagramApiConnector.windowOpen(lastInbound, clock.now().epochMillis)
     }
 
     private fun isInboundMessage(obs: app.mini.hub.observation.ObservedNotification, account: app.mini.hub.connector.ConnectedAccount?): Boolean = when (obs.direction) {

@@ -156,9 +156,19 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun connectTelegram(token: String) {
-        connectionStatus.value = "Checking the bot token with Telegram..."
+        val isInstagram = token.startsWith(app.mini.hub.android.ui.INSTAGRAM_TOKEN_PREFIX)
+        connectionStatus.value = if (isInstagram) "Checking the token with Instagram..." else "Checking the bot token with Telegram..."
         Thread({
-            val message = when (val outcome = MiniHubRuntime.connectors.connectTelegram(token)) {
+            val message = if (isInstagram) {
+                when (val outcome = MiniHubRuntime.connectors.instagram.connect(token.removePrefix(app.mini.hub.android.ui.INSTAGRAM_TOKEN_PREFIX))) {
+                    is ConnectOutcome.Connected -> {
+                        runCatching { MiniHubRuntime.connectors.syncAll("instagram_connect") }
+                        "Instagram connected: ${outcome.account.displayName ?: outcome.account.providerAccountId}."
+                    }
+                    is ConnectOutcome.Blocked -> outcome.reason
+                    is ConnectOutcome.Started -> "Instagram connection in progress."
+                }
+            } else when (val outcome = MiniHubRuntime.connectors.connectTelegram(token)) {
                 is ConnectOutcome.Connected -> "Telegram bot connected: ${outcome.account.displayName ?: outcome.account.providerAccountId}. Only chats the bot is in are visible."
                 is ConnectOutcome.Blocked -> outcome.reason
                 is ConnectOutcome.Started -> "Telegram connection in progress."
@@ -166,6 +176,7 @@ class MainActivity : ComponentActivity() {
             runOnUiThread {
                 connectionStatus.value = message
                 accountsVersion.value++
+                refreshInbox()
             }
         }, "mini-telegram-connect").start()
     }
