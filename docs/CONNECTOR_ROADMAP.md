@@ -96,6 +96,18 @@ This holds for API, inline-reply and unofficial-client routes alike.
 | Tier C unofficial on-device | Possible (Beeper does it inside the Notification Service Extension) but needs a wake-up push service and fits a 50-150 MB extension memory limit; Go runtime via gomobile xcframework, unmeasured |
 | Handoff | Works via URL schemes (`whatsapp://`, `linkedin://`, `sms:`) |
 
+## Rejected routes (13 Oct 2026)
+
+- **Cloud aggregators (Unipile and similar):** hold users' passwords/cookies and read messages on their servers;
+  API key requires a MINI relay server. Conflicts with phone-only processing.
+- **Hosted Matrix bridges (mautrix on a server):** plaintext on the bridge host.
+- **Beeper content provider:** competitor dependency.
+- **Cloud LLMs:** messages would leave the phone.
+
+Adopted from the review: one account-status model for every account (OK, Connecting, Login needed, Permission
+needed, Stopped, Error with a plain fix), an on-device IMAP/SMTP connector (iCloud, Yahoo, Zoho, Exchange servers,
+custom domains), and a TDLib user client for Telegram.
+
 ## Decisions still open
 
 1. **Meta business webhooks.** Arch s4 rejects a relay because the server sees plaintext briefly. The study's
