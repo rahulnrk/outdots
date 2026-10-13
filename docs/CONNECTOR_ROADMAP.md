@@ -96,6 +96,18 @@ This holds for API, inline-reply and unofficial-client routes alike.
 | Tier C unofficial on-device | Possible (Beeper does it inside the Notification Service Extension) but needs a wake-up push service and fits a 50-150 MB extension memory limit; Go runtime via gomobile xcframework, unmeasured |
 | Handoff | Works via URL schemes (`whatsapp://`, `linkedin://`, `sms:`) |
 
+## Progress (13 Oct 2026)
+
+Completeness pass done for Gmail, Outlook, Slack, Teams, Google Chat, X and WhatsApp (see
+IMPLEMENTATION_STATUS). Telegram is on hold by owner decision.
+
+Next, owner actions:
+1. Microsoft app registration (one client ID for Outlook + Teams), redirects `app.mini.hub://oauth2redirect/outlook` and `/teams`.
+2. Slack app (PKCE, user scopes), redirect `app.mini.hub://oauth2redirect/slack`.
+3. Enable the Google Chat API in the existing Google Cloud project.
+4. X only if a paid DM plan is wanted.
+Then: live connect/sync/send run per provider on the Pixel and record gate evidence.
+
 ## Rejected routes (13 Oct 2026)
 
 - **Cloud aggregators (Unipile and similar):** hold users' passwords/cookies and read messages on their servers;
