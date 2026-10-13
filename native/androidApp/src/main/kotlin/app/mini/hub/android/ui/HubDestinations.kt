@@ -53,6 +53,7 @@ internal fun InboxDestination(
     accountFilter: String,
     onSearch: () -> Unit,
     onFilters: () -> Unit,
+    onAccountFilter: (String) -> Unit,
     onSelect: (ConversationObservationSummary) -> Unit,
     onAttention: (ScopedId, AttentionAction) -> Unit,
     onFixListener: () -> Unit,
@@ -61,8 +62,14 @@ internal fun InboxDestination(
     val visible = state.conversations.filter { conv ->
         val source = SourceAppNames.forPackage(conv.packageId)
         val label = labels[conv.conversationId.key]
-        (sourceFilter.isBlank() || source.equals(sourceFilter, true)) &&
-            (accountFilter == "All" || label == accountFilter || (accountFilter == "Work" && label == "Work") || (accountFilter == "Personal" && label != "Work"))
+        val sourceOk = sourceFilter.isBlank() || source.equals(sourceFilter, true)
+        val accountOk = when (accountFilter) {
+            "Unread" -> conv.unreadCount > 0
+            "Work" -> label == "Work"
+            "Personal" -> label == "Personal" || label == "Family" || label == "Friends"
+            else -> true
+        }
+        sourceOk && accountOk
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
@@ -74,12 +81,11 @@ internal fun InboxDestination(
             listOf("All", "Unread", "Work", "Personal").forEach { chip ->
                 val on = when (chip) {
                     "All" -> accountFilter == "All" && sourceFilter.isBlank()
-                    "Work" -> accountFilter == "Work"
-                    "Personal" -> accountFilter == "Personal"
-                    else -> false
+                    else -> accountFilter == chip
                 }
-                LineuppChip(chip, selected = on, onClick = onFilters)
+                LineuppChip(chip, selected = on, onClick = { onAccountFilter(chip) })
             }
+            IconButtonCircle("console", "More filters", onClick = onFilters)
         }
         if (!state.isPermissionGranted) {
             NoticeBanner("Notification access needed", "Android needs this so " + Brand.NAME + " can save new messages from the sources you choose.", PillTone.Attention, Modifier.padding(bottom = 12.dp), "Open settings", onOpenPermission)
@@ -273,10 +279,16 @@ internal fun ThreadDestination(
     onReview: () -> Unit,
     onContext: () -> Unit,
 ) {
-    val state = viewModel.state.value
+    val state by viewModel.state
     val summary = state.selectedConversation ?: return
     val selectedKey = summary.conversationId.key
+    var newTo by remember(selectedKey) { mutableStateOf(state.composeNewTo.orEmpty()) }
+    var newSubject by remember(selectedKey) { mutableStateOf("") }
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+        if (state.composeNewTo != null) {
+            OutlinedTextField(newTo, { newTo = it }, label = { Text("To") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp))
+            OutlinedTextField(newSubject, { newSubject = it }, label = { Text("Subject") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp))
+        }
         ThreadView(
             summary = summary,
             timeline = state.selectedTimeline,
@@ -291,7 +303,11 @@ internal fun ThreadDestination(
             onCancelDraft = { viewModel.cancelLocalDraft() },
             onDraftChanged = { text -> viewModel.updateLocalDraftText(text) },
             onApprove = { body ->
-                viewModel.prepareDraft(body, "", "")
+                if (state.composeNewTo != null) {
+                    viewModel.prepareComposeEmail(summary.accountId, listOf(newTo), emptyList(), emptyList(), newSubject, body)
+                } else {
+                    viewModel.prepareDraft(body, "", "")
+                }
                 onReview()
             },
             onAttention = { a -> viewModel.applyAttentionAction(summary.conversationId, a) },

@@ -185,6 +185,7 @@ fun HubApp(
                     accountFilter = accountFilter,
                     onSearch = { go(HubScreen.Search) },
                     onFilters = { go(HubScreen.Filters) },
+                    onAccountFilter = { accountFilter = it },
                     onSelect = { viewModel.selectConversation(it) },
                     onAttention = { id, a -> viewModel.applyAttentionAction(id, a) },
                     onFixListener = { healthSource = "WhatsApp"; go(HubScreen.Health) },
@@ -197,7 +198,18 @@ fun HubApp(
                     onAccount = { accountFilter = it },
                     onReset = { sourceFilter = ""; accountFilter = "All" },
                     onBack = { go(HubScreen.Inbox) },
-                    onApply = { go(HubScreen.Inbox) },
+                    onApply = {
+                        viewModel.onSearchSourceFilterChanged(
+                            when (sourceFilter) {
+                                "Gmail" -> "com.google.android.gm"
+                                "Outlook" -> "com.microsoft.office.outlook"
+                                "WhatsApp" -> "com.whatsapp"
+                                "LinkedIn" -> "com.linkedin.android"
+                                else -> null
+                            },
+                        )
+                        go(HubScreen.Inbox)
+                    },
                 )
                 HubScreen.Search -> SearchDestination(
                     state = state,
