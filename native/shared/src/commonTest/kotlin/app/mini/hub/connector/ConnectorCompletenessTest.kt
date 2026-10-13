@@ -152,6 +152,52 @@ class ConnectorCompletenessTest {
     }
 
     @Test
+    fun slackReaderIncludesThreadRepliesOldestFirst() {
+        val transport = ProviderHttpTransport.of { req ->
+            when {
+                req.url.endsWith("/conversations.history") -> ProviderHttpResponse(200,
+                    "{\"ok\":true,\"messages\":[{\"ts\":\"3.0\",\"user\":\"U1\",\"text\":\"mine\"},{\"ts\":\"1.0\",\"user\":\"U2\",\"text\":\"parent\",\"thread_ts\":\"1.0\",\"reply_count\":1,\"latest_reply\":\"2.0\"}]}")
+                req.url.endsWith("/conversations.replies") -> ProviderHttpResponse(200,
+                    "{\"ok\":true,\"messages\":[{\"ts\":\"1.0\",\"user\":\"U2\",\"text\":\"parent\",\"thread_ts\":\"1.0\"},{\"ts\":\"2.0\",\"user\":\"U2\",\"text\":\"reply\",\"thread_ts\":\"1.0\"}]}")
+                else -> error("Unexpected ${req.url}")
+            }
+        }
+        val messages = SlackConnector().fetchConversation(account(Provider.SLACK, "T1:U1", "me", setOf("im:history")), "C1", StoredAccessToken("t", null), transport)
+        assertEquals(listOf("C1:1.0", "C1:2.0", "C1:3.0"), messages.map { it.providerMessageId })
+        assertEquals(MessageDirection.Outbound, messages.last().direction)
+        assertEquals("1.0", ReplyTargets.forProvider(Provider.SLACK, "C1:2.0", messages[1].replyAnchor))
+    }
+
+    @Test
+    fun teamsReaderMarksDirectionAndSkipsSystemEvents() {
+        val transport = ProviderHttpTransport.of { req ->
+            assertTrue(req.url.contains("/chats/19%3Aabc%40thread.v2/messages"))
+            ProviderHttpResponse(200, """
+                {"value":[
+                  {"id":"2","messageType":"message","createdDateTime":"2026-10-10T10:02:00Z","from":{"user":{"id":"me","displayName":"Me"}},"body":{"contentType":"html","content":"<p>ok</p>"}},
+                  {"id":"x","messageType":"systemEventMessage","createdDateTime":"2026-10-10T10:01:30Z"},
+                  {"id":"1","messageType":"message","createdDateTime":"2026-10-10T10:01:00Z","from":{"user":{"id":"ann","displayName":"Ann"}},"body":{"contentType":"text","content":"hi"}}
+                ]}""".trimIndent())
+        }
+        val messages = TeamsChatConnector().fetchConversation(account(Provider.TEAMS, "me", "me@corp.com"), "19:abc@thread.v2", StoredAccessToken("t", null), transport)
+        assertEquals(listOf("19:abc@thread.v2:1", "19:abc@thread.v2:2"), messages.map { it.providerMessageId })
+        assertEquals(MessageDirection.Inbound, messages[0].direction)
+        assertEquals(MessageDirection.Outbound, messages[1].direction)
+        assertEquals("ok", messages[1].bodyText?.trim())
+    }
+
+    @Test
+    fun xReaderUsesConversationEndpoint() {
+        val transport = ProviderHttpTransport.of { req ->
+            assertTrue(req.url.contains("/dm_conversations/1-9/dm_events"))
+            ProviderHttpResponse(200, "{\"data\":[{\"id\":\"b\",\"sender_id\":\"1\",\"text\":\"later\",\"created_at\":\"2026-10-10T10:02:00Z\"},{\"id\":\"a\",\"sender_id\":\"9\",\"text\":\"first\",\"created_at\":\"2026-10-10T10:01:00Z\"}]}")
+        }
+        val messages = XDirectMessageConnector().fetchConversation(account(Provider.TWITTER, "1", "@me"), "1-9", StoredAccessToken("t", null), transport)
+        assertEquals(listOf("a", "b"), messages.map { it.providerMessageId })
+        assertEquals(MessageDirection.Outbound, messages[1].direction)
+    }
+
+    @Test
     fun googleChatMarksOwnMessagesOutbound() {
         val transport = ProviderHttpTransport.of { req ->
             when {

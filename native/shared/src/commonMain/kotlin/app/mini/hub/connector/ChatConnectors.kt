@@ -155,6 +155,38 @@ class SlackConnector(private val apiBase: String = "https://slack.com/api") : Ac
         return SyncResult(out, SyncCheckpoint(ChatCursor(marks).encode(), checkpoint.processedCount + out.size, checkpoint.gapCount + gaps), ConnectionState.Healthy)
     }
 
+    /**
+     * Opened conversation: the latest [READ_LIMIT] messages plus replies of the busiest threads,
+     * oldest first. Used for reading and drafting; sync stays bounded and incremental.
+     */
+    fun fetchConversation(account: ConnectedAccount, channelId: String, accessToken: StoredAccessToken, transport: ProviderHttpTransport): List<ProviderMessage> {
+        val selfUser = account.providerAccountId.substringAfter(':')
+        val names = SlackNames(this, transport, accessToken, "users:read" in account.grantedScopes)
+        val history = slackCall(transport, accessToken, "conversations.history", mapOf("channel" to channelId, "limit" to "$READ_LIMIT"))
+        val top = history["messages"]?.objects.orEmpty()
+        val replies = top.filter { (it["reply_count"]?.long ?: 0L) > 0L }
+            .sortedByDescending { it.str("latest_reply")?.toDoubleOrNull() ?: 0.0 }
+            .take(MAX_THREADS_EXPANDED)
+            .flatMap { parent ->
+                val ts = parent.str("ts") ?: return@flatMap emptyList()
+                runCatching {
+                    slackCall(transport, accessToken, "conversations.replies", mapOf("channel" to channelId, "ts" to ts, "limit" to "$READ_LIMIT"))["messages"]?.objects.orEmpty()
+                }.getOrDefault(emptyList()).filter { it.str("ts") != ts }
+            }
+        return (top + replies).mapNotNull { m ->
+            val ts = m.str("ts") ?: return@mapNotNull null
+            if (m.str("subtype") in IGNORED_SUBTYPES) return@mapNotNull null
+            val user = m.str("user") ?: m.str("bot_id") ?: "unknown"
+            val text = m.str("text").orEmpty()
+            ProviderMessage(
+                providerMessageId = "$channelId:$ts", conversationId = channelId, sender = names.nameOf(user), subject = null,
+                snippet = text.take(200), occurredAtMillis = (ts.substringBefore('.').toLongOrNull() ?: 0L) * 1000L, bodyText = text,
+                direction = if (user == selfUser) MessageDirection.Outbound else MessageDirection.Inbound,
+                isDeleted = m.str("subtype") == "message_deleted", revision = MessageRevision.slack(m), replyAnchor = m.str("thread_ts") ?: ts,
+            )
+        }.distinctBy { it.providerMessageId }.sortedBy { it.occurredAtMillis }
+    }
+
     internal fun slackCall(transport: ProviderHttpTransport, token: StoredAccessToken, method: String, form: Map<String, String>): JsonValue {
         val json = ProviderApiClient("Slack", transport, token).postForm("$apiBase/$method", form)
         if (json["ok"]?.bool == true) return json
@@ -175,6 +207,8 @@ class SlackConnector(private val apiBase: String = "https://slack.com/api") : Ac
         private const val PER_CONVERSATION = 20
         private const val MAX_HISTORY_PAGES = 5
         private const val MAX_LIST_PAGES = 5
+        private const val READ_LIMIT = 100
+        private const val MAX_THREADS_EXPANDED = 10
         private val SKIPPABLE = setOf("channel_not_found", "not_in_channel", "missing_scope")
         private val IGNORED_SUBTYPES = setOf("channel_join", "channel_leave", "channel_topic", "channel_purpose")
 
@@ -305,29 +339,7 @@ class GoogleChatConnector(private val apiBase: String = "https://chat.googleapis
                     break
                 }
             }
-            pageMessages.forEach { m ->
-                val id = m.str("name") ?: return@forEach
-                val text = m.str("text").orEmpty()
-                val senderName = m.path("sender", "name")?.string
-                out += ProviderMessage(
-                    providerMessageId = id,
-                    conversationId = name,
-                    sender = m.path("sender", "displayName")?.string ?: senderName ?: "unknown",
-                    subject = space.str("displayName"),
-                    snippet = text.take(200),
-                    occurredAtMillis = Rfc3339.parseMillis(m.str("createTime")) ?: 0L,
-                    bodyText = text,
-                    // Chat user resource names are "users/{id}" with the same ID as the OpenID sub.
-                    direction = when (senderName) {
-                        null -> MessageDirection.Unknown
-                        "users/${account.providerAccountId}" -> MessageDirection.Outbound
-                        else -> MessageDirection.Inbound
-                    },
-                    isDeleted = m["deletionMetadata"] != null,
-                    revision = MessageRevision.rfc3339(m.str("lastUpdateTime")),
-                    replyAnchor = m.path("thread", "name")?.string,
-                )
-            }
+            pageMessages.forEach { m -> parseMessage(account, name, space.str("displayName"), m)?.let(out::add) }
             if (complete) {
                 pageMessages.mapNotNull { it.str("createTime") }.maxByOrNull { Rfc3339.parseMillis(it) ?: 0L }?.let { marks[name] = it }
             } else {
@@ -337,10 +349,43 @@ class GoogleChatConnector(private val apiBase: String = "https://chat.googleapis
         return SyncResult(out, SyncCheckpoint(ChatCursor(marks).encode(), checkpoint.processedCount + out.size, checkpoint.gapCount + gaps), ConnectionState.Healthy)
     }
 
+    /** Opened space: latest [READ_LIMIT] messages, oldest first. */
+    fun fetchConversation(account: ConnectedAccount, spaceName: String, accessToken: StoredAccessToken, transport: ProviderHttpTransport): List<ProviderMessage> {
+        require(spaceName.startsWith("spaces/"))
+        val page = ProviderApiClient("Google Chat", transport, accessToken)
+            .get("$apiBase/$spaceName/messages?pageSize=$READ_LIMIT&orderBy=${urlEncode("createTime desc")}")
+        return page["messages"]?.objects.orEmpty().mapNotNull { parseMessage(account, spaceName, null, it) }.sortedBy { it.occurredAtMillis }
+    }
+
+    private fun parseMessage(account: ConnectedAccount, spaceName: String, spaceTitle: String?, m: JsonValue): ProviderMessage? {
+        val id = m.str("name") ?: return null
+        val text = m.str("text").orEmpty()
+        val senderName = m.path("sender", "name")?.string
+        return ProviderMessage(
+            providerMessageId = id,
+            conversationId = spaceName,
+            sender = m.path("sender", "displayName")?.string ?: senderName ?: "unknown",
+            subject = spaceTitle,
+            snippet = text.take(200),
+            occurredAtMillis = Rfc3339.parseMillis(m.str("createTime")) ?: 0L,
+            bodyText = text,
+            // Chat user resource names are "users/{id}" with the same ID as the OpenID sub.
+            direction = when (senderName) {
+                null -> MessageDirection.Unknown
+                "users/${account.providerAccountId}" -> MessageDirection.Outbound
+                else -> MessageDirection.Inbound
+            },
+            isDeleted = m["deletionMetadata"] != null,
+            revision = MessageRevision.rfc3339(m.str("lastUpdateTime")),
+            replyAnchor = m.path("thread", "name")?.string,
+        )
+    }
+
     companion object {
         private const val MAX_SPACES = 30
         private const val PER_SPACE = 20
         private const val MAX_PAGES = 5
+        private const val READ_LIMIT = 100
     }
 }
 
@@ -430,27 +475,10 @@ class TeamsChatConnector(private val graphBase: String = "https://graph.microsof
             val complete = nextUrl == null
             val markMillis = mark?.let(Rfc3339::parseMillis) ?: Long.MIN_VALUE
             pageMessages.forEach { m ->
-                val id = m.str("id") ?: return@forEach
                 val created = Rfc3339.parseMillis(m.str("createdDateTime")) ?: 0L
                 val modified = Rfc3339.parseMillis(m.str("lastModifiedDateTime")) ?: created
                 if (maxOf(created, modified) <= markMillis) return@forEach
-                val body = m["body"]
-                val raw = body?.str("content").orEmpty()
-                val text = if (body?.str("contentType").equals("html", true)) MimeText.htmlToText(raw) else raw
-                val fromUser = m.path("from", "user")
-                out += ProviderMessage(
-                    providerMessageId = "$chatId:$id",
-                    conversationId = chatId,
-                    sender = fromUser?.str("displayName") ?: m.path("from", "application", "displayName")?.string ?: "unknown",
-                    subject = chat.str("topic"),
-                    snippet = text.take(200),
-                    occurredAtMillis = created,
-                    bodyText = text,
-                    direction = if (fromUser?.str("id") == account.providerAccountId) MessageDirection.Outbound else MessageDirection.Inbound,
-                    isDeleted = m.str("deletedDateTime") != null,
-                    revision = if (modified > created) modified else 1L,
-                    replyAnchor = id,
-                )
+                parseMessage(account, chatId, chat.str("topic"), m)?.let(out::add)
             }
             if (complete) {
                 pageMessages.mapNotNull { m -> listOfNotNull(m.str("lastModifiedDateTime"), m.str("createdDateTime")).maxByOrNull { Rfc3339.parseMillis(it) ?: 0L } }
@@ -462,10 +490,54 @@ class TeamsChatConnector(private val graphBase: String = "https://graph.microsof
         return SyncResult(out, SyncCheckpoint(ChatCursor(marks).encode(), checkpoint.processedCount + out.size, checkpoint.gapCount + gaps), ConnectionState.Healthy)
     }
 
+    /** Opened chat: latest messages (up to [READ_PAGES] pages), oldest first. */
+    fun fetchConversation(account: ConnectedAccount, chatId: String, accessToken: StoredAccessToken, transport: ProviderHttpTransport): List<ProviderMessage> {
+        val api = OutlookGraphConnector(graphBase).client(transport, accessToken)
+        val out = mutableListOf<ProviderMessage>()
+        var nextUrl: String? = "$graphBase/chats/${urlEncode(chatId)}/messages?\$top=50"
+        var pages = 0
+        while (nextUrl != null && pages < READ_PAGES) {
+            val page = api.get(nextUrl)
+            pages++
+            page["value"]?.objects.orEmpty().filter { it.str("messageType") == "message" }
+                .mapNotNullTo(out) { parseMessage(account, chatId, null, it) }
+            nextUrl = page.str("@odata.nextLink")
+        }
+        return out.sortedBy { it.occurredAtMillis }
+    }
+
+    private fun parseMessage(account: ConnectedAccount, chatId: String, topic: String?, m: JsonValue): ProviderMessage? {
+        val id = m.str("id") ?: return null
+        val created = Rfc3339.parseMillis(m.str("createdDateTime")) ?: 0L
+        val modified = Rfc3339.parseMillis(m.str("lastModifiedDateTime")) ?: created
+        val body = m["body"]
+        val raw = body?.str("content").orEmpty()
+        val text = if (body?.str("contentType").equals("html", true)) MimeText.htmlToText(raw) else raw
+        val fromUser = m.path("from", "user")
+        return ProviderMessage(
+            providerMessageId = "$chatId:$id",
+            conversationId = chatId,
+            sender = fromUser?.str("displayName") ?: m.path("from", "application", "displayName")?.string ?: "unknown",
+            subject = topic,
+            snippet = text.take(200),
+            occurredAtMillis = created,
+            bodyText = text,
+            direction = when (fromUser?.str("id")) {
+                null -> MessageDirection.Unknown
+                account.providerAccountId -> MessageDirection.Outbound
+                else -> MessageDirection.Inbound
+            },
+            isDeleted = m.str("deletedDateTime") != null,
+            revision = if (modified > created) modified else 1L,
+            replyAnchor = id,
+        )
+    }
+
     companion object {
         private const val MAX_CHATS = 20
         private const val PER_CHAT = 20
         private const val MAX_PAGES = 5
+        private const val READ_PAGES = 2
     }
 }
 
@@ -670,6 +742,29 @@ class XDirectMessageConnector(private val apiBase: String = "https://api.x.com/2
             SyncCheckpoint(ChatCursor(global = next).encode(), checkpoint.processedCount + out.size, checkpoint.gapCount + if (gap) 1 else 0),
             ConnectionState.Healthy,
         )
+    }
+
+    /** Opened DM conversation (last 30 days per X's limits), oldest first. */
+    fun fetchConversation(account: ConnectedAccount, conversationId: String, accessToken: StoredAccessToken, transport: ProviderHttpTransport): List<ProviderMessage> {
+        val page = ProviderApiClient("X", transport, accessToken, reasonOf = ::xReason).get(
+            "$apiBase/dm_conversations/${urlEncode(conversationId)}/dm_events?max_results=100&event_types=MessageCreate" +
+                "&dm_event.fields=${urlEncode("id,text,created_at,sender_id,dm_conversation_id")}" +
+                "&expansions=sender_id&user.fields=${urlEncode("username,name")}",
+        )
+        val users = page.path("includes", "users")?.objects.orEmpty().mapNotNull { u ->
+            val uid = u.str("id") ?: return@mapNotNull null
+            uid to (u.str("name")?.let { n -> u.str("username")?.let { "$n (@$it)" } ?: n } ?: u.str("username")?.let { "@$it" } ?: uid)
+        }.toMap()
+        return page["data"]?.objects.orEmpty().mapNotNull { e ->
+            val id = e.str("id") ?: return@mapNotNull null
+            val text = e.str("text").orEmpty()
+            ProviderMessage(
+                providerMessageId = id, conversationId = conversationId,
+                sender = e.str("sender_id")?.let { users[it] ?: it } ?: "unknown", subject = null,
+                snippet = text.take(200), occurredAtMillis = Rfc3339.parseMillis(e.str("created_at")) ?: 0L, bodyText = text,
+                direction = if (e.str("sender_id") == account.providerAccountId) MessageDirection.Outbound else MessageDirection.Inbound,
+            )
+        }.sortedBy { it.occurredAtMillis }
     }
 
     companion object {

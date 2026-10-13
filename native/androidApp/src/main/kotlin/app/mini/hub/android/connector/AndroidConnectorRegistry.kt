@@ -321,6 +321,10 @@ class AndroidConnectorRegistry(
         return when (account.id.provider) {
             Provider.GMAIL -> gmail.fetchThread(conversationId, account)
             Provider.OUTLOOK -> outlookConnector.fetchConversation(conversationId, token, transport, app.mini.hub.connector.EmailAddress.extract(account.displayName))
+            Provider.SLACK -> runCatching { slackConnector.fetchConversation(account, conversationId, token, transport) }.getOrNull()
+            Provider.TEAMS -> runCatching { teamsConnector.fetchConversation(account, conversationId, token, transport) }.getOrNull()
+            Provider.GOOGLE_CHAT -> runCatching { chatConnector.fetchConversation(account, conversationId, token, transport) }.getOrNull()
+            Provider.TWITTER -> runCatching { xConnector.fetchConversation(account, conversationId, token, transport) }.getOrNull()
             Provider.INSTAGRAM -> if (account.route == app.mini.hub.connector.ConnectorRoute.OfficialProviderApi) {
                 runCatching { instagramOfficial.fetchConversationWith(transport, token, conversationId, account.providerAccountId) }.getOrNull()
             } else null
