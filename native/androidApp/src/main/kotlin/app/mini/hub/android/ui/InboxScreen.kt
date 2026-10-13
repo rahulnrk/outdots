@@ -105,6 +105,21 @@ fun InboxScreen(
     var showSourceSettings by remember { mutableStateOf(false) }
     var showAccountSettings by remember { mutableStateOf(false) }
     var showLearningSettings by remember { mutableStateOf(false) }
+    HubApp(
+        viewModel = viewModel,
+        handoffLauncher = handoffLauncher,
+        onRequestPermission = onRequestPermission,
+        sourcePreferences = sourcePreferences,
+        accountStore = accountStore,
+        connectionStatus = connectionStatus,
+        onConnect = onConnect,
+        onSourceSelectionChanged = onSourceSelectionChanged,
+        styleLearningEnabled = styleLearningEnabled,
+        onStyleLearningChanged = onStyleLearningChanged,
+        onOpenAccounts = { showAccountSettings = true },
+        onOpenSources = { showSourceSettings = true },
+        onSyncNow = onSyncNow,
+    )
     var hubTab by rememberSaveable { mutableStateOf(HubTab.Inbox.name) }
     val currentTab = HubTab.entries.firstOrNull { it.name == hubTab } ?: HubTab.Inbox
     val showingThread = state.selectedConversation != null
@@ -113,7 +128,7 @@ fun InboxScreen(
         if (connectionStatus != null) showAccountSettings = true
     }
 
-    Scaffold(
+    if (false) Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             if (!showingThread) {
