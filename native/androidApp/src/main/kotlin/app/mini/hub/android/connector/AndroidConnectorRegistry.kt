@@ -320,7 +320,7 @@ class AndroidConnectorRegistry(
         }
         return when (account.id.provider) {
             Provider.GMAIL -> gmail.fetchThread(conversationId, account)
-            Provider.OUTLOOK -> outlookConnector.fetchConversation(conversationId, token, transport)
+            Provider.OUTLOOK -> outlookConnector.fetchConversation(conversationId, token, transport, app.mini.hub.connector.EmailAddress.extract(account.displayName))
             Provider.INSTAGRAM -> if (account.route == app.mini.hub.connector.ConnectorRoute.OfficialProviderApi) {
                 runCatching { instagramOfficial.fetchConversationWith(transport, token, conversationId, account.providerAccountId) }.getOrNull()
             } else null

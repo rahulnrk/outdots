@@ -32,6 +32,7 @@ class ConnectorEngineAndGatewayTest {
 
         val transport = ProviderHttpTransport.of { req ->
             when {
+                req.url.contains("/sentitems/") -> ProviderHttpResponse(200, "{\"value\":[],\"@odata.deltaLink\":\"https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages/delta?deltatoken=s1\"}")
                 req.url.contains("/delta") -> ProviderHttpResponse(
                     200,
                     "{\"@odata.deltaLink\":\"https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta?deltatoken=d1\",\"value\":[{\"id\":\"m1\",\"conversationId\":\"c1\",\"bodyPreview\":\"s1\",\"receivedDateTime\":\"2026-10-10T12:00:00Z\",\"from\":{\"emailAddress\":{\"address\":\"s@ex.com\"}}}]}",
@@ -79,7 +80,8 @@ class ConnectorEngineAndGatewayTest {
             refreshers = emptyMap(),
             transport = ProviderHttpTransport.of { req ->
                 when {
-                    req.url.contains("/delta") -> ProviderHttpResponse(
+                    req.url.contains("/sentitems/") -> ProviderHttpResponse(200, "{\"value\":[],\"@odata.deltaLink\":\"https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages/delta?deltatoken=s1\"}")
+                req.url.contains("/delta") -> ProviderHttpResponse(
                         200,
                         "{\"@odata.deltaLink\":\"https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta?deltatoken=d2\",\"value\":[{\"id\":\"m2\",\"conversationId\":\"c2\",\"bodyPreview\":\"please find the invoice\",\"receivedDateTime\":\"2026-10-10T12:00:00Z\",\"from\":{\"emailAddress\":{\"address\":\"me@ex.com\"}}}]}",
                     )

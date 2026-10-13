@@ -5,8 +5,9 @@ import app.mini.hub.domain.Provider
 
 /**
  * Microsoft Graph mail adapter (delegated, personal Outlook.com or work/school). Reads the Inbox
- * with per-folder delta: the full `@odata.deltaLink` URL is the cursor and is stored opaquely.
- * Authentication is MSAL on Android (public client, no secret); this adapter only sees tokens.
+ * and Sent Items with per-folder delta; each folder's full `@odata.deltaLink` URL is stored
+ * opaquely. Authentication is MSAL on Android (public client, no secret); this adapter only sees
+ * tokens.
  */
 class OutlookGraphConnector(
     private val graphBase: String = "https://graph.microsoft.com/v1.0",
@@ -23,9 +24,11 @@ class OutlookGraphConnector(
     }
 
     /**
-     * One bounded delta pass over the Inbox. [SyncCheckpoint.cursor] is either null (start a new
-     * round), an `@odata.nextLink` (round in progress) or an `@odata.deltaLink` (round finished).
-     * A rejected/expired token (410 or SyncStateNotFound) restarts with a recorded gap.
+     * One bounded delta pass over Inbox and Sent Items. The cursor is a small JSON object holding
+     * one opaque Graph link per folder: absent (start a new round), an `@odata.nextLink` (round in
+     * progress) or an `@odata.deltaLink` (round finished). A legacy cursor that is a bare Graph URL
+     * is the Inbox link from before Sent Items were synced. An expired link (410 or
+     * SyncStateNotFound) restarts that folder with a recorded gap.
      */
     override fun sync(
         account: ConnectedAccount,
@@ -37,39 +40,49 @@ class OutlookGraphConnector(
         require(account.id.provider == Provider.OUTLOOK)
         require(maxMessages in 1..100)
         val api = client(transport, accessToken)
-        val start = checkpoint.cursor?.takeIf { it.startsWith(graphBase) } ?: initialDelta()
-        var url: String? = start
+        val self = EmailAddress.extract(account.displayName)
+        val links = decodeCursor(checkpoint.cursor).toMutableMap()
         var gaps = checkpoint.gapCount
         val messages = mutableListOf<ProviderMessage>()
-        var nextCursor: String? = checkpoint.cursor
-        var pages = 0
-        while (url != null && pages < MAX_PAGES && messages.size < maxMessages) {
-            val page = try {
-                api.call(ProviderHttpRequest(HttpMethod.GET, url, auth(accessToken) + PREFER))
-            } catch (e: ConnectorHttpException) {
-                if (e.kind == ProviderErrorKind.CursorInvalid && url != initialDelta()) {
-                    // Sync state expired: restart the round. Changes in between are not replayed.
-                    gaps++
-                    url = initialDelta(); nextCursor = null; continue
+        for (folder in FOLDERS) {
+            if (messages.size >= maxMessages) break
+            var url: String? = links[folder]?.takeIf { it.startsWith(graphBase) } ?: initialDelta(folder)
+            var pages = 0
+            while (url != null && pages < MAX_PAGES && messages.size < maxMessages) {
+                val page = try {
+                    api.call(ProviderHttpRequest(HttpMethod.GET, url, auth(accessToken) + PREFER))
+                } catch (e: ConnectorHttpException) {
+                    if (e.kind == ProviderErrorKind.CursorInvalid && url != initialDelta(folder)) {
+                        // Sync state expired: restart this folder. Changes in between are not replayed.
+                        gaps++
+                        url = initialDelta(folder); links.remove(folder); continue
+                    }
+                    // Sent Items is additive context; its absence must not block the Inbox.
+                    if (folder != INBOX && (e.kind == ProviderErrorKind.NotFound || e.kind == ProviderErrorKind.PermissionMissing)) break
+                    throw e
                 }
-                throw e
+                page["value"]?.objects.orEmpty().forEach { item -> parse(item, self)?.let(messages::add) }
+                val next = page.str("@odata.nextLink")
+                val delta = page.str("@odata.deltaLink")
+                (next ?: delta)?.let { links[folder] = it }
+                url = next
+                pages++
             }
-            page["value"]?.objects.orEmpty().forEach { item -> parse(item)?.let(messages::add) }
-            val next = page.str("@odata.nextLink")
-            val delta = page.str("@odata.deltaLink")
-            nextCursor = next ?: delta ?: nextCursor
-            url = next
-            pages++
         }
         return SyncResult(
             messages = messages,
-            next = SyncCheckpoint(nextCursor, checkpoint.processedCount + messages.size, gaps),
+            next = SyncCheckpoint(encodeCursor(links), checkpoint.processedCount + messages.size, gaps),
             state = ConnectionState.Healthy,
         )
     }
 
-    /** Full selected conversation with bodies, newest last. */
-    fun fetchConversation(conversationId: String, accessToken: StoredAccessToken, transport: ProviderHttpTransport): List<ProviderMessage> {
+    /** Full selected conversation with bodies across all folders, newest last. */
+    fun fetchConversation(
+        conversationId: String,
+        accessToken: StoredAccessToken,
+        transport: ProviderHttpTransport,
+        selfAddress: String? = null,
+    ): List<ProviderMessage> {
         val filter = urlEncode("conversationId eq '${conversationId.replace("'", "''")}'")
         var nextUrl: String? = "$graphBase/me/messages?\$filter=$filter&\$top=50&\$select=$SELECT"
         val out = mutableListOf<ProviderMessage>()
@@ -84,35 +97,45 @@ class OutlookGraphConnector(
                     auth(accessToken) + PREFER,
                 ),
             )
-            out.addAll(page["value"]?.objects.orEmpty().mapNotNull { parse(it) })
+            out.addAll(page["value"]?.objects.orEmpty().mapNotNull { parse(it, selfAddress) })
             nextUrl = page.str("@odata.nextLink")
             pages++
         }
         return out.sortedBy { it.occurredAtMillis }
     }
 
-    private fun initialDelta() = "$graphBase/me/mailFolders/inbox/messages/delta?\$select=$SELECT"
+    private fun initialDelta(folder: String) = "$graphBase/me/mailFolders/$folder/messages/delta?\$select=$SELECT"
 
-    private fun parse(item: JsonValue): ProviderMessage? {
+    private fun parse(item: JsonValue, selfAddress: String?): ProviderMessage? {
         val id = item.str("id") ?: return null
         if (item["@removed"] != null) {
             return ProviderMessage(id, id, "", null, "", 0L, isDeleted = true)
         }
+        // Unsent drafts are not conversation messages.
+        if (item["isDraft"]?.bool == true) return null
         val from = item.path("from", "emailAddress")
-        val sender = listOfNotNull(from?.str("name"), from?.str("address")?.let { "<$it>" }).joinToString(" ").ifBlank { "Unknown sender" }
+        val fromAddress = from?.str("address")
+        val sender = listOfNotNull(from?.str("name"), fromAddress?.let { "<$it>" }).joinToString(" ").ifBlank { "Unknown sender" }
         val body = item["body"]
         val text = body?.str("content")?.let { if (body.str("contentType").equals("html", true)) MimeText.htmlToText(it) else it }
+        val direction = when {
+            selfAddress == null || fromAddress == null -> MessageDirection.Unknown
+            fromAddress.equals(selfAddress, ignoreCase = true) -> MessageDirection.Outbound
+            else -> MessageDirection.Inbound
+        }
+        val time = if (direction == MessageDirection.Outbound) item.str("sentDateTime") ?: item.str("receivedDateTime") else item.str("receivedDateTime")
         return ProviderMessage(
             providerMessageId = id,
             conversationId = item.str("conversationId") ?: id,
             sender = sender,
             subject = item.str("subject"),
             snippet = item.str("bodyPreview").orEmpty(),
-            occurredAtMillis = Rfc3339.parseMillis(item.str("receivedDateTime")) ?: 0L,
+            occurredAtMillis = Rfc3339.parseMillis(time) ?: 0L,
             bodyText = text,
-            direction = if (item["isDraft"]?.bool == true) MessageDirection.Outbound else MessageDirection.Inbound,
+            direction = direction,
             replyAnchor = item.str("internetMessageId"),
-            recipients = item["toRecipients"]?.objects.orEmpty().mapNotNull { it.path("emailAddress", "address")?.string },
+            recipients = (item["toRecipients"]?.objects.orEmpty() + item["ccRecipients"]?.objects.orEmpty())
+                .mapNotNull { it.path("emailAddress", "address")?.string },
         )
     }
 
@@ -125,10 +148,24 @@ class OutlookGraphConnector(
 
     companion object {
         private const val MAX_PAGES = 5
+        private const val INBOX = "inbox"
+        private const val SENT = "sentitems"
+        private val FOLDERS = listOf(INBOX, SENT)
         private val PREFER = mapOf("Prefer" to "odata.maxpagesize=50, IdType=\"ImmutableId\", outlook.body-content-type=\"text\"")
-        private const val SELECT = "id,conversationId,subject,from,toRecipients,receivedDateTime,bodyPreview,body,internetMessageId,isDraft"
+        private const val SELECT = "id,conversationId,subject,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,bodyPreview,body,internetMessageId,isDraft"
 
         internal fun auth(token: StoredAccessToken) = mapOf("Authorization" to "Bearer ${token.value}")
+
+        /** Legacy cursors are a bare Graph URL (Inbox only). */
+        internal fun decodeCursor(value: String?): Map<String, String> {
+            if (value.isNullOrBlank()) return emptyMap()
+            if (value.startsWith("https://")) return mapOf(INBOX to value)
+            val json = JsonValue.parseOrNull(value) as? JsonValue.Obj ?: return emptyMap()
+            return json.fields.mapNotNull { (k, v) -> v.string?.let { k to it } }.toMap()
+        }
+
+        internal fun encodeCursor(links: Map<String, String>): String? =
+            if (links.isEmpty()) null else JsonWriter.write(links)
 
         /** Graph error codes per https://learn.microsoft.com/en-us/graph/errors and delta docs. */
         fun classifyGraph(status: Int, reason: String?): ProviderErrorKind = when {
@@ -171,11 +208,14 @@ class OutlookSender(private val graphBase: String = "https://graph.microsoft.com
                 }
                 api.postJson("$graphBase/me/messages/${urlEncode(target)}/reply", mapOf("comment" to payload.body), headers)
             } else {
-                val message = mapOf(
-                    "subject" to (payload.subject ?: ""),
-                    "body" to mapOf("contentType" to "Text", "content" to payload.body),
-                    "toRecipients" to payload.recipients.map { mapOf("emailAddress" to mapOf("address" to it)) },
-                )
+                val address = { a: String -> mapOf("emailAddress" to mapOf("address" to a)) }
+                val message = buildMap<String, Any> {
+                    put("subject", payload.subject ?: "")
+                    put("body", mapOf("contentType" to "Text", "content" to payload.body))
+                    put("toRecipients", payload.recipients.map(address))
+                    if (payload.cc.isNotEmpty()) put("ccRecipients", payload.cc.map(address))
+                    if (payload.bcc.isNotEmpty()) put("bccRecipients", payload.bcc.map(address))
+                }
                 api.postJson("$graphBase/me/sendMail", mapOf("message" to message, "saveToSentItems" to true), headers)
             }
         } catch (e: ConnectorHttpException) {

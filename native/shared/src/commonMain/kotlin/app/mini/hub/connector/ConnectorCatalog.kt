@@ -163,7 +163,7 @@ object ConnectorCatalog {
         ),
         gates = mapOf(Capability.Reply to sendGates, Capability.SendNew to sendGates),
         routeGates = setOf(ReleaseGate.MicrosoftAppRegistration),
-        coverageNote = "Inbox folder delta (per-folder cursor). Other folders are not synced yet. sendMail/reply return 202: accepted, not delivered.",
+        coverageNote = "Inbox and Sent Items via per-folder delta. Other folders are not synced yet. sendMail/reply return 202: accepted, not delivered.",
         officialDocs = listOf(
             "https://learn.microsoft.com/en-us/graph/api/message-delta?view=graph-rest-1.0",
             "https://learn.microsoft.com/en-us/graph/api/user-sendmail?view=graph-rest-1.0",

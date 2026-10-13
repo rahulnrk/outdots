@@ -18,6 +18,7 @@ class OutlookGraphConnectorTest {
             assertEquals("Bearer token-123", req.headers["Authorization"])
             when {
                 req.url.contains("/me?") -> ProviderHttpResponse(200, "{\"id\":\"usr_1\",\"mail\":\"user@outlook.com\"}")
+                req.url.contains("/sentitems/") -> ProviderHttpResponse(200, "{\"value\":[],\"@odata.deltaLink\":\"https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages/delta?deltatoken=s1\"}")
                 req.url.contains("/delta") -> ProviderHttpResponse(
                     200,
                     """

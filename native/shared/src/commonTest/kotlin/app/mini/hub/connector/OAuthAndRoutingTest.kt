@@ -115,8 +115,14 @@ class OAuthAndRoutingTest {
     @Test
     fun replyTargetsPerProvider() {
         assertEquals("m1", ReplyTargets.forProvider(Provider.GMAIL, "m1"))
-        assertEquals("1700000000.000100", ReplyTargets.forProvider(Provider.SLACK, "C1:1700000000.000100"))
-        assertNull(ReplyTargets.forProvider(Provider.SLACK, "noColon"))
+        // Slack: a top-level message (anchor == its own ts) gets a channel reply, not a new thread.
+        assertNull(ReplyTargets.forProvider(Provider.SLACK, "C1:1700000000.000100", "1700000000.000100"))
+        assertNull(ReplyTargets.forProvider(Provider.SLACK, "C1:1700000000.000100"))
+        // A message inside a thread replies into that thread (parent ts).
+        assertEquals("1699999999.000001", ReplyTargets.forProvider(Provider.SLACK, "C1:1700000000.000100", "1699999999.000001"))
+        assertNull(ReplyTargets.forProvider(Provider.SLACK, "noColon", "1"))
+        assertEquals("spaces/S1/threads/T1", ReplyTargets.forProvider(Provider.GOOGLE_CHAT, "spaces/S1/messages/M1", "spaces/S1/threads/T1"))
+        assertNull(ReplyTargets.forProvider(Provider.GOOGLE_CHAT, "spaces/S1/messages/M1"))
         assertEquals("-100:42", ReplyTargets.forProvider(Provider.TELEGRAM, "-100:42"))
         assertNull(ReplyTargets.forProvider(Provider.TEAMS, "anything"))
         assertNull(ReplyTargets.forProvider(Provider.TWITTER, "e1"))

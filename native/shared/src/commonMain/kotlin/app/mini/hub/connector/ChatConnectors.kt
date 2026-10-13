@@ -94,6 +94,7 @@ class SlackConnector(private val apiBase: String = "https://slack.com/api") : Ac
             .take(MAX_CONVERSATIONS)
         val marks = cursor.perConversation.toMutableMap()
         val out = mutableListOf<ProviderMessage>()
+        val names = SlackNames(this, transport, accessToken, "users:read" in account.grantedScopes)
         var gaps = 0
         for (conv in conversations) {
             if (out.size >= maxMessages) break
@@ -134,8 +135,8 @@ class SlackConnector(private val apiBase: String = "https://slack.com/api") : Ac
                 out += ProviderMessage(
                     providerMessageId = "$id:$ts",
                     conversationId = id,
-                    sender = user,
-                    subject = conv.str("name")?.let { "#$it" },
+                    sender = names.nameOf(user),
+                    subject = conv.str("name")?.let { "#$it" } ?: conv.str("user")?.let { names.nameOf(it) },
                     snippet = text.take(200),
                     occurredAtMillis = (ts.substringBefore('.').toLongOrNull() ?: 0L) * 1000L,
                     bodyText = text,
@@ -184,6 +185,37 @@ class SlackConnector(private val apiBase: String = "https://slack.com/api") : Ac
             if ("groups:history" in scopes) add("private_channel")
         }
     }
+}
+
+/**
+ * Resolves Slack user IDs to display names with `users.info` (needs users:read), cached per sync
+ * and bounded so a busy workspace cannot turn one sync into hundreds of calls. Falls back to the ID.
+ */
+internal class SlackNames(
+    private val connector: SlackConnector,
+    private val transport: ProviderHttpTransport,
+    private val token: StoredAccessToken,
+    private val enabled: Boolean,
+) {
+    private val cache = mutableMapOf<String, String>()
+    private var lookups = 0
+
+    fun nameOf(userId: String): String {
+        cache[userId]?.let { return it }
+        if (!enabled || !userId.startsWith("U") && !userId.startsWith("W") || lookups >= MAX_LOOKUPS) return userId
+        lookups++
+        val name = runCatching {
+            val user = connector.slackCall(transport, token, "users.info", mapOf("user" to userId))["user"]
+            user?.path("profile", "display_name")?.string?.takeIf { it.isNotBlank() }
+                ?: user?.path("profile", "real_name")?.string?.takeIf { it.isNotBlank() }
+                ?: user?.str("real_name")?.takeIf { it.isNotBlank() }
+                ?: user?.str("name")
+        }.getOrNull() ?: userId
+        cache[userId] = name
+        return name
+    }
+
+    private companion object { const val MAX_LOOKUPS = 40 }
 }
 
 /** Slack `chat.postMessage` as the signed-in user, threaded with `thread_ts` when replying. */
@@ -276,15 +308,21 @@ class GoogleChatConnector(private val apiBase: String = "https://chat.googleapis
             pageMessages.forEach { m ->
                 val id = m.str("name") ?: return@forEach
                 val text = m.str("text").orEmpty()
+                val senderName = m.path("sender", "name")?.string
                 out += ProviderMessage(
                     providerMessageId = id,
                     conversationId = name,
-                    sender = m.path("sender", "displayName")?.string ?: m.path("sender", "name")?.string ?: "unknown",
+                    sender = m.path("sender", "displayName")?.string ?: senderName ?: "unknown",
                     subject = space.str("displayName"),
                     snippet = text.take(200),
                     occurredAtMillis = Rfc3339.parseMillis(m.str("createTime")) ?: 0L,
                     bodyText = text,
-                    direction = MessageDirection.Unknown,
+                    // Chat user resource names are "users/{id}" with the same ID as the OpenID sub.
+                    direction = when (senderName) {
+                        null -> MessageDirection.Unknown
+                        "users/${account.providerAccountId}" -> MessageDirection.Outbound
+                        else -> MessageDirection.Inbound
+                    },
                     isDeleted = m["deletionMetadata"] != null,
                     revision = MessageRevision.rfc3339(m.str("lastUpdateTime")),
                     replyAnchor = m.path("thread", "name")?.string,
@@ -581,20 +619,42 @@ class XDirectMessageConnector(private val apiBase: String = "https://api.x.com/2
         require(account.id.provider == Provider.TWITTER)
         val api = ProviderApiClient("X", transport, accessToken, reasonOf = ::xReason)
         val newestSeen = ChatCursor.decode(checkpoint.cursor).global
-        val page = api.get(
-            "$apiBase/dm_events?max_results=${maxMessages.coerceIn(1, 100)}&event_types=MessageCreate" +
-                "&dm_event.fields=${urlEncode("id,text,created_at,sender_id,dm_conversation_id")}",
-        )
-        val events = page["data"]?.objects.orEmpty()
-        val fresh = events.takeWhile { it.str("id") != newestSeen }
-        val out = fresh.mapNotNull { e ->
+        val users = mutableMapOf<String, String>()
+        val events = mutableListOf<JsonValue>()
+        var paginationToken: String? = null
+        var reachedSeen = false
+        var pages = 0
+        // Events arrive newest first. Page back until the newest event from the last sync shows
+        // up, so a burst larger than one page is not silently skipped (bounded per sync).
+        while (pages < MAX_PAGES) {
+            pages++
+            val page = api.get(
+                "$apiBase/dm_events?max_results=${maxMessages.coerceIn(1, 100)}&event_types=MessageCreate" +
+                    "&dm_event.fields=${urlEncode("id,text,created_at,sender_id,dm_conversation_id")}" +
+                    "&expansions=sender_id&user.fields=${urlEncode("username,name")}" +
+                    (paginationToken?.let { "&pagination_token=" + urlEncode(it) } ?: ""),
+            )
+            page.path("includes", "users")?.objects.orEmpty().forEach { u ->
+                val uid = u.str("id") ?: return@forEach
+                users[uid] = u.str("name")?.let { n -> u.str("username")?.let { "$n (@$it)" } ?: n } ?: u.str("username")?.let { "@$it" } ?: uid
+            }
+            val data = page["data"]?.objects.orEmpty()
+            val fresh = data.takeWhile { it.str("id") != newestSeen }
+            events += fresh
+            if (fresh.size < data.size) { reachedSeen = true; break }
+            // First sync: one page is the starting window, not a gap.
+            if (newestSeen == null) { reachedSeen = true; break }
+            paginationToken = page.path("meta", "next_token")?.string?.takeIf { it.isNotBlank() } ?: run { reachedSeen = true; null }
+            if (paginationToken == null) break
+        }
+        val out = events.mapNotNull { e ->
             val id = e.str("id") ?: return@mapNotNull null
             val conv = e.str("dm_conversation_id") ?: return@mapNotNull null
             val text = e.str("text").orEmpty()
             ProviderMessage(
                 providerMessageId = id,
                 conversationId = conv,
-                sender = e.str("sender_id") ?: "unknown",
+                sender = e.str("sender_id")?.let { users[it] ?: it } ?: "unknown",
                 subject = null,
                 snippet = text.take(200),
                 occurredAtMillis = Rfc3339.parseMillis(e.str("created_at")) ?: 0L,
@@ -602,8 +662,8 @@ class XDirectMessageConnector(private val apiBase: String = "https://api.x.com/2
                 direction = if (e.str("sender_id") == account.providerAccountId) MessageDirection.Outbound else MessageDirection.Inbound,
             )
         }
-        // If the previous newest event is not on this page, events between may have been missed.
-        val gap = newestSeen != null && fresh.size == events.size && events.isNotEmpty()
+        // The previous newest event was never reached within the page budget: events may be missing.
+        val gap = newestSeen != null && !reachedSeen
         val next = events.firstOrNull()?.str("id") ?: newestSeen
         return SyncResult(
             out,
@@ -613,6 +673,7 @@ class XDirectMessageConnector(private val apiBase: String = "https://api.x.com/2
     }
 
     companion object {
+        private const val MAX_PAGES = 5
         /** X problem details: {"title":"...","type":"https://api.twitter.com/2/problems/client-forbidden"}. */
         fun xReason(json: JsonValue?): String? = json?.str("type")?.substringAfterLast('/') ?: json?.str("title") ?: ProviderApiClient.defaultReason(json)
     }

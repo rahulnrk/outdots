@@ -8,17 +8,29 @@ import app.mini.hub.domain.Provider
  * sent as a new message in the same conversation (and the review screen says so).
  */
 object ReplyTargets {
-    fun forProvider(provider: Provider, providerMessageId: String?): String? {
+    /**
+     * [replyAnchor] is the provider-native anchor stored with the message (Slack thread_ts or ts,
+     * Chat thread name). Rows synced before anchors existed pass null and keep the old behavior.
+     */
+    fun forProvider(provider: Provider, providerMessageId: String?, replyAnchor: String? = null): String? {
         val id = providerMessageId?.takeIf { it.isNotBlank() } ?: return null
+        val anchor = replyAnchor?.takeIf { it.isNotBlank() }
         return when (provider) {
             // Gmail and Outlook senders resolve threading from the message ID themselves.
             Provider.GMAIL, Provider.OUTLOOK -> id
-            // Stored as "<channel>:<ts>"; Slack threads by the parent ts.
-            Provider.SLACK -> id.substringAfter(':').takeIf { it.isNotBlank() && it != id }
+            // Stored as "<channel>:<ts>". Slack threads by the *parent* ts, so only reply in a
+            // thread when the anchor message was itself inside one (anchor = thread_ts != ts).
+            // Otherwise reply in the channel/DM like a person would.
+            Provider.SLACK -> {
+                val ts = id.substringAfter(':').takeIf { it.isNotBlank() && it != id } ?: return null
+                anchor?.takeIf { it != ts }
+            }
             // Stored as "<chat>:<message_id>"; TelegramBotSender reads the part after the last ':'.
             Provider.TELEGRAM -> id.takeIf { ':' in it }
-            // Teams chats are flat, X DMs have no reply anchor, Chat thread names are not stored.
-            Provider.TEAMS, Provider.TWITTER, Provider.GOOGLE_CHAT -> null
+            // Chat replies target the thread resource name ("spaces/S/threads/T").
+            Provider.GOOGLE_CHAT -> anchor?.takeIf { it.startsWith("spaces/") && "/threads/" in it }
+            // Teams chats are flat and X DMs have no reply anchor: post into the conversation.
+            Provider.TEAMS, Provider.TWITTER -> null
             else -> null
         }
     }

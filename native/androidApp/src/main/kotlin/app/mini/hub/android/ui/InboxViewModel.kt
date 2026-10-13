@@ -643,7 +643,7 @@ class InboxViewModel(
         val providerMessageId = anchor?.notificationKey
             ?.takeIf { it.startsWith("provider:${selected.accountId.key}:") }
             ?.removePrefix("provider:${selected.accountId.key}:")
-        val replyTarget = app.mini.hub.connector.ReplyTargets.forProvider(provider, providerMessageId)
+        val replyTarget = app.mini.hub.connector.ReplyTargets.forProvider(provider, providerMessageId, anchor?.replyAnchor)
 
         // Email needs an address; chat routes address the conversation itself.
         val typed = recipient.trim()
