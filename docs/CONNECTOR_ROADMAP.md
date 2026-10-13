@@ -17,6 +17,35 @@ one starts and the blocked one is tracked.
 5. Send path goes through exact-review approval; `SendQualification` cleared only by owner evidence.
 6. `IMPLEMENTATION_STATUS.md` updated, keeping "fixture-tested" vs "qualified on device/live" separate.
 
+## Product decision (13 Oct 2026)
+
+Personal chat networks use **on-device connections** (Beeper On-Device model): the protocol client runs inside
+MINI on the phone, plaintext never leaves the device, session keys are stored in SQLCipher + Keystore, no Matrix
+homeserver and no MINI server in the path. Everything else uses **official APIs**. The user always taps Send.
+
+| Network | On-device engine (candidate) | License | Login on phone | Status |
+|---|---|---|---|---|
+| WhatsApp (+ Business app) | whatsmeow | MPL-2.0 | Linked device, pairing code | Packaged; owner-verified on Pixel (debug) |
+| Google Messages SMS/RCS | libgm (mautrix-gmessages) | **AGPL-3.0** | Pair as Messages for Web (QR or Google account) | Not started |
+| Instagram DMs | mautrix-meta (instagram mode) | **AGPL-3.0** | In-app login WebView, cookies kept on device | Not started |
+| Messenger | mautrix-meta (messenger mode) | **AGPL-3.0** | In-app login WebView, cookies kept on device | Not started |
+| LinkedIn messages | mautrix-linkedin | **AGPL-3.0** | In-app login WebView, cookies kept on device | Not started |
+| iMessage | none viable | - | - | **Not possible** on Android or iOS; see below |
+
+Engineering constraints:
+
+- **One Go runtime.** gomobile produces one `libgojni.so`; two gomobile AARs cannot coexist. All engines go into a
+  single `native/bridgeRuntime` Go module (rename of `whatsappRuntime`) with one Kotlin facade per network.
+- **AGPL.** Linking libgm / mautrix-meta / mautrix-linkedin into the distributed app makes the combined runtime
+  AGPL. Options: (a) publish MINI's bridge runtime (and likely the app) under AGPL, (b) obtain a commercial
+  license from the authors, (c) write our own clients from the protocol. Prototype work can proceed in debug;
+  release requires this decision.
+- **iMessage.** Apple's protocol needs Apple-signed device validation. Beeper Mini was shut down by Apple; Beeper
+  now supports iMessage only on a Mac. Fallback: Android notification capture is impossible (no iMessage on
+  Android); on iOS, handoff only; optional future "Mac relay" owned by the user (plaintext on the user's Mac).
+- **Risk.** Reverse-engineered clients can break on protocol changes and can trigger account checks. Human-only
+  sending lowers but does not remove this. Each connection is opt-in with a plain disclosure.
+
 ## Tiers
 
 | Tier | Meaning | Routes |
@@ -30,22 +59,24 @@ one starts and the blocked one is tracked.
 
 | # | Connector | Tier | Current state | Work to finish | External blockers |
 |---|---|---|---|---|---|
-| 1 | **Gmail** | A | Implemented, device-verified sync | Live send qualification, reboot-without-launch sync, restricted-scope verification prep | Google OAuth verification; CASA only if a server touches mail |
-| 2 | **Outlook.com + Microsoft 365** | A | Fixture-tested, release-offered | Live connect/sync/send on device, 410 resync on device, tenant-consent error UX | Entra app registration, publisher verification |
-| 3 | **Android inline reply (RemoteInput)** | B | Notification capture qualified; replies use handoff | Cache reply actions from child notifications per package (`com.whatsapp` vs `.w4b`), bind approval to the action, downgrade to handoff when the action is gone, "submitted, outcome unverified" receipt | None (no external review) |
-| 4 | **Google Messages SMS/RCS** | B | Source exists, not default | Enable via notification + inline reply, `smsto:` for new threads; never request READ_SMS | None |
-| 4b | **LinkedIn personal** | B | Notification conversations, activity feed and acknowledge actions landed (commits `2a51f79`..`25ee51c`); handoff send | Inline reply through the notification (#3), device run, coverage banner. Official Messaging API is partner-only (SNAP/RSC); no session-scraping vendors | None for Tier B |
-| 5 | **Chat export import** | B | Not started | Share-intent receiver for WhatsApp `.zip`/`_chat.txt`, then Telegram JSON; dedupe with captured history; mark as imported coverage | None |
-| 6 | **Slack** | A | Fixture-tested, debug only | Live workspace run, rate-limit backoff, 90-day free-tier coverage label | Slack app distribution |
-| 7 | **Teams (work/school)** | A | Fixture-tested, debug only | Live tenant run, admin-consent link, automatic fallback to Tier B | Tenant admin consent |
-| 8 | **Google Chat** | A | Fixture-tested, debug only | Live Workspace run | Workspace admin allowlist |
-| 9 | **Telegram personal (TDLib)** | A | Bot API only | Add TDLib user client (api_id/api_hash, OTP/QR login, encrypted TDLib DB); keep bot route for business | Telegram api_id registration |
-| 10 | **Instagram Professional** | A | Adapter exists (24h window) | Live run, App Review, webhook decision (see below) | Meta App Review, Business verification |
-| 11 | **Messenger Pages / WhatsApp Business Cloud** | A | Catalog only | Decide webhook route; adapter | Meta review + privacy decision on webhooks |
-| 12 | **X DMs** | A | Fixture-tested, debug only | Paid-tier add-on, budget guard | Paid X API credits |
-| 13 | **WhatsApp unofficial on-device** | C | whatsmeow packaged (debug, arm64) | Opt-in "advanced" only, ban-risk disclosure, no automated sends, reconnect after process death, 14-day linked-device expiry warning | Product risk decision (see below) |
-| 14 | **Instagram/Messenger/LinkedIn unofficial on-device** | C | Not started | Only after #13 runs cleanly for weeks; needs session-cookie handling decision | Product risk decision; AGPL if mautrix-meta/mautrix-linkedin is used |
-| 15 | iOS slice, Windows companion | - | Blocked / not scoped | After Android connectors are stable | macOS for iOS; Windows needs a platform decision |
+| 1 | **Bridge runtime consolidation** | C | `whatsappRuntime` single-network | Rename to `bridgeRuntime`, one Go module, per-network Kotlin facades, shared session store | None |
+| 2 | **WhatsApp on-device** | C | Owner-verified on Pixel (debug) | Release gating, 14-day primary-phone warning, coverage label, multi-account | None |
+| 3 | **Google Messages on-device (libgm)** | C | Not started | Pair, sync history, receive, reviewed send, reconnect after process death | AGPL decision for release |
+| 4 | **Instagram on-device** | C | Official Pro adapter exists | mautrix-meta engine, in-app login, checkpoint handling | AGPL decision |
+| 5 | **Messenger on-device** | C | Notification-only | Same engine as #4 (messenger mode) | AGPL decision |
+| 6 | **LinkedIn on-device** | C | Notification conversations (`2a51f79`..`25ee51c`) | mautrix-linkedin engine, in-app login | AGPL decision |
+| 7 | **Gmail** | A | Device-verified sync | Live send qualification, OAuth verification prep | Google verification |
+| 8 | **Outlook / M365** | A | Fixture-tested | Live run on device | Entra registration |
+| 9 | **Slack** | A | Fixture-tested, debug | Live workspace run | Slack app distribution |
+| 10 | **Teams (work/school)** | A | Fixture-tested, debug | Live tenant run, admin-consent link | Tenant consent |
+| 11 | **Google Chat** | A | Fixture-tested, debug | Live Workspace run | Workspace allowlist |
+| 12 | **Telegram (TDLib)** | A | Bot API only | TDLib user client | api_id registration |
+| 13 | **X DMs** | A | Fixture-tested, debug | Paid add-on | X API credits |
+| 14 | **Business APIs** (IG Pro, Pages, WA Cloud) | A | IG Pro adapter | Only if business users need them | Meta App Review |
+| - | Notification capture (all Android sources) | B | Qualified on device | Stays as a fallback when an on-device connection is disconnected | None |
+| - | Chat export import | B | Not started | WhatsApp `.zip`; mainly for iOS | None |
+| - | iOS | - | Blocked (no macOS) | Same engines via gomobile xcframework inside a notification extension; needs a content-free push wake-up | macOS, Apple dev account |
+| - | iMessage | - | Not possible | Handoff only; optional user-owned Mac relay later | Apple |
 
 Cross-cutting, scheduled alongside #2: **content-free wake-up relay** for Gmail Pub/Sub and Graph
 subscriptions (notification carries only an ID; device fetches content). Off by default; requires disclosure.
@@ -70,6 +101,6 @@ This holds for API, inline-reply and unofficial-client routes alike.
 1. **Meta business webhooks.** Arch s4 rejects a relay because the server sees plaintext briefly. The study's
    sealed-box relay narrows this but does not remove it. Decide before #10/#11 ship sync (API send within
    24h works without webhooks).
-2. **Tier C (unofficial clients).** Allowed as opt-in advanced connections on the phone only, or not shipped.
+2. **AGPL** for libgm / mautrix-meta / mautrix-linkedin (see Product decision).
    A remote Matrix homeserver/bridge stays excluded under the phone-local rule.
 3. **Telegram:** TDLib replaces or sits alongside the bot connector.
