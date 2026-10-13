@@ -70,6 +70,18 @@ interface WhatsAppPhoneClient {
     fun persistSnapshot(): ByteArray? = null
     fun logout() {}
     fun unencryptedSessionFiles(): List<String> = emptyList()
+    /** Live connection health of the linked companion session. */
+    fun health(): WhatsAppHealth = if (linkedPhoneE164() != null) WhatsAppHealth.Connected else WhatsAppHealth.NotLinked
+}
+
+/** What the companion runtime can tell us about the link right now. */
+enum class WhatsAppHealth {
+    Connected,
+    /** Linked but the socket is down; whatsmeow reconnects by itself. */
+    Reconnecting,
+    /** WhatsApp removed this linked device (user unlinked it, or the primary phone was offline too long). */
+    LoggedOut,
+    NotLinked,
 }
 
 /**

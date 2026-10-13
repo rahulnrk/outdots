@@ -197,6 +197,36 @@ class ConnectorCompletenessTest {
         assertEquals(MessageDirection.Outbound, messages[1].direction)
     }
 
+    private class FakeWa(var health: WhatsAppHealth, var pending: List<ProviderMessage>) : WhatsAppPhoneClient {
+        override fun startPairing() = WhatsAppPairing.Cancelled
+        override fun restoreAndReconnect(envelope: WhatsAppSessionEnvelope) = WhatsAppReconnect.Restored("+15551234567")
+        override fun linkedPhoneE164() = "+15551234567"
+        override fun send(payload: app.mini.hub.action.ExactActionPayload) = SendOutcome.Rejected("x")
+        override fun drainInbound() = pending.also { pending = emptyList() }
+        override fun health() = health
+    }
+
+    @Test
+    fun whatsappLogoutKeepsDrainedMessagesThenAsksToRelink() {
+        val msg = ProviderMessage("m1", "1@s.whatsapp.net", "Ann", null, "hi", 1L)
+        val client = FakeWa(WhatsAppHealth.LoggedOut, listOf(msg))
+        val connector = WhatsAppPhoneConnector(client)
+        val acct = account(Provider.WHATSAPP, "+15551234567", "+15551234567").copy(route = ConnectorRoute.PhoneLocalBridge)
+        val first = connector.sync(acct, StoredAccessToken("s", null), SyncCheckpoint(), ProviderHttpTransport.of { error("no http") }, 50)
+        assertEquals(ConnectionState.Healthy, first.state)
+        assertEquals(1, first.messages.size)
+        val second = connector.sync(acct, StoredAccessToken("s", null), first.next, ProviderHttpTransport.of { error("no http") }, 50)
+        assertEquals(ConnectionState.AuthorizationRequired, second.state)
+        assertEquals(WhatsAppPhoneConnector.LOGGED_OUT_NOTICE, second.userActionRequired)
+    }
+
+    @Test
+    fun whatsappReconnectingStaysHealthy() {
+        val connector = WhatsAppPhoneConnector(FakeWa(WhatsAppHealth.Reconnecting, emptyList()))
+        val acct = account(Provider.WHATSAPP, "+15551234567", null).copy(route = ConnectorRoute.PhoneLocalBridge)
+        assertEquals(ConnectionState.Healthy, connector.sync(acct, StoredAccessToken("s", null), SyncCheckpoint(), ProviderHttpTransport.of { error("no http") }, 50).state)
+    }
+
     @Test
     fun googleChatMarksOwnMessagesOutbound() {
         val transport = ProviderHttpTransport.of { req ->

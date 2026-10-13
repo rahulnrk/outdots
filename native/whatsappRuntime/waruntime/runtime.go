@@ -41,6 +41,7 @@ type Runtime struct {
 	names      map[string]string
 	media      map[string]*waE2E.Message
 	dirty      bool
+	loggedOut  bool
 	watchDir   string
 }
 
@@ -366,6 +367,7 @@ func (r *Runtime) Restore(snapshot []byte) error {
 		return err
 	}
 	r.restoreExtrasLocked(snapshot)
+	r.loggedOut = false
 	device, err := r.container.GetFirstDevice(context.Background())
 	if err != nil {
 		return err
@@ -415,6 +417,7 @@ func (r *Runtime) Logout() error {
 	r.state = StateIdle
 	r.qr = ""
 	r.inbound = nil
+	r.loggedOut = false
 	r.chats = make(map[string][]inboundMessage)
 	r.names = make(map[string]string)
 	r.dirty = false
@@ -508,12 +511,40 @@ func (r *Runtime) onEvent(evt any) {
 		r.mu.Lock()
 		r.state = StateLinked
 		r.dirty = true
+		r.loggedOut = false
 		r.mu.Unlock()
 	case *events.LoggedOut:
 		r.mu.Lock()
 		r.state = StateError
 		r.lastErr = "logged_out"
+		r.loggedOut = true
 		r.mu.Unlock()
+	case *events.StreamReplaced:
+		// Another client took over this linked-device session; whatsmeow will not reconnect.
+		r.mu.Lock()
+		r.lastErr = "stream_replaced"
+		r.loggedOut = true
+		r.mu.Unlock()
+	case *events.TemporaryBan:
+		r.mu.Lock()
+		r.lastErr = "temporary_ban"
+		r.mu.Unlock()
+	}
+}
+
+// Health reports the live link state: "connected", "reconnecting", "logged_out" or "not_linked".
+func (r *Runtime) Health() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	switch {
+	case r.loggedOut:
+		return "logged_out"
+	case r.client == nil || r.client.Store.ID == nil:
+		return "not_linked"
+	case r.client.IsConnected() && r.client.IsLoggedIn():
+		return "connected"
+	default:
+		return "reconnecting"
 	}
 }
 

@@ -78,6 +78,15 @@ class GomobileWhatsAppClient private constructor(private val native: Any) : What
 
     override fun linkedPhoneE164(): String? = string("linkedPhone").ifBlank { null }
 
+    /** Older packaged runtimes have no `health`; fall back to linked/not linked. */
+    override fun health(): app.mini.hub.connector.WhatsAppHealth = when (runCatching { string("health") }.getOrNull()) {
+        "connected" -> app.mini.hub.connector.WhatsAppHealth.Connected
+        "reconnecting" -> app.mini.hub.connector.WhatsAppHealth.Reconnecting
+        "logged_out" -> app.mini.hub.connector.WhatsAppHealth.LoggedOut
+        "not_linked" -> app.mini.hub.connector.WhatsAppHealth.NotLinked
+        else -> super.health()
+    }
+
     override fun send(payload: ExactActionPayload): SendOutcome {
         val chat = chatJid(payload)
         if (chat.isBlank()) return SendOutcome.Rejected("whatsapp_missing_chat")
