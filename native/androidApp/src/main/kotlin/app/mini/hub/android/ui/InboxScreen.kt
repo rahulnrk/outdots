@@ -2,7 +2,6 @@ package app.mini.hub.android.ui
 
 import android.content.Intent
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -42,7 +41,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -105,97 +103,110 @@ fun InboxScreen(
     var showSourceSettings by remember { mutableStateOf(false) }
     var showAccountSettings by remember { mutableStateOf(false) }
     var showLearningSettings by remember { mutableStateOf(false) }
-    HubApp(
-        viewModel = viewModel,
-        handoffLauncher = handoffLauncher,
-        onRequestPermission = onRequestPermission,
-        sourcePreferences = sourcePreferences,
-        accountStore = accountStore,
-        connectionStatus = connectionStatus,
-        onConnect = onConnect,
-        onSourceSelectionChanged = onSourceSelectionChanged,
-        styleLearningEnabled = styleLearningEnabled,
-        onStyleLearningChanged = onStyleLearningChanged,
-        onOpenAccounts = { showAccountSettings = true },
-        onOpenSources = { showSourceSettings = true },
-        onSyncNow = onSyncNow,
-    )
-    var hubTab by rememberSaveable { mutableStateOf(HubTab.Inbox.name) }
-    val currentTab = HubTab.entries.firstOrNull { it.name == hubTab } ?: HubTab.Inbox
-    val showingThread = state.selectedConversation != null
     // Returning from Google recreates the screen. Reopen Accounts so the connection result is visible.
     androidx.compose.runtime.LaunchedEffect(connectionStatus) {
         if (connectionStatus != null) showAccountSettings = true
     }
 
-    if (false) Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+    Scaffold(
         topBar = {
-            if (!showingThread) {
-                BrandBar(
-                    statusText = if (state.isListenerConnected) "On this phone" else "Listener idle",
-                    statusOk = state.isListenerConnected,
-                    onStatusClick = { hubTab = HubTab.Console.name },
-                    onCompose = {
+            TopAppBar(
+                title = { Text("MINI") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+                actions = {
+                    TextButton(onClick = {
                         val gmail = accountStore.list().firstOrNull {
                             it.id.provider == app.mini.hub.domain.Provider.GMAIL && it.state != app.mini.hub.connector.ConnectionState.Disconnected
                         }
-                        if (gmail != null) viewModel.startComposeEmail(gmail.id) else {
-                            hubTab = HubTab.Console.name
-                            showAccountSettings = true
-                        }
-                    },
-                )
-            }
-        },
-        bottomBar = {
-            if (!showingThread) {
-                LineuppBottomBar(selected = currentTab, onSelect = { hubTab = it.name })
-            }
+                        if (gmail != null) viewModel.startComposeEmail(gmail.id) else showAccountSettings = true
+                    }) { Text("✏ Compose") }
+                    TextButton(onClick = { showSourceSettings = true }) {
+                        Text("Sources")
+                    }
+                    TextButton(onClick = { showAccountSettings = true }) {
+                        Text("Accounts")
+                    }
+                    TextButton(onClick = { showLearningSettings = true }) {
+                        Text("Learning")
+                    }
+                    val statusText = if (state.isListenerConnected) "Listener Active" else "Listener Idle"
+                    val statusColor = if (state.isListenerConnected) Color(0xFF2E7D32) else Color(0xFFC62828)
+                    Text(
+                        text = statusText,
+                        color = statusColor,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(end = 12.dp),
+                    )
+                },
+            )
         },
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 20.dp),
+                .padding(16.dp),
         ) {
+            // Permission Banner if access is not granted
             if (!state.isPermissionGranted) {
-                NoticeBanner(
-                    title = "Notification access needed",
-                    body = "Android needs this so Lineupp can save new messages from the sources you choose.",
-                    tone = PillTone.Attention,
-                    action = "Open settings",
-                    onAction = onRequestPermission,
-                    modifier = Modifier.padding(bottom = 12.dp),
-                )
-            } else if (!state.isListenerConnected) {
-                NoticeBanner(
-                    title = "Listener is idle",
-                    body = "New notifications aren't being saved right now.",
-                    tone = PillTone.Attention,
-                    action = "Fix",
-                    onAction = { hubTab = HubTab.Console.name },
-                    modifier = Modifier.padding(bottom = 12.dp),
-                )
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "Notification Access Required",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "To observe WhatsApp and Gmail messages locally on your device, please grant Notification Access permission.",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(vertical = 4.dp),
+                        )
+                        Button(
+                            onClick = onRequestPermission,
+                            modifier = Modifier.align(Alignment.End),
+                        ) {
+                            Text("Open Settings")
+                        }
+                    }
+                }
             }
 
             state.storageFailure?.let { failure ->
-                NoticeBanner(
-                    title = "Storage error",
-                    body = failure,
-                    tone = PillTone.Error,
-                    modifier = Modifier.padding(bottom = 12.dp),
-                )
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                ) {
+                    Text(
+                        text = "Storage Error: $failure",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
             }
 
+            // Status message (e.g. outbox confirmation)
             state.outboxStatusMessage?.let { msg ->
-                NoticeBanner(
-                    title = "Reply status",
-                    body = msg,
-                    tone = PillTone.Action,
-                    modifier = Modifier.padding(bottom = 12.dp),
-                )
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                ) {
+                    Text(
+                        text = msg,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
             }
 
             if (state.selectedConversation != null) {
@@ -280,32 +291,12 @@ fun InboxScreen(
                     onDraftPrepared = { body, recip -> viewModel.prepareDraft(body, recip) },
                     onAttentionAction = { action -> viewModel.applyAttentionAction(state.selectedConversation!!.conversationId, action) },
                 )
-            } else when (currentTab) {
-                HubTab.Focus -> FocusPane(
-                    view = state.attentionView,
-                    conversations = state.conversations,
-                    onSelect = { viewModel.selectConversation(it) },
-                    onAttention = { id, action -> viewModel.applyAttentionAction(id, action) },
-                )
-                HubTab.Console -> ConsolePane(
-                    accounts = remember(accountsVersion, connectionStatus) { accountStore.list() },
-                    isPermissionGranted = state.isPermissionGranted,
-                    isListenerConnected = state.isListenerConnected,
-                    styleLearningEnabled = styleLearningEnabled,
-                    connectionStatus = connectionStatus,
-                    onOpenAccounts = { showAccountSettings = true },
-                    onOpenSources = { showSourceSettings = true },
-                    onOpenStyle = { showLearningSettings = true },
-                    onRequestPermission = onRequestPermission,
-                    onSyncNow = onSyncNow,
-                )
-                HubTab.Inbox -> {
-                PageTitle("Inbox", "Everything that's arrived.")
+            } else {
                 // Unified search box across every enabled source
                 androidx.compose.material3.OutlinedTextField(
                     value = state.searchQuery,
                     onValueChange = { viewModel.onSearchQueryChanged(it) },
-                    placeholder = { Text("Search people and messages") },
+                    placeholder = { Text("Search messages across all sources…") },
                     singleLine = true,
                     trailingIcon = {
                         if (state.searchQuery.isNotBlank()) {
@@ -383,11 +374,9 @@ fun InboxScreen(
                     ChatListView(
                         conversations = state.conversations,
                         labels = labels,
-                        attention = state.attentionRecords,
                         onSelect = { viewModel.selectConversation(it) },
                         onAttention = { conversationId, action -> viewModel.applyAttentionAction(conversationId, action) },
                     )
-                }
                 }
             }
         }
@@ -448,7 +437,7 @@ fun InboxScreen(
     }
 
     // Exact Action Review Dialog
-    if (false) state.activeReviewPayload?.let { payload ->
+    state.activeReviewPayload?.let { payload ->
         ExactActionReviewDialog(
             payload = payload,
             context = state.reviewContext,
@@ -456,178 +445,6 @@ fun InboxScreen(
             onConfirm = { viewModel.approveAndDispatch(handoffLauncher) },
             onDismiss = { if (!state.isSending) viewModel.clearDraftReview() },
         )
-    }
-}
-
-@Composable
-private fun FocusPane(
-    view: AttentionView?,
-    conversations: List<ConversationObservationSummary>,
-    onSelect: (ConversationObservationSummary) -> Unit,
-    onAttention: (app.mini.hub.domain.ScopedId, AttentionAction) -> Unit,
-) {
-    val needs = view?.needsAttention.orEmpty()
-    val waiting = view?.waiting.orEmpty()
-    val later = view?.snoozed.orEmpty()
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-            PageTitle("A little focus.", if (needs.isEmpty()) "Nothing needs you right now." else "Here's what needs you today.")
-            Text(needs.size.toString(), style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
-        }
-        if (needs.isEmpty() && waiting.isEmpty() && later.isEmpty()) {
-            Text("New messages can still arrive. Your inbox is always here.", color = lineupp.secondaryText, style = MaterialTheme.typography.bodySmall)
-        }
-        needs.forEach { entry ->
-            FocusCard(
-                summary = entry.summary,
-                status = "Needs reply",
-                tone = PillTone.Attention,
-                onSelect = { onSelect(entry.summary) },
-                onLater = { onAttention(entry.summary.conversationId, AttentionAction.Snooze(UtcInstant(System.currentTimeMillis() + 4 * 3600_000L))) },
-                onDone = { onAttention(entry.summary.conversationId, AttentionAction.MarkDone) },
-            )
-        }
-        if (waiting.isNotEmpty()) {
-            SectionLabel("Waiting on them", waiting.size.toString())
-            waiting.take(5).forEach { entry ->
-                FocusCard(summary = entry.summary, status = "Waiting", tone = PillTone.Neutral, onSelect = { onSelect(entry.summary) }, onLater = null, onDone = { onAttention(entry.summary.conversationId, AttentionAction.MarkDone) })
-            }
-        }
-        if (later.isNotEmpty()) {
-            SectionLabel("Later", later.size.toString())
-            later.take(5).forEach { entry ->
-                FocusCard(summary = entry.summary, status = "Later", tone = PillTone.Action, onSelect = { onSelect(entry.summary) }, onLater = null, onDone = { onAttention(entry.summary.conversationId, AttentionAction.MarkDone) })
-            }
-        }
-        if (conversations.isEmpty() && needs.isEmpty()) {
-            Text("No conversations yet.", color = lineupp.secondaryText, modifier = Modifier.padding(top = 24.dp))
-        }
-    }
-}
-
-@Composable
-private fun FocusCard(
-    summary: ConversationObservationSummary,
-    status: String,
-    tone: PillTone,
-    onSelect: () -> Unit,
-    onLater: (() -> Unit)?,
-    onDone: () -> Unit,
-) {
-    val source = app.mini.hub.observation.SourceAppNames.forPackage(summary.packageId)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 12.dp)
-            .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
-            .padding(14.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            PersonAvatar(summary.title, source, 40.dp)
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(summary.title, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                Text(source, style = MaterialTheme.typography.labelSmall, color = lineupp.secondaryText)
-            }
-            StatePill(status, tone)
-        }
-        Text(summary.latestSnippet, style = MaterialTheme.typography.bodySmall, maxLines = 3, modifier = Modifier.padding(top = 10.dp))
-        Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onSelect, shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp)) { Text("Reply") }
-            if (onLater != null) OutlinedButton(onClick = onLater, shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp)) { Text("Later") }
-            TextButton(onClick = onDone) { Text("Done") }
-        }
-    }
-}
-
-@Composable
-private fun ConsolePane(
-    accounts: List<ConnectedAccount>,
-    isPermissionGranted: Boolean,
-    isListenerConnected: Boolean,
-    styleLearningEnabled: Boolean,
-    connectionStatus: String?,
-    onOpenAccounts: () -> Unit,
-    onOpenSources: () -> Unit,
-    onOpenStyle: () -> Unit,
-    onRequestPermission: () -> Unit,
-    onSyncNow: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
-        PageTitle("Your console.", "A clear view of what's working.")
-        NoticeBanner(
-            title = "Private, by design.",
-            body = "Messages are stored encrypted here. Your connected services still use the internet.",
-            tone = PillTone.Settled,
-            modifier = Modifier.padding(bottom = 8.dp),
-        )
-        val needs = accounts.count {
-            it.state != app.mini.hub.connector.ConnectionState.Healthy &&
-                it.state != app.mini.hub.connector.ConnectionState.Authorized &&
-                it.state != app.mini.hub.connector.ConnectionState.Syncing
-        }
-        SectionLabel("Connected sources", if (accounts.isEmpty()) "None yet" else if (needs > 0) needs.toString() + " need attention" else "All active")
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerLowest),
-        ) {
-            if (accounts.isEmpty()) {
-                SettingRow("No authenticated accounts", "Connect Gmail, Outlook or others to sync history.", onClick = onOpenAccounts)
-            } else {
-                accounts.forEachIndexed { index, account ->
-                    if (index > 0) HorizontalDivider(color = lineupp.divider)
-                    val ok = account.state == app.mini.hub.connector.ConnectionState.Healthy ||
-                        account.state == app.mini.hub.connector.ConnectionState.Authorized ||
-                        account.state == app.mini.hub.connector.ConnectionState.Syncing
-                    SettingRow(
-                        title = (account.displayName ?: account.providerAccountId) + " · " + account.id.provider.wire,
-                        subtitle = account.userActionRequired ?: accountStateLabel(account.state),
-                        trailing = { StatePill(accountStateLabel(account.state), if (ok) PillTone.Settled else PillTone.Attention) },
-                        onClick = onOpenAccounts,
-                    )
-                }
-            }
-        }
-        SectionLabel("Notification listener")
-        Column(
-            modifier = Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerLowest),
-        ) {
-            SettingRow(
-                title = "Notification access",
-                subtitle = if (isPermissionGranted) "Android access is enabled" else "Needed to save new notifications",
-                trailing = { StatePill(if (isPermissionGranted) "On" else "Off", if (isPermissionGranted) PillTone.Settled else PillTone.Attention) },
-                onClick = onRequestPermission,
-            )
-            HorizontalDivider(color = lineupp.divider)
-            SettingRow(
-                title = "Save notifications",
-                subtitle = if (isListenerConnected) "New selected-source notifications can be saved" else "Listener idle · new notifications aren't saved",
-                trailing = { StatePill(if (isListenerConnected) "Active" else "Idle", if (isListenerConnected) PillTone.Settled else PillTone.Attention) },
-                onClick = onOpenSources,
-            )
-        }
-        SectionLabel("Your preferences")
-        Column(
-            modifier = Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerLowest),
-        ) {
-            SettingRow("Sources", "Choose which notification apps appear in the inbox", onClick = onOpenSources)
-            HorizontalDivider(color = lineupp.divider)
-            SettingRow(
-                "Writing style",
-                if (styleLearningEnabled) "On for approved outgoing writing" else "Off · learns only with your permission",
-                onClick = onOpenStyle,
-            )
-            HorizontalDivider(color = lineupp.divider)
-            SettingRow("Add or disconnect accounts", "Provider sign-in stays with that service", onClick = onOpenAccounts)
-            HorizontalDivider(color = lineupp.divider)
-            SettingRow("Sync connected accounts now", "Pull new mail and messages from signed-in accounts", onClick = onSyncNow)
-        }
-        connectionStatus?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = lineupp.secondaryText, modifier = Modifier.padding(top = 16.dp))
-        }
     }
 }
 
@@ -1717,7 +1534,7 @@ fun ExactActionReviewDialog(
     val handoffApp = context?.handoffPackage?.let { app.mini.hub.observation.SourceAppNames.forPackage(it) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Check before it goes.") },
+        title = { Text("Review exactly what happens") },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(

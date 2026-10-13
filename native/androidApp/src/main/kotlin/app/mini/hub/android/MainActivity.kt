@@ -43,11 +43,10 @@ class MainActivity : ComponentActivity() {
         if (storage is RuntimeStorage.Failed) {
             // Blocking: no inbox, no accounts, no sending. Nothing would be durable.
             setContent {
-                app.mini.hub.android.ui.LineuppTheme {
+                MaterialTheme {
                     Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-                        app.mini.hub.android.ui.LineuppMark(40.dp)
-                        Text("${app.mini.hub.android.ui.Brand.NAME} cannot open its storage", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(top = 16.dp))
-                        Text(storage.userMessage, modifier = Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("MINI cannot open its storage", style = MaterialTheme.typography.headlineSmall)
+                        Text(storage.userMessage, modifier = Modifier.padding(top = 12.dp))
                     }
                 }
             }
@@ -94,7 +93,7 @@ class MainActivity : ComponentActivity() {
         handoffLauncher = AndroidNativeHandoffLauncher(this)
 
         setContent {
-            app.mini.hub.android.ui.LineuppTheme {
+            MaterialTheme {
                 InboxScreen(
                     viewModel = viewModel,
                     handoffLauncher = handoffLauncher,

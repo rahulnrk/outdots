@@ -120,7 +120,6 @@ fun ChatListView(
     labels: Map<String, String>,
     onSelect: (ConversationObservationSummary) -> Unit,
     onAttention: (app.mini.hub.domain.ScopedId, app.mini.hub.attention.AttentionAction) -> Unit = { _, _ -> },
-    attention: Map<String, app.mini.hub.attention.ConversationAttention> = emptyMap(),
 ) {
     var filter by rememberSaveable { mutableStateOf<String?>(null) }
     val linkedinActivities = conversations.filter(::isLinkedInActivitySummary)
@@ -130,9 +129,9 @@ fun ChatListView(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            LineuppChip("All", selected = filter == null, onClick = { filter = null })
+            FilterChip(selected = filter == null, onClick = { filter = null }, label = { Text("All") })
             ConversationLabels.DEFAULTS.forEach { label ->
-                LineuppChip(label, selected = filter == label, onClick = { filter = if (filter == label) null else label })
+                FilterChip(selected = filter == label, onClick = { filter = if (filter == label) null else label }, label = { Text(label) })
             }
         }
         if (linkedinActivities.isNotEmpty() && filter == null) {
@@ -162,7 +161,7 @@ fun ChatListView(
         }
         LazyColumn {
             items(shown, key = { it.conversationId.key }) { conv ->
-                ChatRow(conv, labels[conv.conversationId.key], attention[conv.conversationId.key]) { onSelect(conv) }
+                ChatRow(conv, labels[conv.conversationId.key]) { onSelect(conv) }
                 HorizontalDivider()
             }
         }
@@ -216,55 +215,42 @@ private fun ConversationObservationSummary.categoryLabel(): String = when (categ
 }
 
 @Composable
-private fun ChatRow(
-    conv: ConversationObservationSummary,
-    label: String?,
-    attention: app.mini.hub.attention.ConversationAttention?,
-    onClick: () -> Unit,
-) {
-    val source = SourceAppNames.forPackage(conv.packageId)
-    val status = when {
-        attention?.status == app.mini.hub.attention.FollowUpStatus.Waiting -> "Waiting" to PillTone.Neutral
-        attention?.status == app.mini.hub.attention.FollowUpStatus.Snoozed -> "Later" to PillTone.Action
-        conv.unreadCount > 0 || attention?.status == app.mini.hub.attention.FollowUpStatus.NeedsAttention -> "Needs reply" to PillTone.Attention
-        else -> null
-    }
+private fun ChatRow(conv: ConversationObservationSummary, label: String?, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PersonAvatar(conv.title, source, 44.dp)
+        Box(
+            modifier = Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(conv.title.trim().firstOrNull()?.uppercase() ?: "?", fontWeight = FontWeight.Bold)
+        }
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(conv.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                Text(timeLabel(conv.latestEventAt.epochMillis), style = MaterialTheme.typography.labelSmall, color = lineupp.secondaryText)
+                Text(timeLabel(conv.latestEventAt.epochMillis), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
             }
-            Text(
-                formatChatText(previewText(conv.latestSnippet)).text,
-                style = MaterialTheme.typography.bodySmall,
-                color = lineupp.secondaryText,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 3.dp),
-            )
-            Row(
-                modifier = Modifier.padding(top = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                status?.let { StatePill(it.first, it.second) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    source + (label?.let { " · " + it } ?: ""),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = lineupp.secondaryText,
+                    formatChatText(previewText(conv.latestSnippet)).text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
+                if (conv.unreadCount > 0) {
+                    Box(
+                        modifier = Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.primary).padding(horizontal = 6.dp, vertical = 1.dp),
+                    ) { Text("${conv.unreadCount}", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall) }
+                }
             }
-        }
-        if (conv.unreadCount > 0) {
-            Box(
-                modifier = Modifier.padding(start = 8.dp).size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(SourceAppNames.forPackage(conv.packageId), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                label?.let { Text("• $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary) }
+            }
         }
     }
 }
@@ -306,16 +292,14 @@ fun ThreadView(
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            IconButtonCircle("back", "Back", onClick = onBack)
-            PersonAvatar(summary.title, SourceAppNames.forPackage(summary.packageId), 36.dp)
-            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = onBack) { Text("←") }
             Column(modifier = Modifier.weight(1f)) {
                 Text(summary.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
                 Text(SourceAppNames.forPackage(summary.packageId), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
             }
             OutlinedButton(onClick = { showLabels = true }) { Text(label ?: "Category") }
             Box {
-                IconButtonCircle("more", "More", onClick = { menu = true })
+                TextButton(onClick = { menu = true }) { Text("⋮") }
                 androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     androidx.compose.material3.DropdownMenuItem(text = { Text("Mark done") }, onClick = { onAttention(app.mini.hub.attention.AttentionAction.MarkDone); menu = false })
                     androidx.compose.material3.DropdownMenuItem(text = { Text("Waiting for their reply") }, onClick = { onAttention(app.mini.hub.attention.AttentionAction.MarkWaiting); menu = false })
@@ -685,10 +669,7 @@ private fun Composer(
             }
         }
         Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-            Box(
-                modifier = Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(lineupp.actionTint).clickable { aiOpen = !aiOpen },
-                contentAlignment = Alignment.Center,
-            ) { StrokeIcon(if (aiOpen) "close" else "spark", Modifier.size(20.dp), MaterialTheme.colorScheme.primary) }
+            TextButton(onClick = { aiOpen = !aiOpen }) { Text(if (aiOpen) "✕ AI" else "✨ AI") }
             OutlinedTextField(
                 value = draftText,
                 onValueChange = onDraftChanged,
@@ -697,10 +678,10 @@ private fun Composer(
                 maxLines = 5,
             )
             Spacer(modifier = Modifier.width(6.dp))
-            Button(onClick = { onApprove(draftText) }, enabled = draftText.isNotBlank() && !isDrafting, shape = RoundedCornerShape(14.dp)) { Text("Review") }
+            Button(onClick = { onApprove(draftText) }, enabled = draftText.isNotBlank() && !isDrafting) { Text("Send") }
         }
         Text(
-            "Review shows the exact message for your approval first.",
+            "Send shows the exact message for your approval first.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.outline,
         )
