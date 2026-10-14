@@ -152,10 +152,11 @@ class SqlCipherObservationStore(
             db.execSQL(ObservationSchema.POPULATE_FTS_FROM_EXISTING)
             true
         } catch (t: Throwable) {
-            android.util.Log.w("MiniSearch", "fts5 unavailable: ${t.javaClass.simpleName}: ${t.message?.take(160)}")
+            // Fixed label + exception class only. Exception messages can echo SQL or data.
+            android.util.Log.w("MiniSearch", "fts_init_failed class=${t.javaClass.simpleName}")
             false
         }
-        android.util.Log.i("MiniSearch", "fts5 supported=$isFts5Supported")
+        android.util.Log.i("MiniSearch", "fts_init supported=$isFts5Supported")
         db
     }
 
@@ -695,8 +696,8 @@ class SqlCipherObservationStore(
                 }
             }
         } catch (t: Throwable) {
-            // Never log query text or content: only the failure type and the SQL error message.
-            android.util.Log.w("MiniSearch", "search failed: ${t.javaClass.simpleName}: ${t.message?.take(160)}")
+            // Never log query text, content or the exception message: fixed label + class only.
+            android.util.Log.w("MiniSearch", "search_failed class=${t.javaClass.simpleName}")
             emptyList()
         }
     }

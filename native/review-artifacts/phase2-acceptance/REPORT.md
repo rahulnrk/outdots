@@ -29,7 +29,7 @@ Evidence label **SYNTHETIC**: repeat/new-message checks used debug probes (`Acce
 | v4 survival of accounts/drafts/history | PASS. Stores present, accounts Connected, Focus history intact |
 
 ### Bugs found and fixed during acceptance
-- **On-device search returned nothing for every query.** `SqlCipherObservationStore.search` used `snippet()` inside `GROUP BY`, which SQLite rejects. The exception was swallowed. Fixed, and the failure type is now logged without query text. Regression test added.
+- **On-device search returned nothing for every query.** `SqlCipherObservationStore.search` used `snippet()` inside `GROUP BY`, which SQLite rejects. The exception was swallowed. Fixed. Failures now log a fixed label and the exception class only (see section 6). Regression test added.
 - **Debug synthetic probes were invisible in Inbox/search** (self package not a selected source). The debug build alone now passes MINI's own package. Release builds pass nothing.
 - **Restored new-email draft did not show which Gmail account it would send from**, though two are connected. Now shows `From:`.
 
@@ -47,9 +47,16 @@ Recorded separately:
 - Activity actions wrap with a minimum touch height. "Open in LinkedIn" is fully readable and tappable at 1.3x and 2.0x. PASS.
 - Action history is now a single compact strip. The uncertain outcome comes first, with "Check in source app" and "History (n)" to expand. Draft cards are one line plus recipient. At 1.3x the Inbox shows the strip, draft and both conversations above the bottom bar. PASS at 1.0x and 1.3x.
 
-## Remaining limitations
-- At 2.0x text the pinned header, strip and draft still push the conversation list mostly below the fold (header labels "Latest conversations / 2 conversations" are visible, rows need a scroll). Acceptable for now, noted for later.
+## Follow-ups (Phase 2 accepted, these stay open)
+- **Locked-phone listener reliability needs investigation.** While the phone was locked, the system repeatedly unbound and rebound the listener, then logged "not rebinding ... previous rebind attempt". The ~2.3 s recovery measured on an unlocked phone does not establish locked-phone reliability. Whether this predates Phase 2 is also unverified.
+- **Improve the Inbox layout at 2x text.** The pinned header, history strip and draft still push conversation rows mostly below the fold. Fix this while keeping scrolling and access to every action.
+- **Inline Done on search results (optional).** Convenience only. The tested route (open result, conversation menu, Mark done) works.
+
+## Other limitations
 - Repeat/new-message evidence is synthetic, not a real WhatsApp/Gmail message.
-- Locked-device listener churn origin (pre-Phase 2 or not) is unverified. On an unlocked device the listener reconnected in about 2.3 s.
-- Search results have no inline Done action. Done is taken from the opened conversation's menu.
 - No instrumented tests (`connectedDebugAndroidTest` wipes authorizations).
+
+## 6. Final privacy correction (after acceptance)
+- `SqlCipherObservationStore.android.kt` no longer logs exception messages (truncation does not sanitize them). The two failure logs are now fixed labels plus the exception class only: `fts_init_failed class=<Class>` and `search_failed class=<Class>`. The success line is `fts_init supported=<bool>`. No other log call in the file uses an exception message (the remaining `e.message` uses are error return values, not logs).
+- Checked: full unit/JDBC suite 312 tests, 0 failures. Installed with `adb install -r`. On the device, search still returns the synthetic probe, and logcat shows only `fts_init supported=true`.
+- Synthetic cleanup: the synthetic "Hub" probe conversation was marked Done through the conversation menu. The active Inbox went from 178 to 177 conversations, and the probe no longer appears in active search. Real records and authorizations are intact: the observations/attention/actions DBs, accounts store, Gmail OAuth session and seen store are all present. Console shows Healthy with 3 Connected.
