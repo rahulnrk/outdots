@@ -2,6 +2,12 @@
 <!-- Debug-only manifest entries. Merged only for debug builds. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
+        <activity
+            android:name=".ui.PreviewExportActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <receiver
             android:name=".notification.SyntheticNotificationReceiver"
             android:exported="true">
@@ -11,6 +17,8 @@
                 <action android:name="app.mini.hub.REPOST_SYNTHETIC_NOTIFICATION" />
                 <action android:name="app.mini.hub.DUMP_SYNTHETIC_STATE" />
                 <action android:name="app.mini.hub.QUERY_DELIVERY_ACCOUNTING" />
+                <action android:name="app.mini.hub.SET_ATTENTION" />
+                <action android:name="app.mini.hub.DUMP_ATTENTION" />
             </intent-filter>
         </receiver>
         <receiver

@@ -173,7 +173,7 @@ private fun previewInboxState(): InboxViewState {
 }
 
 @Composable
-private fun MiniProductionPreview(tab: MiniTab) {
+internal fun MiniProductionPreview(tab: MiniTab) {
     val state = previewInboxState()
     val accounts = previewAccounts()
     val labels = mapOf(
