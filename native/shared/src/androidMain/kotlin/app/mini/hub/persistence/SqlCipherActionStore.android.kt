@@ -11,6 +11,7 @@ import app.mini.hub.action.ActionState
 import app.mini.hub.action.ApprovalRecord
 import app.mini.hub.action.OutboxCommand
 import app.mini.hub.action.OutboxState
+import app.mini.hub.action.ReviewedActionSnapshot
 import app.mini.hub.domain.UtcInstant
 import java.security.KeyStore
 import java.security.SecureRandom
@@ -50,6 +51,8 @@ class SqlCipherActionStore(
         )
         db.execSQL(SCHEMA_APPROVALS)
         db.execSQL(SCHEMA_OUTBOX)
+        db.execSQL(SCHEMA_SNAPSHOTS)
+        db.execSQL(SCHEMA_DRAFTS)
         db
     }
 
@@ -127,7 +130,40 @@ class SqlCipherActionStore(
                 }
             }
         }
-        return ActionState(approvals, outbox)
+        val snapshots = database.query(
+            "reviewed_snapshots",
+            SNAPSHOT_COLUMNS,
+            null,
+            null,
+            null,
+            null,
+            "created_at ASC, command_id ASC",
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        ReviewedActionSnapshot(
+                            commandId = cursor.text("command_id"),
+                            accountId = cursor.text("account_id"),
+                            conversationId = cursor.text("conversation_id"),
+                            route = ActionRoute.valueOf(cursor.text("route")),
+                            recipients = decodeList(cursor.text("recipients")),
+                            cc = decodeList(cursor.text("cc")),
+                            bcc = decodeList(cursor.text("bcc")),
+                            subject = cursor.optionalText("subject"),
+                            body = cursor.text("body"),
+                            attachmentNames = decodeList(cursor.text("attachment_names")),
+                            replyTarget = cursor.optionalText("reply_target"),
+                            state = OutboxState.valueOf(cursor.text("state")),
+                            createdAt = UtcInstant(cursor.long("created_at")),
+                            receipt = cursor.optionalText("receipt"),
+                            failureReason = cursor.optionalText("failure_reason"),
+                        ),
+                    )
+                }
+            }
+        }
+        return ActionState(approvals, outbox, snapshots)
     }
 
     private fun replaceState(database: SQLiteDatabase, state: ActionState) {
@@ -155,6 +191,77 @@ class SqlCipherActionStore(
                 command.failureReason?.let { put("failure_reason", it) }
             })
         }
+        database.delete("reviewed_snapshots", null, null)
+        state.reviewedSnapshots.forEach { snap ->
+            database.insertOrThrow("reviewed_snapshots", null, ContentValues().apply {
+                put("command_id", snap.commandId)
+                put("account_id", snap.accountId)
+                put("conversation_id", snap.conversationId)
+                put("route", snap.route.name)
+                put("recipients", encodeList(snap.recipients))
+                put("cc", encodeList(snap.cc))
+                put("bcc", encodeList(snap.bcc))
+                snap.subject?.let { put("subject", it) }
+                put("body", snap.body)
+                put("attachment_names", encodeList(snap.attachmentNames))
+                snap.replyTarget?.let { put("reply_target", it) }
+                put("state", snap.state.name)
+                put("created_at", snap.createdAt.epochMillis)
+                snap.receipt?.let { put("receipt", it) }
+                snap.failureReason?.let { put("failure_reason", it) }
+            })
+        }
+    }
+
+    @Synchronized
+    override fun saveDraft(draft: ConversationDraft) {
+        database.insertWithOnConflict(
+            "conversation_drafts",
+            null,
+            ContentValues().apply {
+                put("conversation_key", draft.conversationKey)
+                put("account_id", draft.accountId)
+                put("body", draft.body)
+                put("compose_to", draft.to)
+                put("compose_cc", draft.cc)
+                put("compose_bcc", draft.bcc)
+                put("compose_subject", draft.subject)
+                put("is_new_email", if (draft.isNewEmail) 1 else 0)
+                put("updated_at", draft.updatedAtMillis)
+            },
+            SQLiteDatabase.CONFLICT_REPLACE,
+        )
+    }
+
+    @Synchronized
+    override fun loadDraft(conversationKey: String): ConversationDraft? {
+        return database.query(
+            "conversation_drafts",
+            DRAFT_COLUMNS,
+            "conversation_key = ?",
+            arrayOf(conversationKey),
+            null,
+            null,
+            null,
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            ConversationDraft(
+                conversationKey = cursor.text("conversation_key"),
+                accountId = cursor.text("account_id"),
+                body = cursor.text("body"),
+                to = cursor.text("compose_to"),
+                cc = cursor.text("compose_cc"),
+                bcc = cursor.text("compose_bcc"),
+                subject = cursor.text("compose_subject"),
+                isNewEmail = cursor.int("is_new_email") != 0,
+                updatedAtMillis = cursor.long("updated_at"),
+            )
+        }
+    }
+
+    @Synchronized
+    override fun deleteDraft(conversationKey: String) {
+        database.delete("conversation_drafts", "conversation_key = ?", arrayOf(conversationKey))
     }
 
     private companion object {
@@ -183,6 +290,46 @@ class SqlCipherActionStore(
         """
         val APPROVAL_COLUMNS = arrayOf("id", "payload_digest", "approved_at", "expires_at", "consumed")
         val OUTBOX_COLUMNS = arrayOf("id", "approval_id", "payload_digest", "route", "state", "created_at", "last_attempt_at", "receipt", "failure_reason")
+        const val SCHEMA_SNAPSHOTS = """
+            CREATE TABLE IF NOT EXISTS reviewed_snapshots (
+                command_id TEXT NOT NULL PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                route TEXT NOT NULL,
+                recipients TEXT NOT NULL,
+                cc TEXT NOT NULL,
+                bcc TEXT NOT NULL,
+                subject TEXT,
+                body TEXT NOT NULL,
+                attachment_names TEXT NOT NULL,
+                reply_target TEXT,
+                state TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                receipt TEXT,
+                failure_reason TEXT
+            )
+        """
+        const val SCHEMA_DRAFTS = """
+            CREATE TABLE IF NOT EXISTS conversation_drafts (
+                conversation_key TEXT NOT NULL PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                body TEXT NOT NULL,
+                compose_to TEXT NOT NULL,
+                compose_cc TEXT NOT NULL,
+                compose_bcc TEXT NOT NULL,
+                compose_subject TEXT NOT NULL,
+                is_new_email INTEGER NOT NULL CHECK (is_new_email IN (0, 1)),
+                updated_at INTEGER NOT NULL
+            )
+        """
+        val SNAPSHOT_COLUMNS = arrayOf(
+            "command_id", "account_id", "conversation_id", "route", "recipients", "cc", "bcc",
+            "subject", "body", "attachment_names", "reply_target", "state", "created_at", "receipt", "failure_reason",
+        )
+        val DRAFT_COLUMNS = arrayOf(
+            "conversation_key", "account_id", "body", "compose_to", "compose_cc", "compose_bcc",
+            "compose_subject", "is_new_email", "updated_at",
+        )
     }
 }
 
@@ -251,6 +398,9 @@ private class KeystoreDatabaseKey(
 
     private fun b64(value: ByteArray): String = Base64.encodeToString(value, Base64.NO_WRAP)
 }
+
+private fun encodeList(items: List<String>): String = items.joinToString("\u001e")
+private fun decodeList(raw: String): List<String> = if (raw.isEmpty()) emptyList() else raw.split('\u001e')
 
 private fun android.database.Cursor.text(column: String): String = getString(getColumnIndexOrThrow(column))
 private fun android.database.Cursor.long(column: String): Long = getLong(getColumnIndexOrThrow(column))

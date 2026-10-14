@@ -57,6 +57,11 @@ data class InboxViewState(
     val isSearching: Boolean = false,
     /** Set when starting a brand-new email (no thread yet); the send goes to this address. */
     val composeNewTo: String? = null,
+    val composeCc: String = "",
+    val composeBcc: String = "",
+    val composeSubject: String = "",
+    /** Durable reviewed actions, including unknowns recovered after restart. */
+    val reviewedSnapshots: List<app.mini.hub.action.ReviewedActionSnapshot> = emptyList(),
 )
 
 data class ReviewContext(
@@ -67,4 +72,6 @@ data class ReviewContext(
     val handoffPackage: String?,
     /** Why the route is handoff even though an API account exists. */
     val note: String?,
+    /** Visible sending identity for exact review. */
+    val fromAddress: String? = null,
 )

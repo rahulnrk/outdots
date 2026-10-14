@@ -1,5 +1,6 @@
 package app.mini.hub.connector
 
+import app.mini.hub.domain.AccountId
 import app.mini.hub.domain.Provider
 
 /**
@@ -155,10 +156,16 @@ class GmailApiConnector(
     }
 
     /** Full selected thread with plain-text bodies, for reading and local drafting. */
-    fun fetchThread(threadId: String, accessToken: StoredAccessToken, transport: ProviderHttpTransport, selfAddress: String? = null): List<ProviderMessage> {
+    fun fetchThread(
+        threadId: String,
+        accessToken: StoredAccessToken,
+        transport: ProviderHttpTransport,
+        selfAddress: String? = null,
+        accountId: AccountId? = null,
+    ): List<ProviderMessage> {
         require(threadId.isNotBlank())
         val thread = client(transport, accessToken).get("$apiBase/threads/${urlEncode(threadId)}?format=full")
-        return thread["messages"]?.objects.orEmpty().map { parseFull(it, threadId, selfAddress) }
+        return thread["messages"]?.objects.orEmpty().map { parseFull(it, threadId, selfAddress, accountId) }
     }
 
     /** Raw bytes of one attachment. Network I/O. */
@@ -186,14 +193,14 @@ class GmailApiConnector(
         )
     }
 
-    private fun parseFull(message: JsonValue, threadId: String, selfAddress: String?): ProviderMessage {
+    private fun parseFull(message: JsonValue, threadId: String, selfAddress: String?, accountId: AccountId?): ProviderMessage {
         val id = message.str("id") ?: error("Gmail message without id")
         val payload = message["payload"]
         val headers = headers(message)
         val from = headers["from"] ?: "Unknown sender"
         val body = payload?.let { p ->
             val text = MimeText.extractPlainText(p)
-            val markers = MimeText.attachmentMarkers(id, p)
+            val markers = MimeText.attachmentMarkers(id, p, accountId)
             if (markers.isEmpty()) text else (markers + listOfNotNull(text)).joinToString("\n")
         }
         val dir = direction(message).takeIf { it != MessageDirection.Unknown }
@@ -275,8 +282,8 @@ object MimeText {
         return findPart(part, "text/html")?.let { decode(it)?.let(::htmlToText) }
     }
 
-    /** Attachment markers rendered inline by the chat UI: ⟦gm-image:msgId/attId|name⟧. */
-    fun attachmentMarkers(messageId: String, part: JsonValue): List<String> {
+    /** Attachment markers rendered inline by the chat UI: ⟦gm-image:gmail|localId|msgId/attId|name⟧. */
+    fun attachmentMarkers(messageId: String, part: JsonValue, accountId: AccountId? = null): List<String> {
         val out = mutableListOf<String>()
         fun walk(p: JsonValue) {
             val name = p.str("filename").orEmpty()
@@ -291,7 +298,8 @@ object MimeText {
                     else -> "gm-document"
                 }
                 val safe = name.replace('|', '_').replace('\u27e7', '_')
-                out += "\u27e6$kind:$messageId/$att|$safe\u27e7"
+                val scoped = accountId?.let { "${it.key}|$messageId/$att|$safe" } ?: "$messageId/$att|$safe"
+                out += "\u27e6$kind:$scoped\u27e7"
             }
             p["parts"]?.objects.orEmpty().forEach(::walk)
         }
@@ -317,4 +325,46 @@ object MimeText {
         .lines().joinToString("\n") { it.trimEnd() }
         .replace(Regex("\n{3,}"), "\n\n")
         .trim()
+}
+
+/** Parsed Gmail attachment marker. Legacy refs omit [accountId] and must be fetched with the observation account. */
+data class GmailAttachmentRef(
+    val accountId: AccountId?,
+    val messageId: String,
+    val attachmentId: String,
+    val fileName: String,
+) {
+    companion object {
+        fun parse(raw: String, fallbackAccount: AccountId? = null): GmailAttachmentRef? {
+            val parts = raw.split('|')
+            return when {
+                parts.size >= 4 -> {
+                    val account = runCatching { AccountId.parse("${parts[0]}|${parts[1]}") }.getOrNull() ?: return null
+                    val msgAtt = parts[2]
+                    val msg = msgAtt.substringBefore('/')
+                    val att = msgAtt.substringAfter('/', "")
+                    if (msg.isBlank() || att.isBlank()) return null
+                    GmailAttachmentRef(account, msg, att, parts.drop(3).joinToString("|").ifBlank { "attachment" })
+                }
+                parts.size == 2 -> {
+                    val msg = parts[0].substringBefore('/')
+                    val att = parts[0].substringAfter('/', "")
+                    if (msg.isBlank() || att.isBlank()) return null
+                    GmailAttachmentRef(fallbackAccount, msg, att, parts[1].ifBlank { "attachment" })
+                }
+                else -> null
+            }
+        }
+
+        fun resolveAccount(requested: AccountId, parsed: GmailAttachmentRef): AccountId? {
+            val marked = parsed.accountId
+            return when {
+                marked != null && marked != requested -> null
+                else -> requested
+            }
+        }
+
+        fun cachePartition(accountId: AccountId): String =
+            accountId.key.replace(Regex("[^A-Za-z0-9._-]"), "_")
+    }
 }

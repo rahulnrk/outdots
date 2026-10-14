@@ -261,7 +261,7 @@ class InboxViewModelTest {
     }
 
     @Test
-    fun userEditedApprovedTextIsLearnedAndUneditedGeneratedTextIsNot() {
+    fun handoffOpenedDoesNotLearnStyleFromUnconfirmedSend() {
         val obsStore = InMemoryObservationStore()
         val learned = mutableListOf<Pair<String, app.mini.hub.style.TextAuthorship>>()
         val obs = ObservedNotification(
@@ -301,7 +301,7 @@ class InboxViewModelTest {
         vm.updateLocalDraftText("Thanks, I will review the proposal.")
         vm.prepareDraft("Thanks, I will review the proposal.", "Alice")
         vm.approveAndDispatch(HandoffLauncher { _, _ -> true })
-        assertEquals(listOf("Thanks, I will review the proposal." to app.mini.hub.style.TextAuthorship.UserAuthoredSentMessage), learned)
+        assertEquals(emptyList(), learned)
     }
 
     @org.junit.Test(timeout = 30_000)

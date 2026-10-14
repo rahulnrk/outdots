@@ -23,21 +23,17 @@ class AndroidNativeHandoffLauncher(
     fun forPackage(packageId: String?): AndroidNativeHandoffLauncher =
         AndroidNativeHandoffLauncher(context, packageId)
 
+    /** Opens the installed provider app. Does not send or prefill a message. */
+    fun openSourceApp(packageId: String): Boolean {
+        val launch = context.packageManager.getLaunchIntentForPackage(packageId)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            ?: return false
+        return runCatching { context.startActivity(launch); true }.getOrDefault(false)
+    }
+
     override fun open(command: OutboxCommand, payload: ExactActionPayload): Boolean {
         return try {
-            // Email: open a prefilled compose (mailto) so To/Cc/Bcc/Subject/Body arrive exactly as approved.
-            if (payload.subject != null && payload.recipients.all { it.contains('@') } && payload.recipients.isNotEmpty()) {
-                val compose = Intent(Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:")).apply {
-                    putExtra(Intent.EXTRA_EMAIL, payload.recipients.toTypedArray())
-                    if (payload.cc.isNotEmpty()) putExtra(Intent.EXTRA_CC, payload.cc.toTypedArray())
-                    if (payload.bcc.isNotEmpty()) putExtra(Intent.EXTRA_BCC, payload.bcc.toTypedArray())
-                    putExtra(Intent.EXTRA_SUBJECT, payload.subject)
-                    putExtra(Intent.EXTRA_TEXT, payload.body)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                val gmail = Intent(compose).setPackage("com.google.android.gm")
-                if (gmail.resolveActivity(context.packageManager) != null) { context.startActivity(gmail); return true }
-                if (compose.resolveActivity(context.packageManager) != null) { context.startActivity(compose); return true }
+            if (isEmailPayload(payload)) {
+                return openEmailHandoff(payload)
             }
             val sendIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
@@ -63,4 +59,53 @@ class AndroidNativeHandoffLauncher(
             false
         }
     }
+
+    /**
+     * Email handoff uses mailto with the requested provider package when that package is known.
+     * It never forces Gmail for Outlook or unknown mail accounts. Opening the app does not prove
+     * the sending identity or thread inside that app.
+     */
+    private fun openEmailHandoff(payload: ExactActionPayload): Boolean {
+        val compose = Intent(Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:")).apply {
+            putExtra(Intent.EXTRA_EMAIL, payload.recipients.toTypedArray())
+            if (payload.cc.isNotEmpty()) putExtra(Intent.EXTRA_CC, payload.cc.toTypedArray())
+            if (payload.bcc.isNotEmpty()) putExtra(Intent.EXTRA_BCC, payload.bcc.toTypedArray())
+            putExtra(Intent.EXTRA_SUBJECT, payload.subject)
+            putExtra(Intent.EXTRA_TEXT, payload.body)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val preferred = targetPackage?.takeIf { it.isNotBlank() }
+        if (preferred != null) {
+            val targeted = Intent(compose).setPackage(preferred)
+            if (targeted.resolveActivity(context.packageManager) != null) {
+                context.startActivity(targeted)
+                return true
+            }
+        }
+        if (compose.resolveActivity(context.packageManager) != null) {
+            context.startActivity(compose)
+            return true
+        }
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "message/rfc822"
+            putExtra(Intent.EXTRA_EMAIL, payload.recipients.toTypedArray())
+            if (payload.cc.isNotEmpty()) putExtra(Intent.EXTRA_CC, payload.cc.toTypedArray())
+            if (payload.bcc.isNotEmpty()) putExtra(Intent.EXTRA_BCC, payload.bcc.toTypedArray())
+            putExtra(Intent.EXTRA_SUBJECT, payload.subject)
+            putExtra(Intent.EXTRA_TEXT, payload.body)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val targetedSend = preferred?.let { Intent(send).setPackage(it) }
+        if (targetedSend != null && targetedSend.resolveActivity(context.packageManager) != null) {
+            context.startActivity(targetedSend)
+            return true
+        }
+        context.startActivity(Intent.createChooser(send, "Open draft in mail app").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+        return true
+    }
+
+    private fun isEmailPayload(payload: ExactActionPayload): Boolean =
+        payload.subject != null && payload.recipients.isNotEmpty() && payload.recipients.all { it.contains('@') }
 }

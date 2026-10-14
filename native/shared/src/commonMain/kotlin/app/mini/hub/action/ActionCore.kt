@@ -110,7 +110,62 @@ data class OutboxCommand(
     val failureReason: String? = null,
 )
 
-data class ActionState(val approvals: List<ApprovalRecord> = emptyList(), val outbox: List<OutboxCommand> = emptyList())
+/** Immutable copy of the exact reviewed payload, keyed by outbox command. */
+data class ReviewedActionSnapshot(
+    val commandId: String,
+    val accountId: String,
+    val conversationId: String,
+    val route: ActionRoute,
+    val recipients: List<String>,
+    val cc: List<String>,
+    val bcc: List<String>,
+    val subject: String?,
+    val body: String,
+    val attachmentNames: List<String>,
+    val replyTarget: String?,
+    val state: OutboxState,
+    val createdAt: UtcInstant,
+    val receipt: String? = null,
+    val failureReason: String? = null,
+)
+
+fun ExactActionPayload.toReviewedSnapshot(command: OutboxCommand): ReviewedActionSnapshot = ReviewedActionSnapshot(
+    commandId = command.id,
+    accountId = accountId,
+    conversationId = conversationId,
+    route = route,
+    recipients = recipients,
+    cc = cc,
+    bcc = bcc,
+    subject = subject,
+    body = body,
+    attachmentNames = attachments.map { it.name },
+    replyTarget = replyTarget,
+    state = command.state,
+    createdAt = command.createdAt,
+    receipt = command.receipt,
+    failureReason = command.failureReason,
+)
+
+data class ActionState(
+    val approvals: List<ApprovalRecord> = emptyList(),
+    val outbox: List<OutboxCommand> = emptyList(),
+    val reviewedSnapshots: List<ReviewedActionSnapshot> = emptyList(),
+)
+
+fun ActionState.syncReviewedSnapshots(): ActionState {
+    if (reviewedSnapshots.isEmpty()) return this
+    var changed = false
+    val next = reviewedSnapshots.map { snap ->
+        val cmd = outbox.find { it.id == snap.commandId } ?: return@map snap
+        if (snap.state == cmd.state && snap.receipt == cmd.receipt && snap.failureReason == cmd.failureReason) snap
+        else {
+            changed = true
+            snap.copy(state = cmd.state, receipt = cmd.receipt, failureReason = cmd.failureReason)
+        }
+    }
+    return if (changed) copy(reviewedSnapshots = next) else this
+}
 
 sealed class GatewayResult {
     data class Accepted(val receipt: String) : GatewayResult()
@@ -187,7 +242,7 @@ class ActionController(
         return state.copy(
             approvals = state.approvals.map { if (it.id == approval.id) it.copy(consumed = true) else it },
             outbox = state.outbox.map { if (it.id == commandId) it.copy(state = OutboxState.Dispatching, lastAttemptAt = now) else it },
-        )
+        ).syncReviewedSnapshots()
     }
 
     /** Phase 2: the provider call. No state access, so it can run outside any transaction. */
@@ -207,10 +262,12 @@ class ActionController(
         }
     }
 
-    fun recoverInterrupted(state: ActionState): ActionState = state.copy(outbox = state.outbox.map { if (it.state == OutboxState.Dispatching) it.copy(state = OutboxState.OutcomeUnknown, failureReason = "interrupted_during_dispatch") else it })
+    fun recoverInterrupted(state: ActionState): ActionState = state.copy(outbox = state.outbox.map { if (it.state == OutboxState.Dispatching) it.copy(state = OutboxState.OutcomeUnknown, failureReason = "interrupted_during_dispatch") else it }).syncReviewedSnapshots()
 
-    private fun update(state: ActionState, id: String, next: OutboxState, now: UtcInstant, receipt: String? = null): ActionState = state.copy(outbox = state.outbox.map { if (it.id == id) it.copy(state = next, lastAttemptAt = now, receipt = receipt) else it })
-    private fun fail(state: ActionState, id: String, next: OutboxState, reason: String, now: UtcInstant): ActionState = state.copy(outbox = state.outbox.map { if (it.id == id) it.copy(state = next, lastAttemptAt = now, failureReason = reason) else it })
+    private fun update(state: ActionState, id: String, next: OutboxState, now: UtcInstant, receipt: String? = null): ActionState =
+        state.copy(outbox = state.outbox.map { if (it.id == id) it.copy(state = next, lastAttemptAt = now, receipt = receipt) else it }).syncReviewedSnapshots()
+    private fun fail(state: ActionState, id: String, next: OutboxState, reason: String, now: UtcInstant): ActionState =
+        state.copy(outbox = state.outbox.map { if (it.id == id) it.copy(state = next, lastAttemptAt = now, failureReason = reason) else it }).syncReviewedSnapshots()
     private fun sameSources(a: List<SourceVersion>, b: List<SourceVersion>): Boolean =
         a.sortedWith(compareBy({ it.id }, { it.revision })) == b.sortedWith(compareBy({ it.id }, { it.revision }))
 }

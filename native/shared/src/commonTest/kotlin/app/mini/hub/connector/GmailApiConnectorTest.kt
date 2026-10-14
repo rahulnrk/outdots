@@ -310,4 +310,20 @@ class GmailApiConnectorTest {
         assertTrue(manager.disconnect(account.id))
         assertNotNull(history.getObservation(observation.id))
     }
+
+    @Test
+    fun gmailAttachmentRefParsesScopedAndLegacyAndRejectsAccountMismatch() {
+        val work = AccountId(Provider.GMAIL, "work")
+        val home = AccountId(Provider.GMAIL, "home")
+        val scoped = GmailAttachmentRef.parse("gmail|work|msg1/att1|quote.pdf")!!
+        assertEquals(work, scoped.accountId)
+        assertEquals("msg1", scoped.messageId)
+        assertEquals("att1", scoped.attachmentId)
+        assertEquals("quote.pdf", scoped.fileName)
+        assertEquals(work, GmailAttachmentRef.resolveAccount(work, scoped))
+        assertEquals(null, GmailAttachmentRef.resolveAccount(home, scoped))
+        val legacy = GmailAttachmentRef.parse("msg1/att1|quote.pdf", work)!!
+        assertEquals(work, legacy.accountId)
+        assertTrue(GmailAttachmentRef.cachePartition(work) != GmailAttachmentRef.cachePartition(home))
+    }
 }

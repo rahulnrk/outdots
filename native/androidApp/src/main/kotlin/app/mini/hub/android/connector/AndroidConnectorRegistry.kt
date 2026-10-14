@@ -398,22 +398,17 @@ class AndroidConnectorRegistry(
         return out.distinctBy { "${it.provider}|${it.address}" }.take(30)
     }
 
-    /** Downloads a Gmail attachment ("msgId/attId|name") into the app media cache. Network I/O. */
-    fun gmailDownloadAttachment(ref: String): java.io.File? {
-        val ids = ref.substringBefore('|')
-        val name = ref.substringAfter('|', "attachment").replace(Regex("[^A-Za-z0-9._-]"), "_")
-        val msg = ids.substringBefore('/')
-        val att = ids.substringAfter('/', "")
-        if (att.isEmpty()) return null
-        val dir = java.io.File(appContext.cacheDir, "wa-media").apply { mkdirs() }
-        val file = java.io.File(dir, "gm_${msg}_${att.hashCode()}_$name")
-        if (file.exists()) return file
-        for (account in accounts.list().filter { it.id.provider == Provider.GMAIL }) {
-            val bytes = runCatching { gmail.fetchAttachment(account, msg, att) }.getOrNull() ?: continue
-            file.writeBytes(bytes)
-            return file
+    private val mediaCache = EncryptedAttachmentCache(appContext)
+
+    /** Downloads a Gmail attachment using only [accountId], into an encrypted cache then a short-lived export. */
+    fun gmailDownloadAttachment(accountId: app.mini.hub.domain.AccountId, ref: String): java.io.File? {
+        val parsed = app.mini.hub.connector.GmailAttachmentRef.parse(ref, accountId) ?: return null
+        val scoped = app.mini.hub.connector.GmailAttachmentRef.resolveAccount(accountId, parsed) ?: return null
+        val account = accounts.get(scoped) ?: return null
+        if (account.id.provider != Provider.GMAIL) return null
+        return mediaCache.export(scoped, parsed.messageId, parsed.attachmentId, parsed.fileName) {
+            runCatching { gmail.fetchAttachment(account, parsed.messageId, parsed.attachmentId) }.getOrNull()
         }
-        return null
     }
     fun startWhatsAppPairing() = whatsappHost.startPairing()
     fun startWhatsAppPhonePairing(phoneE164: String) = whatsappHost.startPhonePairing(phoneE164)

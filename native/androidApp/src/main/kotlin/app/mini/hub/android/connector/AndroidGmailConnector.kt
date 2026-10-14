@@ -183,7 +183,7 @@ class AndroidGmailConnector(
 
     fun fetchThread(threadId: String, account: ConnectedAccount): List<app.mini.hub.connector.ProviderMessage> {
         val token = tokens.get(account.id) ?: error("Credential missing for Gmail account")
-        return connector.fetchThread(threadId, token, transport, account.displayName)
+        return connector.fetchThread(threadId, token, transport, account.displayName, account.id)
     }
 
     fun fetchAttachment(account: ConnectedAccount, messageId: String, attachmentId: String): ByteArray? {

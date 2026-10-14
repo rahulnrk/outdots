@@ -411,7 +411,7 @@ private fun EmailCard(obs: ObservedNotification, expandedByDefault: Boolean) {
                 if (attachments.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("📎 ${attachments.size} attachment(s)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    attachments.forEach { MediaView(it) }
+                    attachments.forEach { MediaView(it, obs.accountId) }
                 }
             }
         }
@@ -450,7 +450,7 @@ private fun MessageBubble(obs: ObservedNotification, isGroupish: Boolean) {
                 if (!mine && isGroupish) {
                     Text(obs.senderHint, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 }
-                medias.forEach { MediaView(it) }
+                medias.forEach { MediaView(it, obs.accountId) }
                 if (text.isNotBlank()) LinkText(text)
                 Text(
                     timeLabel(obs.postTime.epochMillis),
@@ -517,7 +517,7 @@ internal fun formatChatText(text: String): androidx.compose.ui.text.AnnotatedStr
 }
 
 @Composable
-private fun MediaView(ref: MediaRef) {
+private fun MediaView(ref: MediaRef, accountId: app.mini.hub.domain.AccountId) {
     if (ref.isUrl) {
         val ctx = LocalContext.current
         OutlinedButton(onClick = {
@@ -534,7 +534,7 @@ private fun MediaView(ref: MediaRef) {
             runCatching {
                 if (ref.isGmail) {
                     if (ref.kind == "image" || ref.kind == "gif") {
-                        MiniHubRuntime.connectors.gmailDownloadAttachment(ref.id)?.let { f ->
+                        MiniHubRuntime.connectors.gmailDownloadAttachment(accountId, ref.id)?.let { f ->
                             val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
                             BitmapFactory.decodeFile(f.absolutePath, opts)?.asImageBitmap()
                         }
@@ -551,7 +551,7 @@ private fun MediaView(ref: MediaRef) {
         status = "Loading…"
         val file = withContext(Dispatchers.IO) {
             runCatching {
-                if (ref.isGmail) MiniHubRuntime.connectors.gmailDownloadAttachment(ref.id)
+                if (ref.isGmail) MiniHubRuntime.connectors.gmailDownloadAttachment(accountId, ref.id)
                 else MiniHubRuntime.connectors.whatsappDownloadMedia(ref.id)
             }.getOrNull()
         }
@@ -678,10 +678,10 @@ private fun Composer(
                 maxLines = 5,
             )
             Spacer(modifier = Modifier.width(6.dp))
-            Button(onClick = { onApprove(draftText) }, enabled = draftText.isNotBlank() && !isDrafting) { Text("Send") }
+            Button(onClick = { onApprove(draftText) }, enabled = draftText.isNotBlank() && !isDrafting) { Text("Review reply") }
         }
         Text(
-            "Send shows the exact message for your approval first.",
+            "Review reply shows the exact message for your approval first.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.outline,
         )

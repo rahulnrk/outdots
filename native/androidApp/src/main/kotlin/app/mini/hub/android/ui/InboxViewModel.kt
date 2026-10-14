@@ -16,6 +16,7 @@ import app.mini.hub.action.HandoffLauncher
 import app.mini.hub.action.LiveDispatchChecks
 import app.mini.hub.action.OutboxState
 import app.mini.hub.action.SourceVersion
+import app.mini.hub.action.toReviewedSnapshot
 import app.mini.hub.connector.AuthorizationSnapshot
 import app.mini.hub.connector.CapabilitySnapshot
 import app.mini.hub.android.intelligence.LocalDraftExperiment
@@ -90,6 +91,8 @@ class InboxViewModel(
     private var localDraftGeneration = 0L
     private val _state = mutableStateOf(InboxViewState())
     val state: State<InboxViewState> get() = _state
+    private val draftStore: app.mini.hub.persistence.ConversationDraftStore? =
+        actionStore as? app.mini.hub.persistence.ConversationDraftStore
     private val mainHandler: Handler? = try {
         Handler(Looper.getMainLooper())
     } catch (_: RuntimeException) {
@@ -152,6 +155,7 @@ class InboxViewModel(
         val failure: String?,
         val view: AttentionView,
         val understanding: Map<String, MessageUnderstanding>,
+        val reviewedSnapshots: List<app.mini.hub.action.ReviewedActionSnapshot>,
     )
 
     /** Store reads and analysis; runs on the refresh worker. */
@@ -204,7 +208,7 @@ class InboxViewModel(
                 ).also { understandingCache[key] = signature to it })
             }
         }
-        return RefreshResult(summaries, records, failure, view, understanding)
+        return RefreshResult(summaries, records, failure, view, understanding, actionStore.snapshot().reviewedSnapshots)
     }
 
     private fun applyRefresh(result: RefreshResult, isPermissionGranted: Boolean, isListenerConnected: Boolean) {
@@ -221,6 +225,7 @@ class InboxViewModel(
             attentionView = result.view,
             storageFailure = result.failure,
             selectedConversation = selected,
+            reviewedSnapshots = result.reviewedSnapshots,
         )
     }
 
@@ -279,6 +284,37 @@ class InboxViewModel(
         })
     }
 
+    private fun persistCurrentDraft() {
+        val selected = _state.value.selectedConversation ?: return
+        val store = draftStore ?: return
+        val s = _state.value
+        val empty = s.localDraftText.isBlank() &&
+            s.composeNewTo.orEmpty().isBlank() &&
+            s.composeCc.isBlank() &&
+            s.composeBcc.isBlank() &&
+            s.composeSubject.isBlank()
+        if (empty) {
+            store.deleteDraft(selected.conversationId.key)
+            return
+        }
+        store.saveDraft(
+            app.mini.hub.persistence.ConversationDraft(
+                conversationKey = selected.conversationId.key,
+                accountId = selected.accountId.key,
+                body = s.localDraftText,
+                to = s.composeNewTo.orEmpty(),
+                cc = s.composeCc,
+                bcc = s.composeBcc,
+                subject = s.composeSubject,
+                isNewEmail = s.composeNewTo != null,
+                updatedAtMillis = clock.now().epochMillis,
+            ),
+        )
+    }
+
+    private fun loadedDraft(conversationKey: String): app.mini.hub.persistence.ConversationDraft? =
+        draftStore?.loadDraft(conversationKey)
+
     /**
      * Opens the chat with this person on the chosen account. Uses the existing conversation when
      * there is one; otherwise starts an empty thread so the user can write the first message.
@@ -311,7 +347,9 @@ class InboxViewModel(
             isRemoved = false,
         )
         clearSearch()
+        persistCurrentDraft()
         abandonLocalDraft()
+        val draft = loadedDraft(summary.conversationId.key)
         _state.value = _state.value.copy(
             selectedConversation = summary,
             selectedTimeline = emptyList(),
@@ -319,11 +357,14 @@ class InboxViewModel(
                 ScopedRetrievalQuery(conversationId = summary.conversationId, compartment = CompartmentId(accountId.key), tokenBudget = 650),
             ),
             activeReviewPayload = null,
-            localDraftText = "",
+            localDraftText = draft?.body.orEmpty(),
             draftVersions = emptyList(),
             localDraftStatus = null,
             conversationLoadStatus = null,
-            composeNewTo = if (isEmail) address else null,
+            composeNewTo = if (isEmail) draft?.to?.ifBlank { address } ?: address else null,
+            composeCc = draft?.cc.orEmpty(),
+            composeBcc = draft?.bcc.orEmpty(),
+            composeSubject = draft?.subject.orEmpty(),
         )
     }
 
@@ -344,7 +385,9 @@ class InboxViewModel(
             observationCount = 0, unreadCount = 0, isRemoved = false,
         )
         clearSearch()
+        persistCurrentDraft()
         abandonLocalDraft()
+        val draft = loadedDraft(summary.conversationId.key)
         _state.value = _state.value.copy(
             selectedConversation = summary,
             selectedTimeline = emptyList(),
@@ -352,11 +395,14 @@ class InboxViewModel(
                 ScopedRetrievalQuery(conversationId = summary.conversationId, compartment = CompartmentId(accountId.key), tokenBudget = 650),
             ),
             activeReviewPayload = null,
-            localDraftText = "",
+            localDraftText = draft?.body.orEmpty(),
             draftVersions = emptyList(),
             localDraftStatus = null,
             conversationLoadStatus = null,
-            composeNewTo = "",
+            composeNewTo = draft?.to ?: "",
+            composeCc = draft?.cc.orEmpty(),
+            composeBcc = draft?.bcc.orEmpty(),
+            composeSubject = draft?.subject.orEmpty(),
         )
     }
 
@@ -388,7 +434,9 @@ class InboxViewModel(
             account = summary.accountId,
         )
 
+        persistCurrentDraft()
         abandonLocalDraft()
+        val draft = loadedDraft(summary.conversationId.key)
         _state.value = _state.value.copy(
             selectedConversation = summary,
             selectedTimeline = observations,
@@ -396,10 +444,13 @@ class InboxViewModel(
             activeStyleProfile = style,
             activeReviewPayload = null,
             outboxStatusMessage = null,
-            localDraftText = "",
+            localDraftText = draft?.body.orEmpty(),
             originalGeneratedDraft = null,
             draftVersions = emptyList(),
-            composeNewTo = null,
+            composeNewTo = if (draft?.isNewEmail == true) draft.to else null,
+            composeCc = draft?.cc.orEmpty(),
+            composeBcc = draft?.bcc.orEmpty(),
+            composeSubject = draft?.subject.orEmpty(),
             localDraftWarning = null,
             localDraftStatus = null,
             localDraftFeedback = null,
@@ -452,6 +503,7 @@ class InboxViewModel(
     }
 
     fun clearSelection() {
+        persistCurrentDraft()
         abandonLocalDraft()
         conversationLoadGeneration++
         _state.value = _state.value.copy(
@@ -465,6 +517,9 @@ class InboxViewModel(
             originalGeneratedDraft = null,
             draftVersions = emptyList(),
             composeNewTo = null,
+            composeCc = "",
+            composeBcc = "",
+            composeSubject = "",
             localDraftWarning = null,
             localDraftStatus = null,
             localDraftFeedback = null,
@@ -535,6 +590,7 @@ class InboxViewModel(
                         isLocalAiRetryAvailable = result.needsRecovery,
                     )
                 }
+                persistCurrentDraft()
             }
             postToMain("draft-result", applyResult)
         }
@@ -570,10 +626,33 @@ class InboxViewModel(
             localDraftStatus = "Draft paused when MINI left the foreground. Your text was kept; tap Draft on device to try again.",
             isLocalDraftInProgress = false,
         )
+        persistCurrentDraft()
     }
 
     fun updateLocalDraftText(text: String) {
         _state.value = _state.value.copy(localDraftText = text)
+        persistCurrentDraft()
+    }
+
+    fun updateComposeTo(value: String) {
+        if (_state.value.composeNewTo == null) return
+        _state.value = _state.value.copy(composeNewTo = value)
+        persistCurrentDraft()
+    }
+
+    fun updateComposeCc(value: String) {
+        _state.value = _state.value.copy(composeCc = value)
+        persistCurrentDraft()
+    }
+
+    fun updateComposeBcc(value: String) {
+        _state.value = _state.value.copy(composeBcc = value)
+        persistCurrentDraft()
+    }
+
+    fun updateComposeSubject(value: String) {
+        _state.value = _state.value.copy(composeSubject = value)
+        persistCurrentDraft()
     }
 
     fun recordDraftUsefulness(feedback: DraftUsefulnessFeedback) {
@@ -620,6 +699,10 @@ class InboxViewModel(
     }
 
     fun prepareDraft(body: String, recipient: String, subjectOverride: String? = null) {
+        if (body.isBlank()) {
+            _state.value = _state.value.copy(outboxStatusMessage = "Write a message first.")
+            return
+        }
         val selected = _state.value.selectedConversation ?: return
         _state.value.composeNewTo?.let { to ->
             prepareNewEmail(selected, to, subjectOverride?.ifBlank { null } ?: "(no subject)", body)
@@ -694,6 +777,7 @@ class InboxViewModel(
                 isReply = route == ActionRoute.Api && replyTarget != null,
                 handoffPackage = if (route == ActionRoute.NativeHandoff) handoffPackageFor(selected) else null,
                 note = note,
+                fromAddress = connectedAccount?.providerAccountId ?: connectedAccount?.displayName,
             ),
         )
     }
@@ -747,13 +831,19 @@ class InboxViewModel(
             cc = ccL,
             bcc = bccL,
         )
+        val handoffPkg = if (route == ActionRoute.NativeHandoff) {
+            CommunicationSource.primaryPackageFor(accountId.provider)
+        } else null
+        val appName = handoffPkg?.let { app.mini.hub.observation.SourceAppNames.forPackage(it) } ?: "your mail app"
         _state.value = _state.value.copy(
             activeReviewPayload = payload,
             reviewContext = ReviewContext(
                 providerName = providerLabel(accountId.provider),
                 isReply = false,
-                handoffPackage = if (route == ActionRoute.NativeHandoff) "com.google.android.gm" else null,
-                note = if (route == ActionRoute.Api) null else "MINI will open Gmail with To, Cc, Subject and your message filled in. You tap Send in Gmail.",
+                handoffPackage = handoffPkg,
+                note = if (route == ActionRoute.Api) null else
+                    "MINI will open $appName with To, Cc, Bcc, Subject and your message filled in. You tap Send there. MINI cannot choose which account $appName uses.",
+                fromAddress = account?.providerAccountId ?: account?.displayName,
             ),
         )
     }
@@ -831,7 +921,7 @@ class InboxViewModel(
         actionStore.transaction { currentActionState ->
             val (approvedState, command) = actionController.approve(currentActionState, payload)
             outboxCmdId = command.id
-            approvedState
+            approvedState.copy(reviewedSnapshots = approvedState.reviewedSnapshots + payload.toReviewedSnapshot(command))
         }
         val cmdId = outboxCmdId ?: return
 
@@ -879,7 +969,7 @@ class InboxViewModel(
                 else -> "Action state: ${finalCommand?.state?.name}"
             }
 
-            if (finalCommand?.state == OutboxState.AcceptedByProvider || finalCommand?.state == OutboxState.HandoffOpened) {
+            if (finalCommand?.state == OutboxState.AcceptedByProvider) {
                 authorshipForApprovedBody(payload.body)?.let { authorship ->
                     onLearnFromApprovedText?.invoke(
                         selectedConversationForLearning(),
@@ -895,6 +985,7 @@ class InboxViewModel(
                 reviewContext = null,
                 outboxStatusMessage = statusMessage,
                 isSending = false,
+                reviewedSnapshots = actionStore.snapshot().reviewedSnapshots,
             )
         }
     }

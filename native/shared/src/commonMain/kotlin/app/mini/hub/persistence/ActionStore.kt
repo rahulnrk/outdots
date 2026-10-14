@@ -20,12 +20,32 @@ enum class StorageQualification {
     SqlCipherAndroidKeystoreQualified,
 }
 
+/** Editable composer text keyed by conversation. Approvals are never stored here. */
+data class ConversationDraft(
+    val conversationKey: String,
+    val accountId: String,
+    val body: String,
+    val to: String = "",
+    val cc: String = "",
+    val bcc: String = "",
+    val subject: String = "",
+    val isNewEmail: Boolean = false,
+    val updatedAtMillis: Long,
+)
+
+interface ConversationDraftStore {
+    fun saveDraft(draft: ConversationDraft)
+    fun loadDraft(conversationKey: String): ConversationDraft?
+    fun deleteDraft(conversationKey: String)
+}
+
 /**
  * Deterministic test repository. It deliberately advertises that it is not durable or encrypted and must never be
  * wired into a release Android build.
  */
-class InMemoryActionStore(initial: ActionState = ActionState()) : ActionStore {
+class InMemoryActionStore(initial: ActionState = ActionState()) : ActionStore, ConversationDraftStore {
     private var state = initial
+    private val drafts = LinkedHashMap<String, ConversationDraft>()
     override val qualification: StorageQualification = StorageQualification.InMemoryTestOnly
     override fun snapshot(): ActionState = state
     override fun transaction(update: (ActionState) -> ActionState): ActionState {
@@ -37,10 +57,17 @@ class InMemoryActionStore(initial: ActionState = ActionState()) : ActionStore {
         state = controller.recoverInterrupted(state)
         return state
     }
+    override fun saveDraft(draft: ConversationDraft) {
+        drafts[draft.conversationKey] = draft
+    }
+    override fun loadDraft(conversationKey: String): ConversationDraft? = drafts[conversationKey]
+    override fun deleteDraft(conversationKey: String) {
+        drafts.remove(conversationKey)
+    }
 }
 
 /** Contract for the Android SQLCipher implementation. No implementation is claimed until key lifecycle and migration tests pass. */
-interface EncryptedActionStore : ActionStore {
+interface EncryptedActionStore : ActionStore, ConversationDraftStore {
     override val qualification: StorageQualification
         get() = StorageQualification.SqlCipherAndroidKeystorePending
 }

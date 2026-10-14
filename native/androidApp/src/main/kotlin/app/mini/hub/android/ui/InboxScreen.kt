@@ -209,6 +209,54 @@ fun InboxScreen(
                 }
             }
 
+            val visibleOutcomes = state.reviewedSnapshots.filter { snap ->
+                snap.state == app.mini.hub.action.OutboxState.OutcomeUnknown ||
+                    snap.state == app.mini.hub.action.OutboxState.Rejected ||
+                    snap.state == app.mini.hub.action.OutboxState.HandoffOpened
+            }.filter { snap ->
+                val selected = state.selectedConversation
+                selected == null ||
+                    snap.conversationId == selected.conversationId.key ||
+                    (snap.conversationId.isBlank() && snap.accountId == selected.accountId.key)
+            }
+            visibleOutcomes.takeLast(5).forEach { snap ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            when (snap.state) {
+                                app.mini.hub.action.OutboxState.OutcomeUnknown -> "Send outcome unknown"
+                                app.mini.hub.action.OutboxState.Rejected -> "Not sent"
+                                app.mini.hub.action.OutboxState.HandoffOpened -> "Opened in another app. Not sent by MINI."
+                                else -> snap.state.name
+                            },
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        Text("To: ${snap.recipients.joinToString().ifBlank { "this conversation" }}", style = MaterialTheme.typography.bodySmall)
+                        if (snap.cc.isNotEmpty()) Text("Cc: ${snap.cc.joinToString()}", style = MaterialTheme.typography.bodySmall)
+                        if (snap.bcc.isNotEmpty()) Text("Bcc: ${snap.bcc.joinToString()}", style = MaterialTheme.typography.bodySmall)
+                        snap.subject?.let { Text("Subject: $it", style = MaterialTheme.typography.bodySmall) }
+                        Text(snap.body, style = MaterialTheme.typography.bodySmall, maxLines = 6)
+                        snap.failureReason?.let {
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                        }
+                        TextButton(
+                            onClick = {
+                                val pkg = runCatching {
+                                    app.mini.hub.observation.CommunicationSource.primaryPackageFor(
+                                        app.mini.hub.domain.AccountId.parse(snap.accountId).provider,
+                                    )
+                                }.getOrNull()
+                                if (pkg != null) (handoffLauncher as? AndroidNativeHandoffLauncher)?.openSourceApp(pkg)
+                            },
+                        ) { Text("Check in source app") }
+                    }
+                }
+            }
+
             if (state.selectedConversation != null) {
                 state.conversationLoadStatus?.let {
                     Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 6.dp))
@@ -217,23 +265,19 @@ fun InboxScreen(
                 val record = state.attentionRecords[state.selectedConversation!!.conversationId.key] 
                     ?: app.mini.hub.attention.AttentionRules.default(state.selectedConversation!!.conversationId, app.mini.hub.domain.UtcInstant(System.currentTimeMillis()))
                 val selectedKey = state.selectedConversation!!.conversationId.key
-                var newSubject by remember(selectedKey) { mutableStateOf("") }
-                var newTo by remember(selectedKey) { mutableStateOf(state.composeNewTo.orEmpty()) }
-                var newCc by remember(selectedKey) { mutableStateOf("") }
-                var newBcc by remember(selectedKey) { mutableStateOf("") }
-                var showCcBcc by remember(selectedKey) { mutableStateOf(false) }
+                var showCcBcc by remember(selectedKey) { mutableStateOf(state.composeCc.isNotBlank() || state.composeBcc.isNotBlank()) }
                 if (state.composeNewTo != null) {
                     val emailKb = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Email)
-                    OutlinedTextField(newTo, { newTo = it }, label = { Text("To (comma separated)") }, singleLine = true, keyboardOptions = emailKb, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(state.composeNewTo!!, { viewModel.updateComposeTo(it) }, label = { Text("To (comma separated)") }, singleLine = true, keyboardOptions = emailKb, modifier = Modifier.fillMaxWidth())
                     if (showCcBcc) {
-                        OutlinedTextField(newCc, { newCc = it }, label = { Text("Cc") }, singleLine = true, keyboardOptions = emailKb, modifier = Modifier.fillMaxWidth())
-                        OutlinedTextField(newBcc, { newBcc = it }, label = { Text("Bcc") }, singleLine = true, keyboardOptions = emailKb, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(state.composeCc, { viewModel.updateComposeCc(it) }, label = { Text("Cc") }, singleLine = true, keyboardOptions = emailKb, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(state.composeBcc, { viewModel.updateComposeBcc(it) }, label = { Text("Bcc") }, singleLine = true, keyboardOptions = emailKb, modifier = Modifier.fillMaxWidth())
                     } else {
                         TextButton(onClick = { showCcBcc = true }) { Text("+ Cc / Bcc") }
                     }
                     OutlinedTextField(
-                        value = newSubject,
-                        onValueChange = { newSubject = it },
+                        value = state.composeSubject,
+                        onValueChange = { viewModel.updateComposeSubject(it) },
                         label = { Text("Subject") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
@@ -246,12 +290,14 @@ fun InboxScreen(
                     onLabel = { l ->
                         conversationLabels.set(selectedKey, l)
                         labels = conversationLabels.all()
-                        viewModel.applyAttentionAction(
-                            state.selectedConversation!!.conversationId,
-                            app.mini.hub.attention.AttentionAction.SetPriority(
-                                if (l == "Priority") app.mini.hub.attention.ConversationPriority.Important else app.mini.hub.attention.ConversationPriority.Normal,
-                            ),
-                        )
+                        if (l == "Priority") {
+                            viewModel.applyAttentionAction(
+                                state.selectedConversation!!.conversationId,
+                                app.mini.hub.attention.AttentionAction.SetPriority(
+                                    app.mini.hub.attention.ConversationPriority.Important,
+                                ),
+                            )
+                        }
                     },
                     draftText = state.localDraftText,
                     draftStatus = state.localDraftStatus,
@@ -263,8 +309,15 @@ fun InboxScreen(
                     onDraftChanged = { text -> viewModel.updateLocalDraftText(text) },
                     onApprove = { body ->
                         if (state.composeNewTo != null) {
-                            viewModel.prepareComposeEmail(state.selectedConversation!!.accountId, listOf(newTo), listOf(newCc), listOf(newBcc), newSubject, body)
-                        } else viewModel.prepareDraft(body, "", newSubject)
+                            viewModel.prepareComposeEmail(
+                                state.selectedConversation!!.accountId,
+                                listOf(state.composeNewTo!!),
+                                listOf(state.composeCc),
+                                listOf(state.composeBcc),
+                                state.composeSubject,
+                                body,
+                            )
+                        } else viewModel.prepareDraft(body, "", state.composeSubject)
                     },
                     onAttention = { a -> viewModel.applyAttentionAction(state.selectedConversation!!.conversationId, a) },
                 )
@@ -1554,11 +1607,21 @@ fun ExactActionReviewDialog(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text("Route: ${if (isApi) "$provider API" else "Open ${handoffApp ?: "app"} (you send)"}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                Text("Account: ${payload.accountId}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                payload.subject?.let {
-                    Text("Subject: $it", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                }
+                Text("From: ${context?.fromAddress ?: payload.accountId}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                 Text("To: ${payload.recipients.joinToString().ifBlank { "this conversation" }}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                Text("Cc: ${payload.cc.joinToString().ifBlank { "None" }}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                Text("Bcc: ${payload.bcc.joinToString().ifBlank { "None" }}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                Text("Subject: ${payload.subject?.ifBlank { "None" } ?: "None"}", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                Text(
+                    "Reply target: ${payload.replyTarget ?: if (context?.isReply == true) "this conversation" else "new message"}",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp,
+                )
+                Text(
+                    "Attachments: ${payload.attachments.joinToString { it.name }.ifBlank { "None" }}",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp,
+                )
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text("Draft Content:", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
