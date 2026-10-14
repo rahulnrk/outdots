@@ -15,12 +15,12 @@ MainActivity keeps FLAG_SECURE. Private Inbox was not screenshotted. Live UI dum
 ## 3. Device workflows (Pixel, existing data)
 | Check | Result |
 |---|---|
-| Search "hello", tap Done without retyping | Query and filter kept |
+| Search "hello", tap Done without retyping | Workflow run and dumped, but dump not parsed before deletion. Not verified |
 | Focus Done | Needs you 174 -> 173, "Undo last attention change" shown |
 | Undo | 173 -> 174, item restored at top |
 | Done again, `am force-stop`, relaunch | Still 173, dismissed item not back |
-| Identical repost (synthetic id 4242) | Not resurfaced |
-| New text on same thread (`phase2new`) | Resurfaced |
+| Identical repost (synthetic id 4242) | Posted, result not parsed. Covered by source dedupe tests only |
+| New text on same thread (`phase2new`) | Posted, result not parsed. Covered by source tests only |
 | Accounts after v4 | 2 Gmail + 1 WhatsApp Connected |
 
 ## 4. Rendered visual checks
