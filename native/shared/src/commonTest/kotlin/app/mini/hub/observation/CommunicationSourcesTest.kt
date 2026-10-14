@@ -221,4 +221,43 @@ class CommunicationSourcesTest {
             assertTrue(isConversationSummary(recovered), "legacy Instagram DMs must remain conversations after restart")
         }
     }
+
+    @Test
+    fun messagingStyleBeatsIncidentalLikePhraseAndGenuineActivityStaysOut() {
+        val message = payload("com.instagram.android").copy(
+            title = "Sam",
+            text = "I liked your post, can you send the file?",
+            hasMessagingStyle = true,
+            category = "msg",
+        )
+        val activity = payload("com.instagram.android").copy(
+            title = "Sam",
+            text = "I liked your post",
+            category = "social",
+        )
+        assertEquals(CommunicationKind.ConversationMessage, classifyCommunication(message))
+        assertEquals(CommunicationKind.NotCommunication, classifyCommunication(activity))
+        val messageSummary = ConversationObservationSummary(
+            conversationId = app.mini.hub.domain.ScopedId(app.mini.hub.domain.AccountId(app.mini.hub.domain.Provider.INSTAGRAM, "local"), app.mini.hub.domain.ScopedId.Kind.CONVERSATION, "Sam"),
+            accountId = app.mini.hub.domain.AccountId(app.mini.hub.domain.Provider.INSTAGRAM, "local"),
+            title = "Sam",
+            appName = "Instagram",
+            senderHint = "Sam",
+            packageId = "com.instagram.android",
+            latestSnippet = "I liked your post, can you send the file?",
+            category = NotificationCategory.DirectMessage,
+            coverage = ConversationCoverage.NotificationOnly,
+            coverageExplanation = "notification",
+            latestEventAt = clock.now(),
+            observationCount = 1,
+            unreadCount = 1,
+            isRemoved = false,
+        )
+        val activitySummary = messageSummary.copy(
+            latestSnippet = "I liked your post",
+            category = NotificationCategory.SocialUpdate,
+        )
+        assertTrue(isConversationSummary(messageSummary))
+        assertFalse(isConversationSummary(activitySummary))
+    }
 }

@@ -132,6 +132,9 @@ class SqlCipherObservationStore(
                 if (currentVersion < 3) {
                     migrateToVersion3(db)
                 }
+                if (currentVersion < 4) {
+                    migrateToVersion4(db)
+                }
                 db.version = DATABASE_VERSION
                 db.setTransactionSuccessful()
             } finally {
@@ -139,8 +142,9 @@ class SqlCipherObservationStore(
             }
         }
 
-        // Fresh databases skip the migration block above; make sure v3 columns exist either way.
+        // Fresh databases skip the migration block above; make sure later columns exist either way.
         migrateToVersion3(db)
+        migrateToVersion4(db)
 
         // Probe FTS5 capability safely
         isFts5Supported = try {
@@ -160,6 +164,14 @@ class SqlCipherObservationStore(
             while (cursor.moveToNext()) columns.add(cursor.getString(cursor.getColumnIndexOrThrow("name")))
         }
         ObservationSchema.version3Statements(columns).forEach { db.execSQL(it) }
+    }
+
+    private fun migrateToVersion4(db: SQLiteDatabase) {
+        val columns = mutableSetOf<String>()
+        db.rawQuery("PRAGMA table_info(notification_observations)", null).use { cursor ->
+            while (cursor.moveToNext()) columns.add(cursor.getString(cursor.getColumnIndexOrThrow("name")))
+        }
+        ObservationSchema.version4Statements(columns).forEach { db.execSQL(it) }
     }
 
     private fun migrateToVersion2(db: SQLiteDatabase) {
@@ -394,6 +406,7 @@ class SqlCipherObservationStore(
             put("direction", ObservationSchema.encodeDirection(obs.direction))
             put("recipients_json", ObservationSchema.encodeRecipients(obs.recipients))
             put("reply_anchor", obs.replyAnchor)
+            put("notification_category", ObservationSchema.encodeCategory(obs.notificationCategory ?: categoryForStoredObservation(obs)))
         }
         db.insertWithOnConflict("notification_observations", null, values, SQLiteDatabase.CONFLICT_REPLACE)
 
@@ -719,11 +732,18 @@ class SqlCipherObservationStore(
             truncationState = TruncationState.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("truncation_state"))),
             correlationConfidence = CorrelationConfidence.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("correlation_confidence"))),
             provenance = ObservationProvenance.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("provenance"))),
-            direction = ObservationSchema.decodeDirection(cursor.getString(cursor.getColumnIndexOrThrow("direction"))),
-            recipients = ObservationSchema.decodeRecipients(cursor.getString(cursor.getColumnIndexOrThrow("recipients_json"))),
-            replyAnchor = cursor.getString(cursor.getColumnIndexOrThrow("reply_anchor")),
+            direction = ObservationSchema.decodeDirection(optionalString(cursor, "direction")),
+            recipients = ObservationSchema.decodeRecipients(optionalString(cursor, "recipients_json")),
+            replyAnchor = optionalString(cursor, "reply_anchor"),
+            notificationCategory = ObservationSchema.decodeCategory(optionalString(cursor, "notification_category")),
         )
     }
+}
+
+private fun optionalString(cursor: android.database.Cursor, column: String): String? {
+    val index = cursor.getColumnIndex(column)
+    if (index < 0 || cursor.isNull(index)) return null
+    return cursor.getString(index)
 }
 
 private object SqlCipherObservationRuntime {

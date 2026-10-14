@@ -50,16 +50,57 @@ import app.mini.hub.attention.AttentionAction
 import app.mini.hub.attention.FollowUpStatus
 import app.mini.hub.connector.ConnectedAccount
 import app.mini.hub.connector.ConnectedAccountStore
+import app.mini.hub.domain.AccountId
+import app.mini.hub.domain.ScopedId
+import app.mini.hub.domain.UtcInstant
+import app.mini.hub.inbox.ContactLookupKind
+import app.mini.hub.inbox.InboxScope
+import app.mini.hub.inbox.InboxScopeFilter
+import app.mini.hub.inbox.UnseenLookup
 import app.mini.hub.observation.ConversationObservationSummary
 import app.mini.hub.observation.SourceAppNames
+import app.mini.hub.persistence.ConversationDraft
+import app.mini.hub.search.SearchResult
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+internal data class InboxUiActions(
+    val onSearchQueryChanged: (String) -> Unit = {},
+    val onSearchSourceFilterChanged: (String?) -> Unit = {},
+    val setShowArchived: (Boolean) -> Unit = {},
+    val setInboxAccountKey: (String?) -> Unit = {},
+    val applyAttentionAction: (ScopedId, AttentionAction) -> Unit = { _, _ -> },
+    val reportUserMessage: (String) -> Unit = {},
+    val openCompose: (AccountId, String, String) -> Unit = { _, _, _ -> },
+    val selectConversationFromSearch: (SearchResult) -> Unit = {},
+    val openSavedDraft: (ConversationDraft) -> Unit = {},
+    val selectConversation: (ConversationObservationSummary) -> Unit = {},
+    val undoLastAttention: () -> Unit = {},
+    val laterPresets: () -> List<Pair<String, UtcInstant>> = { emptyList() },
+) {
+    companion object {
+        fun from(viewModel: InboxViewModel) = InboxUiActions(
+            onSearchQueryChanged = viewModel::onSearchQueryChanged,
+            onSearchSourceFilterChanged = viewModel::onSearchSourceFilterChanged,
+            setShowArchived = viewModel::setShowArchived,
+            setInboxAccountKey = viewModel::setInboxAccountKey,
+            applyAttentionAction = viewModel::applyAttentionAction,
+            reportUserMessage = viewModel::reportUserMessage,
+            openCompose = viewModel::openCompose,
+            selectConversationFromSearch = viewModel::selectConversationFromSearch,
+            openSavedDraft = viewModel::openSavedDraft,
+            selectConversation = viewModel::selectConversation,
+            undoLastAttention = viewModel::undoLastAttention,
+            laterPresets = viewModel::laterPresets,
+        )
+    }
+}
+
 @Composable
 internal fun MiniInboxPane(
     state: InboxViewState,
-    viewModel: InboxViewModel,
+    actions: InboxUiActions,
     accountStore: ConnectedAccountStore,
     labels: Map<String, String>,
     onCompose: () -> Unit,
@@ -74,30 +115,37 @@ internal fun MiniInboxPane(
     var showArchived by rememberSaveable { mutableStateOf(false) }
     var showActivity by rememberSaveable { mutableStateOf(false) }
     val accounts = remember(state.conversations) { state.conversations.map { it.accountId }.distinct() }
-    val active = state.conversations.filter { conv ->
-        val done = state.attentionRecords[conv.conversationId.key]?.status == FollowUpStatus.Done
-        if (showArchived) done else !done
+    val scope = InboxScope(
+        accountKey = accountFilter,
+        categoryLabel = category,
+        unseenOnly = unseenOnly,
+        showDone = showArchived,
+    )
+    val unseen = UnseenLookup { key, at -> seen.isUnseen(key, at) }
+    val chats = state.conversations.filter { conv ->
+        InboxScopeFilter.matchesConversation(conv, labels, state.attentionRecords, unseen, scope)
     }
-    val chats = active
-        .filter { category == null || labels[it.conversationId.key] == category }
-        .filter { accountFilter == null || it.accountId.key == accountFilter }
-        .filter { !unseenOnly || seen.isUnseen(it.conversationId.key, it.latestEventAt.epochMillis) }
     val unseenCount = state.conversations.count { conv ->
-        state.attentionRecords[conv.conversationId.key]?.status != FollowUpStatus.Done &&
-            seen.isUnseen(conv.conversationId.key, conv.latestEventAt.epochMillis)
+        InboxScopeFilter.matchesConversation(
+            conv,
+            labels,
+            state.attentionRecords,
+            unseen,
+            scope.copy(unseenOnly = true, showDone = false),
+        )
     }
     val listedKeys = chats.map { it.conversationId.key }.toSet()
-    val doneKeys = state.attentionRecords.filter { it.value.status == FollowUpStatus.Done }.keys
-    val drafts = state.savedDrafts
-        .filter { accountFilter == null || it.accountId == accountFilter }
-        .filter { draft ->
-            if (draft.isNewEmail) !showArchived
-            else {
-                val done = draft.conversationKey in doneKeys
-                if (showArchived) done else !done
-            }
-        }
-        .filter { it.isNewEmail || it.conversationKey !in listedKeys }
+    val drafts = state.savedDrafts.filter { draft ->
+        InboxScopeFilter.matchesDraft(
+            draft,
+            listedKeys,
+            labels,
+            state.attentionRecords,
+            unseen,
+            state.conversations,
+            scope,
+        )
+    }
     val liveActivity = state.linkedinActivity.filter {
         state.attentionRecords[it.conversationId.key]?.status != FollowUpStatus.Done
     }
@@ -109,16 +157,16 @@ internal fun MiniInboxPane(
             items = liveActivity,
             notice = state.outboxStatusMessage,
             onBack = { showActivity = false },
-            onAcknowledge = { viewModel.applyAttentionAction(it.conversationId, AttentionAction.MarkDone) },
+            onAcknowledge = { actions.applyAttentionAction(it.conversationId, AttentionAction.MarkDone) },
             onOpen = { summary ->
                 if (openLinkedInApp(context)) {
-                    viewModel.applyAttentionAction(summary.conversationId, AttentionAction.MarkDone)
-                    viewModel.reportUserMessage("")
+                    actions.applyAttentionAction(summary.conversationId, AttentionAction.MarkDone)
+                    actions.reportUserMessage("")
                 } else {
-                    viewModel.reportUserMessage("Couldn't open LinkedIn. The item is still here.")
+                    actions.reportUserMessage("Couldn't open LinkedIn. The item is still here.")
                 }
             },
-            onDismissNotice = { viewModel.reportUserMessage("") },
+            onDismissNotice = { actions.reportUserMessage("") },
         )
         return
     }
@@ -126,7 +174,6 @@ internal fun MiniInboxPane(
         emptyList<app.mini.hub.android.connector.AndroidConnectorRegistry.ContactRoute>(),
         state.searchQuery,
         accountFilter,
-        showArchived,
     ) {
         if (state.searchQuery.isBlank()) {
             value = emptyList()
@@ -137,21 +184,25 @@ internal fun MiniInboxPane(
             runCatching { app.mini.hub.android.MiniHubRuntime.connectors.findContacts(state.searchQuery) }
                 .getOrDefault(emptyList())
                 .filter { accountFilter == null || it.accountId.key == accountFilter }
-                .filter { route ->
-                    val existing = state.conversations.firstOrNull {
-                        it.accountId == route.accountId &&
-                            (it.conversationId.value.equals(route.address, ignoreCase = true) ||
-                                it.senderHint.contains(route.address, ignoreCase = true))
-                    } ?: return@filter !showArchived
-                    val done = state.attentionRecords[existing.conversationId.key]?.status == FollowUpStatus.Done
-                    if (showArchived) done else !done
-                }
         }
     }
-    val searchHits = state.searchResults
-        .filter { accountFilter == null || it.accountId.key == accountFilter }
-        .filter { category == null || labels[it.conversationId.key] == category }
-        .filter { !unseenOnly || seen.isUnseen(it.conversationId.key, it.eventAt.epochMillis) }
+    val scopedPeople = contactRoutes.mapNotNull { route ->
+        val existing = InboxScopeFilter.matchingConversation(state.conversations, route.accountId.key, route.address)
+        val decision = InboxScopeFilter.decideContact(existing, labels, state.attentionRecords, unseen, scope)
+        if (decision.include) route to decision.kind else null
+    }
+    val searchHits = state.searchResults.filter { result ->
+        InboxScopeFilter.matchesSearchResult(
+            result,
+            labels,
+            state.attentionRecords,
+            unseen,
+            scope,
+            state.conversations,
+        )
+    }
+    val broaderLookup = scopedPeople.any { it.second == ContactLookupKind.NewContact } &&
+        (scope.categoryLabel != null || scope.unseenOnly || scope.accountKey != null || scope.showDone)
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = MiniInk.gutter.dp),
@@ -173,7 +224,7 @@ internal fun MiniInboxPane(
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = state.searchQuery,
-            onValueChange = { viewModel.onSearchQueryChanged(it) },
+            onValueChange = { actions.onSearchQueryChanged(it) },
             placeholder = { Text("Search people and messages") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = MiniInk.gutter.dp),
@@ -189,15 +240,15 @@ internal fun MiniInboxPane(
         ) {
             FilterChip(selected = category == null && !unseenOnly && accountFilter == null && !showArchived, onClick = {
                 category = null; unseenOnly = false; accountFilter = null; showArchived = false
-                viewModel.onSearchSourceFilterChanged(null)
-                viewModel.setShowArchived(false)
-                viewModel.setInboxAccountKey(null)
+                actions.onSearchSourceFilterChanged(null)
+                actions.setShowArchived(false)
+                actions.setInboxAccountKey(null)
             }, label = { Text("All") })
-            FilterChip(selected = unseenOnly, onClick = { unseenOnly = !unseenOnly; showArchived = false; viewModel.setShowArchived(false) }, label = { Text("Unseen in MINI $unseenCount") })
+            FilterChip(selected = unseenOnly, onClick = { unseenOnly = !unseenOnly; showArchived = false; actions.setShowArchived(false) }, label = { Text("Unseen in MINI $unseenCount") })
             FilterChip(selected = showArchived, onClick = {
                 showArchived = !showArchived
                 unseenOnly = false
-                viewModel.setShowArchived(showArchived)
+                actions.setShowArchived(showArchived)
             }, label = { Text("Done") })
             if (liveActivity.isNotEmpty() || archivedActivity.isNotEmpty()) {
                 FilterChip(selected = false, onClick = { showActivity = true }, label = { Text("Activity ${liveActivity.size}") })
@@ -211,7 +262,7 @@ internal fun MiniInboxPane(
                     selected = accountFilter == id.key,
                     onClick = {
                         accountFilter = if (accountFilter == id.key) null else id.key
-                        viewModel.setInboxAccountKey(accountFilter)
+                        actions.setInboxAccountKey(accountFilter)
                     },
                     label = { Text(alias) },
                 )
@@ -236,7 +287,7 @@ internal fun MiniInboxPane(
             MiniBanner(title = "Storage error", body = it, action = null, onAction = {})
         }
         state.outboxStatusMessage?.takeIf { !showActivity }?.let {
-            MiniBanner(title = "Notice", body = it, action = "Dismiss", onAction = { viewModel.reportUserMessage("") })
+            MiniBanner(title = "Notice", body = it, action = "Dismiss", onAction = { actions.reportUserMessage("") })
         }
         val visibleOutcomes = state.reviewedSnapshots.filter { snap ->
             snap.state == app.mini.hub.action.OutboxState.OutcomeUnknown ||
@@ -257,20 +308,32 @@ internal fun MiniInboxPane(
                 }
             }
             if (state.searchQuery.isNotBlank()) {
-                if (contactRoutes.isNotEmpty()) {
+                if (scopedPeople.isNotEmpty()) {
                     item {
                         Text("People", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 4.dp))
                     }
-                    items(contactRoutes.groupBy { it.name.lowercase() }.entries.take(6).toList(), key = { it.key }) { (_, routes) ->
+                    if (broaderLookup) {
+                        item {
+                            Text(
+                                "New contacts look beyond this filter.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    items(scopedPeople.groupBy { it.first.name.lowercase() }.entries.take(6).toList(), key = { it.key }) { (_, routes) ->
                         Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
-                            Text(routes.first().name, fontWeight = FontWeight.SemiBold)
+                            Text(routes.first().first.name, fontWeight = FontWeight.SemiBold)
                             Row(
                                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                routes.forEach { r ->
-                                    OutlinedButton(onClick = { viewModel.openCompose(r.accountId, r.address, r.name) }) {
-                                        Text(r.label, maxLines = 1)
+                                routes.forEach { (r, kind) ->
+                                    OutlinedButton(onClick = { actions.openCompose(r.accountId, r.address, r.name) }) {
+                                        Text(
+                                            if (kind == ContactLookupKind.NewContact) "${r.label} · New contact" else r.label,
+                                            maxLines = 1,
+                                        )
                                     }
                                 }
                             }
@@ -295,7 +358,7 @@ internal fun MiniInboxPane(
                                 .fillMaxWidth()
                                 .clickable {
                                     seen.markSeen(res.conversationId.key, res.eventAt.epochMillis)
-                                    viewModel.selectConversationFromSearch(res)
+                                    actions.selectConversationFromSearch(res)
                                 }
                                 .padding(vertical = 10.dp),
                         ) {
@@ -319,10 +382,14 @@ internal fun MiniInboxPane(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(MiniInk.cardRadius.dp))
                                 .background(MaterialTheme.colorScheme.tertiaryContainer)
-                                .clickable { viewModel.openSavedDraft(draft) }
+                                .clickable { actions.openSavedDraft(draft) }
                                 .padding(12.dp),
                         ) {
-                            Text("Draft", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
+                            Text(
+                                if (InboxScopeFilter.isStandaloneDraft(draft)) "New email draft" else "Draft",
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.labelLarge,
+                            )
                             if (draft.to.isNotBlank()) Text("To: ${draft.to}", style = MaterialTheme.typography.bodySmall)
                             Text(draft.subject.ifBlank { "(no subject)" }, style = MaterialTheme.typography.titleSmall)
                             if (draft.body.isNotBlank()) Text(draft.body, style = MaterialTheme.typography.bodySmall, maxLines = 2)
@@ -344,7 +411,7 @@ internal fun MiniInboxPane(
                         unseen = seen.isUnseen(conv.conversationId.key, conv.latestEventAt.epochMillis),
                         onClick = {
                             seen.markSeen(conv.conversationId.key, conv.latestEventAt.epochMillis)
-                            viewModel.selectConversation(conv)
+                            actions.selectConversation(conv)
                         },
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline)

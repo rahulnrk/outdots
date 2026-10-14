@@ -344,16 +344,20 @@ class InboxViewModel(
             // Search runs off the main thread; logs contain no query text or message content.
             val query = app.mini.hub.search.SearchQuery(queryText = trimmed, sourceFilter = sourceFilter, limit = 50)
             val rawResults = observationStore.search(query)
-            val conversationKeys = app.mini.hub.attention.scopedConversationKeys(
-                _state.value.conversations.map { it.conversationId.key },
-                _state.value.attentionRecords,
-                _state.value.inboxShowArchived,
+            val scope = app.mini.hub.inbox.InboxScope(
+                accountKey = _state.value.inboxAccountKey,
+                showDone = _state.value.inboxShowArchived,
             )
-            val accountKey = _state.value.inboxAccountKey
             val filtered = rawResults.filter { result ->
                 (result.packageId in enabledSources || result.packageId.startsWith("provider.")) &&
-                    result.conversationId.key in conversationKeys &&
-                    (accountKey == null || result.accountId.key == accountKey)
+                    app.mini.hub.inbox.InboxScopeFilter.matchesSearchResult(
+                        result = result,
+                        labels = emptyMap(),
+                        records = _state.value.attentionRecords,
+                        unseen = { _, _ -> true },
+                        scope = scope,
+                        conversations = _state.value.conversations,
+                    )
             }
             postToMain("search-result") {
                 if (gen != searchGeneration) return@postToMain

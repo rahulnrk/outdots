@@ -108,10 +108,11 @@ fun MiniDailyApp(
                 thread()
             } else {
                 MiniBrandBar(onThisPhone = state.isListenerConnected && state.isPermissionGranted)
+                val actions = InboxUiActions.from(viewModel)
                 when (current) {
                     MiniTab.Inbox -> MiniInboxPane(
                         state = state,
-                        viewModel = viewModel,
+                        actions = actions,
                         accountStore = accountStore,
                         labels = labels,
                         onCompose = onCompose,
@@ -120,7 +121,7 @@ fun MiniDailyApp(
                     )
                     MiniTab.Focus -> MiniFocusPane(
                         state = state,
-                        viewModel = viewModel,
+                        actions = actions,
                         accountStore = accountStore,
                         labels = labels,
                     )
@@ -141,7 +142,7 @@ fun MiniDailyApp(
 }
 
 @Composable
-private fun MiniBrandBar(onThisPhone: Boolean) {
+internal fun MiniBrandBar(onThisPhone: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -173,7 +174,7 @@ private fun MiniBrandBar(onThisPhone: Boolean) {
 }
 
 @Composable
-private fun MiniBottomBar(current: MiniTab, onSelect: (MiniTab) -> Unit) {
+internal fun MiniBottomBar(current: MiniTab, onSelect: (MiniTab) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -402,9 +403,9 @@ private fun attentionChip(attention: app.mini.hub.attention.ConversationAttentio
 }
 
 @Composable
-private fun MiniFocusPane(
+internal fun MiniFocusPane(
     state: InboxViewState,
-    viewModel: InboxViewModel,
+    actions: InboxUiActions,
     accountStore: ConnectedAccountStore,
     labels: Map<String, String>,
 ) {
@@ -433,7 +434,7 @@ private fun MiniFocusPane(
         }
         Text("Here's what needs you today.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (state.canUndoAttention) {
-            TextButton(onClick = { viewModel.undoLastAttention() }) { Text("Undo last attention change") }
+            TextButton(onClick = { actions.undoLastAttention() }) { Text("Undo last attention change") }
         }
         Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
             FocusTab("Needs you ${needs.size}", section == "needs", Modifier.weight(1f)) { section = "needs" }
@@ -471,11 +472,11 @@ private fun MiniFocusPane(
                         category = labels[entry.summary.conversationId.key],
                         onReply = {
                             seen.markSeen(entry.summary.conversationId.key, entry.summary.latestEventAt.epochMillis)
-                            viewModel.selectConversation(entry.summary)
+                            actions.selectConversation(entry.summary)
                         },
                         onLater = { laterFor = entry },
-                        onDone = { viewModel.applyAttentionAction(entry.summary.conversationId, AttentionAction.MarkDone) },
-                        onWaiting = { viewModel.applyAttentionAction(entry.summary.conversationId, AttentionAction.MarkWaiting) },
+                        onDone = { actions.applyAttentionAction(entry.summary.conversationId, AttentionAction.MarkDone) },
+                        onWaiting = { actions.applyAttentionAction(entry.summary.conversationId, AttentionAction.MarkWaiting) },
                     )
                 }
             }
@@ -488,9 +489,9 @@ private fun MiniFocusPane(
             text = {
                 Column {
                     Text("Snooze stays in MINI. This does not schedule an OS notification.")
-                    viewModel.laterPresets().forEach { (label, at) ->
+                    actions.laterPresets().forEach { (label, at) ->
                         TextButton(onClick = {
-                            viewModel.applyAttentionAction(entry.summary.conversationId, AttentionAction.Snooze(at))
+                            actions.applyAttentionAction(entry.summary.conversationId, AttentionAction.Snooze(at))
                             laterFor = null
                         }) { Text(label) }
                     }
@@ -589,7 +590,7 @@ private fun MiniFocusCard(
 }
 
 @Composable
-private fun MiniConsolePane(
+internal fun MiniConsolePane(
     state: InboxViewState,
     accountStore: ConnectedAccountStore,
     capabilities: (ConnectedAccount) -> app.mini.hub.connector.CapabilitySnapshot?,

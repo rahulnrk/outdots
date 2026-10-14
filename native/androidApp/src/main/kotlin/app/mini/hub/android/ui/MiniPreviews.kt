@@ -4,18 +4,26 @@ import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
+import app.mini.hub.action.ActionRoute
+import app.mini.hub.action.OutboxState
+import app.mini.hub.action.ReviewedActionSnapshot
 import app.mini.hub.attention.AttentionEntry
 import app.mini.hub.attention.AttentionRules
+import app.mini.hub.attention.AttentionView
 import app.mini.hub.attention.FollowUpStatus
+import app.mini.hub.connector.AccountType
+import app.mini.hub.connector.Capability
+import app.mini.hub.connector.CapabilitySnapshot
+import app.mini.hub.connector.ConnectedAccount
+import app.mini.hub.connector.ConnectionState
+import app.mini.hub.connector.ConnectorRoute
+import app.mini.hub.connector.InMemoryConnectedAccountStore
 import app.mini.hub.domain.AccountId
 import app.mini.hub.domain.Provider
 import app.mini.hub.domain.ScopedId
@@ -23,41 +31,197 @@ import app.mini.hub.domain.UtcInstant
 import app.mini.hub.observation.ConversationCoverage
 import app.mini.hub.observation.ConversationObservationSummary
 import app.mini.hub.observation.NotificationCategory
+import app.mini.hub.persistence.ConversationDraft
+import app.mini.hub.search.SearchResult
 
 private val previewNow = UtcInstant(1_700_000_000_000L)
-private val previewAccount = AccountId(Provider.WHATSAPP, "local_user")
+private val previewWhatsApp = AccountId(Provider.WHATSAPP, "local_user")
+private val previewGmail = AccountId(Provider.GMAIL, "work")
 
 private fun previewConv(
+    account: AccountId,
     name: String,
     snippet: String,
-    pkg: String = "com.whatsapp",
+    pkg: String,
     category: NotificationCategory = NotificationCategory.DirectMessage,
     coverage: ConversationCoverage = ConversationCoverage.NotificationOnly,
-): ConversationObservationSummary {
-    val account = AccountId(
-        when {
-            pkg.contains("gm") -> Provider.GMAIL
-            pkg.contains("linkedin") -> Provider.LINKEDIN
-            else -> Provider.WHATSAPP
-        },
-        "local_user",
+): ConversationObservationSummary = ConversationObservationSummary(
+    conversationId = ScopedId(account, ScopedId.Kind.CONVERSATION, name),
+    accountId = account,
+    title = name,
+    appName = "preview",
+    senderHint = name,
+    packageId = pkg,
+    latestSnippet = snippet,
+    category = category,
+    coverage = coverage,
+    coverageExplanation = "synthetic preview",
+    latestEventAt = previewNow,
+    observationCount = 2,
+    unreadCount = 1,
+    isRemoved = false,
+)
+
+private fun previewAccounts(): InMemoryConnectedAccountStore {
+    val store = InMemoryConnectedAccountStore()
+    store.upsert(
+        ConnectedAccount(
+            id = previewGmail,
+            providerAccountId = "work@example.com",
+            displayName = "work",
+            accountType = AccountType.GoogleConsumer,
+            route = ConnectorRoute.OfficialProviderApi,
+            state = ConnectionState.Healthy,
+            lastSuccessfulSyncMillis = previewNow.epochMillis,
+        ),
     )
-    return ConversationObservationSummary(
-        conversationId = ScopedId(account, ScopedId.Kind.CONVERSATION, name),
-        accountId = account,
-        title = name,
-        appName = "preview",
-        senderHint = name,
-        packageId = pkg,
-        latestSnippet = snippet,
-        category = category,
-        coverage = coverage,
-        coverageExplanation = "synthetic preview",
-        latestEventAt = previewNow,
-        observationCount = 2,
-        unreadCount = 1,
-        isRemoved = false,
+    store.upsert(
+        ConnectedAccount(
+            id = previewWhatsApp,
+            providerAccountId = "local_user",
+            displayName = "WhatsApp",
+            accountType = AccountType.Unknown,
+            route = ConnectorRoute.NotificationOnly,
+            state = ConnectionState.Healthy,
+        ),
     )
+    return store
+}
+
+private fun previewInboxState(): InboxViewState {
+    val alice = previewConv(previewWhatsApp, "Alice Chen", "Can you send the deck before 4?", "com.whatsapp")
+    val pat = previewConv(
+        previewGmail,
+        "Pat Rivera",
+        "Re: Q3 invoice",
+        "com.google.android.gm",
+        coverage = ConversationCoverage.PartialApiSync,
+    )
+    val done = previewConv(previewWhatsApp, "Sam Lee", "Thanks, all set.", "com.whatsapp")
+    val aliceAttention = AttentionRules.default(alice.conversationId, previewNow)
+    val patAttention = AttentionRules.default(pat.conversationId, previewNow)
+        .copy(status = FollowUpStatus.Waiting, acknowledgedActivityAt = previewNow, isUserSet = true)
+    val doneAttention = AttentionRules.default(done.conversationId, previewNow)
+        .copy(status = FollowUpStatus.Done, acknowledgedActivityAt = previewNow, isUserSet = true)
+    return InboxViewState(
+        isPermissionGranted = true,
+        isListenerConnected = true,
+        conversations = listOf(alice, pat, done),
+        linkedinActivity = listOf(
+            previewConv(
+                AccountId(Provider.LINKEDIN, "local_user"),
+                "Job alert",
+                "12 new roles for you",
+                "com.linkedin.android",
+                category = NotificationCategory.SocialUpdate,
+            ),
+        ),
+        attentionView = AttentionView(
+            needsAttention = listOf(AttentionEntry(alice, aliceAttention)),
+            waiting = listOf(AttentionEntry(pat, patAttention)),
+            snoozed = emptyList(),
+            done = listOf(AttentionEntry(done, doneAttention)),
+        ),
+        attentionRecords = mapOf(
+            alice.conversationId.key to aliceAttention,
+            pat.conversationId.key to patAttention,
+            done.conversationId.key to doneAttention,
+        ),
+        searchQuery = "",
+        searchResults = listOf(
+            SearchResult(
+                conversationId = alice.conversationId,
+                accountId = alice.accountId,
+                packageId = alice.packageId,
+                conversationTitle = alice.title,
+                senderHint = alice.senderHint,
+                snippet = alice.latestSnippet,
+                eventAt = alice.latestEventAt,
+                messageCount = 2,
+            ),
+        ),
+        savedDrafts = listOf(
+            ConversationDraft(
+                conversationKey = "${previewGmail.key}:conversation:compose:${previewNow.epochMillis}",
+                accountId = previewGmail.key,
+                body = "Following up on the invoice.",
+                to = "pat@example.com",
+                subject = "Q3 invoice",
+                isNewEmail = true,
+                updatedAtMillis = previewNow.epochMillis,
+            ),
+        ),
+        reviewedSnapshots = listOf(
+            ReviewedActionSnapshot(
+                commandId = "cmd-preview",
+                accountId = previewGmail.key,
+                conversationId = pat.conversationId.key,
+                route = ActionRoute.NativeHandoff,
+                recipients = listOf("pat@example.com"),
+                cc = emptyList(),
+                bcc = emptyList(),
+                subject = "Q3 invoice",
+                body = "Opening in Gmail. Not sent by MINI.",
+                attachmentNames = emptyList(),
+                replyTarget = null,
+                state = OutboxState.HandoffOpened,
+                createdAt = previewNow,
+            ),
+        ),
+        canUndoAttention = true,
+    )
+}
+
+@Composable
+private fun MiniProductionPreview(tab: MiniTab) {
+    val state = previewInboxState()
+    val accounts = previewAccounts()
+    val labels = mapOf(
+        state.conversations.first().conversationId.key to "Work",
+    )
+    MiniTheme {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            bottomBar = { MiniBottomBar(tab) {} },
+        ) { padding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(padding),
+            ) {
+                MiniBrandBar(onThisPhone = true)
+                when (tab) {
+                    MiniTab.Inbox -> MiniInboxPane(
+                        state = state,
+                        actions = InboxUiActions(),
+                        accountStore = accounts,
+                        labels = labels,
+                        onCompose = {},
+                        onRequestPermission = {},
+                    )
+                    MiniTab.Focus -> MiniFocusPane(
+                        state = state,
+                        actions = InboxUiActions(),
+                        accountStore = accounts,
+                        labels = labels,
+                    )
+                    MiniTab.Console -> MiniConsolePane(
+                        state = state,
+                        accountStore = accounts,
+                        capabilities = {
+                            CapabilitySnapshot(enabled = setOf(Capability.Reply), disabled = emptyMap())
+                        },
+                        onOpenSources = {},
+                        onOpenAccounts = {},
+                        onOpenLearning = {},
+                        onRequestPermission = {},
+                        onSyncNow = {},
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Preview(showBackground = true, name = "Inbox light")
@@ -65,30 +229,7 @@ private fun previewConv(
 @Preview(showBackground = true, name = "Inbox large text", fontScale = 1.3f)
 @Composable
 fun MiniInboxScreenPreview() {
-    MiniTheme {
-        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(bottom = 12.dp)) {
-            Text("Inbox", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-            Text("Conversations, not notifications.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp))
-            MiniPeopleRow(
-                conv = previewConv("Alice Chen", "Can you send the deck before 4?"),
-                label = "Work",
-                attention = AttentionRules.default(ScopedId(previewAccount, ScopedId.Kind.CONVERSATION, "Alice Chen"), previewNow),
-                accountAlias = "WhatsApp",
-                unseen = true,
-                onClick = {},
-            )
-            HorizontalDivider()
-            MiniPeopleRow(
-                conv = previewConv("Pat Rivera", "Re: Q3 invoice", "com.google.android.gm", coverage = ConversationCoverage.PartialApiSync),
-                label = null,
-                attention = AttentionRules.default(ScopedId(previewAccount, ScopedId.Kind.CONVERSATION, "Pat"), previewNow)
-                    .copy(status = FollowUpStatus.Waiting, acknowledgedActivityAt = previewNow, isUserSet = true),
-                accountAlias = "Gmail · work",
-                unseen = false,
-                onClick = {},
-            )
-        }
-    }
+    MiniProductionPreview(MiniTab.Inbox)
 }
 
 @Preview(showBackground = true, name = "Focus light")
@@ -96,23 +237,7 @@ fun MiniInboxScreenPreview() {
 @Preview(showBackground = true, name = "Focus large text", fontScale = 1.3f)
 @Composable
 fun MiniFocusScreenPreview() {
-    val summary = previewConv("Alice Chen", "Can you send the deck before 4?")
-    val entry = AttentionEntry(summary, AttentionRules.default(summary.conversationId, previewNow))
-    MiniTheme {
-        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(20.dp)) {
-            Text("A LITTLE FOCUS.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("A little focus.", style = MaterialTheme.typography.headlineMedium)
-            Text("Needs you 1   Waiting 0   Later 0", style = MaterialTheme.typography.labelLarge)
-            MiniPeopleRow(
-                conv = entry.summary,
-                label = "Work",
-                attention = entry.attention,
-                accountAlias = "WhatsApp",
-                unseen = true,
-                onClick = {},
-            )
-        }
-    }
+    MiniProductionPreview(MiniTab.Focus)
 }
 
 @Preview(showBackground = true, name = "Console light")
@@ -120,15 +245,7 @@ fun MiniFocusScreenPreview() {
 @Preview(showBackground = true, name = "Console large text", fontScale = 1.3f)
 @Composable
 fun MiniConsoleScreenPreview() {
-    MiniTheme {
-        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(20.dp)) {
-            Text("Your console.", style = MaterialTheme.typography.headlineLarge)
-            Text("A clear view of what's working.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Gmail · work", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-            Text("Checked just now", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Reply available", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
+    MiniProductionPreview(MiniTab.Console)
 }
 
 @Preview(showBackground = true, name = "Activity light")
@@ -140,10 +257,11 @@ fun MiniActivityScreenPreview() {
         MiniActivityPane(
             items = listOf(
                 previewConv(
-                    name = "Job alert",
-                    snippet = "12 new roles for you",
-                    pkg = "com.linkedin.android",
-                    category = NotificationCategory.SocialUpdate,
+                    AccountId(Provider.LINKEDIN, "local_user"),
+                    "Job alert",
+                    "12 new roles for you",
+                    "com.linkedin.android",
+                    NotificationCategory.SocialUpdate,
                 ),
             ),
             notice = "Couldn't open LinkedIn. The item is still here.",

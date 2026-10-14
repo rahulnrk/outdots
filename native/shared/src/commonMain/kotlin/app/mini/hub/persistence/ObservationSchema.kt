@@ -6,9 +6,10 @@ package app.mini.hub.persistence
  *  - 1: observations, conversations, cursors
  *  - 2: conversation_summaries.app_name and .category
  *  - 3: notification_observations.direction, .recipients_json, .reply_anchor (null = unknown)
+ *  - 4: notification_observations.notification_category (null = reconstruct from stored text)
  */
 object ObservationSchema {
-    const val VERSION = 3
+    const val VERSION = 4
 
     /** Observations table as created by versions 1 and 2. Version 3 columns are added by migration. */
     const val CREATE_OBSERVATIONS_V1 = """
@@ -100,6 +101,13 @@ object ObservationSchema {
         add(INDEX_CONVERSATION_EVENT)
     }
 
+    /** Statements that add the ingest category column without rewriting existing rows. */
+    fun version4Statements(existingObservationColumns: Set<String>): List<String> = buildList {
+        if ("notification_category" !in existingObservationColumns) {
+            add("ALTER TABLE notification_observations ADD COLUMN notification_category TEXT")
+        }
+    }
+
     private const val SEP = "\u001F"
 
     /** Null = unknown. An empty list is stored as unknown as well; providers always name a recipient. */
@@ -109,4 +117,8 @@ object ObservationSchema {
     fun encodeDirection(direction: app.mini.hub.connector.MessageDirection?): String? = direction?.name
     fun decodeDirection(value: String?): app.mini.hub.connector.MessageDirection? =
         value?.let { v -> app.mini.hub.connector.MessageDirection.entries.firstOrNull { it.name == v } }
+
+    fun encodeCategory(category: app.mini.hub.observation.NotificationCategory?): String? = category?.name
+    fun decodeCategory(value: String?): app.mini.hub.observation.NotificationCategory? =
+        value?.let { v -> app.mini.hub.observation.NotificationCategory.entries.firstOrNull { it.name == v } }
 }

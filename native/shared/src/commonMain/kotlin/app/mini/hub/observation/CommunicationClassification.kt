@@ -64,10 +64,9 @@ fun classifyCommunication(payload: NotificationRawPayload): CommunicationKind {
             else -> CommunicationKind.NotCommunication
         }
         CommunicationSource.Instagram, CommunicationSource.FacebookMessenger, CommunicationSource.X -> when {
-            looksLikeSocialActivity(payload.title, payload.text, payload.subText) -> CommunicationKind.NotCommunication
             messagingEvidence -> CommunicationKind.ConversationMessage
-            hasPersonAndBody(payload) && !looksLikeSocialActivity(payload.title, payload.text, payload.subText) ->
-                CommunicationKind.ConversationMessage
+            looksLikeSocialActivity(payload.title, payload.text, payload.subText) -> CommunicationKind.NotCommunication
+            hasPersonAndBody(payload) -> CommunicationKind.ConversationMessage
             else -> CommunicationKind.NotCommunication
         }
         null -> if (messagingEvidence) CommunicationKind.ConversationMessage else CommunicationKind.NotCommunication
@@ -148,6 +147,9 @@ fun isConversationSummary(summary: ConversationObservationSummary): Boolean {
     if (summary.category == NotificationCategory.OngoingService ||
         summary.category == NotificationCategory.SystemStatus
     ) return false
+    if (summary.category == NotificationCategory.DirectMessage ||
+        summary.category == NotificationCategory.GroupMessage
+    ) return true
     if (isLinkedInActivitySummary(summary)) return false
     if (looksLikeNonMessageActivity(summary)) return false
     return when (CommunicationSource.forExactPackage(summary.packageId)) {
@@ -273,6 +275,9 @@ private fun looksLikeSocialActivity(title: String?, text: String, subText: Strin
             "new follower",
             "story mention",
             "took a screenshot",
+            "new reply",
+            "replied to your",
+            "replied to you",
         ),
     )
 }

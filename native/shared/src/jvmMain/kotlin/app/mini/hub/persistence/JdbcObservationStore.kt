@@ -51,22 +51,32 @@ class JdbcObservationStore(path: String) : ObservationStore {
     private fun migrate() {
         val current = schemaVersion()
         if (current >= ObservationSchema.VERSION) {
-            // Fresh databases created above still need the v3 columns.
+            // Fresh databases created above still need later columns.
             ensureVersion3Columns()
+            ensureVersion4Columns()
             return
         }
         transaction {
             ensureVersion3Columns()
+            ensureVersion4Columns()
             connection.createStatement().use { it.execute("PRAGMA user_version = ${ObservationSchema.VERSION}") }
         }
     }
 
-    private fun ensureVersion3Columns() {
+    private fun observationColumns(): Set<String> {
         val columns = mutableSetOf<String>()
         connection.createStatement().use { s ->
             s.executeQuery("PRAGMA table_info(notification_observations)").use { while (it.next()) columns += it.getString("name") }
         }
-        connection.createStatement().use { s -> ObservationSchema.version3Statements(columns).forEach { s.execute(it) } }
+        return columns
+    }
+
+    private fun ensureVersion3Columns() {
+        connection.createStatement().use { s -> ObservationSchema.version3Statements(observationColumns()).forEach { s.execute(it) } }
+    }
+
+    private fun ensureVersion4Columns() {
+        connection.createStatement().use { s -> ObservationSchema.version4Statements(observationColumns()).forEach { s.execute(it) } }
     }
 
     private inline fun <T> transaction(block: () -> T): T {
@@ -110,13 +120,14 @@ class JdbcObservationStore(path: String) : ObservationStore {
         prepare(
             """INSERT OR REPLACE INTO notification_observations (id, account_key, conversation_key, package_id, notification_key,
                 notification_id, tag, sender_hint, title, text_fragments_json, raw_text_digest, observed_at, post_time, revision,
-                is_removed, is_group_summary, truncation_state, correlation_confidence, provenance, direction, recipients_json, reply_anchor)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                is_removed, is_group_summary, truncation_state, correlation_confidence, provenance, direction, recipients_json, reply_anchor, notification_category)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             obs.id.key, obs.accountId.key, obs.conversationId.key, obs.packageId, obs.notificationKey,
             obs.notificationId, obs.tag, obs.senderHint, obs.title, obs.textFragments.joinToString("\u001F"), obs.rawTextDigest,
             obs.observedAt.epochMillis, obs.postTime.epochMillis, obs.revision, if (obs.isRemoved) 1 else 0,
             if (obs.isGroupSummary) 1 else 0, obs.truncationState.name, obs.correlationConfidence.name, obs.provenance.name,
             ObservationSchema.encodeDirection(obs.direction), ObservationSchema.encodeRecipients(obs.recipients), obs.replyAnchor,
+            ObservationSchema.encodeCategory(obs.notificationCategory ?: categoryForStoredObservation(obs)),
         ).use { it.executeUpdate() }
 
         runCatching {
@@ -324,13 +335,14 @@ class JdbcObservationStore(path: String) : ObservationStore {
         prepare(
             """INSERT OR REPLACE INTO notification_observations (id, account_key, conversation_key, package_id, notification_key,
                 notification_id, tag, sender_hint, title, text_fragments_json, raw_text_digest, observed_at, post_time, revision,
-                is_removed, is_group_summary, truncation_state, correlation_confidence, provenance, direction, recipients_json, reply_anchor)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                is_removed, is_group_summary, truncation_state, correlation_confidence, provenance, direction, recipients_json, reply_anchor, notification_category)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             obs.id.key, obs.accountId.key, obs.conversationId.key, obs.packageId, obs.notificationKey,
             obs.notificationId, obs.tag, obs.senderHint, obs.title, obs.textFragments.joinToString("\u001F"), obs.rawTextDigest,
             obs.observedAt.epochMillis, obs.postTime.epochMillis, obs.revision, if (obs.isRemoved) 1 else 0,
             if (obs.isGroupSummary) 1 else 0, obs.truncationState.name, obs.correlationConfidence.name, obs.provenance.name,
             ObservationSchema.encodeDirection(obs.direction), ObservationSchema.encodeRecipients(obs.recipients), obs.replyAnchor,
+            ObservationSchema.encodeCategory(obs.notificationCategory ?: categoryForStoredObservation(obs)),
         ).use { it.executeUpdate() }
 
         // Keep FTS index in sync
@@ -425,6 +437,7 @@ class JdbcObservationStore(path: String) : ObservationStore {
             direction = ObservationSchema.decodeDirection(rs.getString("direction")),
             recipients = ObservationSchema.decodeRecipients(rs.getString("recipients_json")),
             replyAnchor = rs.getString("reply_anchor"),
+            notificationCategory = ObservationSchema.decodeCategory(rs.getString("notification_category")),
         )
     }
 }

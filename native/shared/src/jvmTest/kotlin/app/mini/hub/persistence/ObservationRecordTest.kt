@@ -10,9 +10,11 @@ import app.mini.hub.domain.ScopedId
 import app.mini.hub.domain.UtcInstant
 import app.mini.hub.intelligence.CompartmentId
 import app.mini.hub.observation.CorrelationConfidence
+import app.mini.hub.observation.NotificationCategory
 import app.mini.hub.observation.ObservationProvenance
 import app.mini.hub.observation.ObservedNotification
 import app.mini.hub.observation.TruncationState
+import app.mini.hub.observation.isConversationSummary
 import app.mini.hub.retrieval.ScopedRetrievalEngine
 import app.mini.hub.retrieval.ScopedRetrievalQuery
 import org.junit.Test
@@ -127,6 +129,43 @@ class ObservationRecordTest {
         val reopened = JdbcObservationStore(file.path)
         assertEquals(2, reopened.getObservationsForConversation(conv).size)
         assertTrue(reopened.getObservationsForConversation(conv).any { it.direction == MessageDirection.Outbound && it.replyAnchor == "<new@mail>" })
+    }
+
+    @Test(timeout = 30_000)
+    fun notificationCategorySurvivesJdbcCloseReopenAndSummaryRebuild() {
+        val file = File.createTempFile("mini-cat", ".db").apply { delete(); deleteOnExit() }
+        val ig = AccountId(Provider.INSTAGRAM, "local")
+        val igConv = ScopedId(ig, ScopedId.Kind.CONVERSATION, "Sam")
+        val message = ObservedNotification(
+            id = ScopedId(ig, ScopedId.Kind.OBSERVATION, "obs-sam"),
+            accountId = ig,
+            conversationId = igConv,
+            packageId = "com.instagram.android",
+            notificationKey = "k-sam",
+            notificationId = 7,
+            tag = null,
+            senderHint = "Sam",
+            title = "Sam",
+            textFragments = listOf("I liked your post, can you send the file?"),
+            rawTextDigest = "dg-sam",
+            observedAt = UtcInstant(20),
+            postTime = UtcInstant(20),
+            revision = 1,
+            isRemoved = false,
+            isGroupSummary = false,
+            truncationState = TruncationState.Complete,
+            correlationConfidence = CorrelationConfidence.High,
+            provenance = ObservationProvenance.AndroidNotificationListener,
+            notificationCategory = NotificationCategory.DirectMessage,
+        )
+        JdbcObservationStore(file.path).persistObservation(message)
+        val reopened = JdbcObservationStore(file.path)
+        assertEquals(ObservationSchema.VERSION, reopened.schemaVersion())
+        val back = reopened.getObservationsForConversation(igConv).single()
+        assertEquals(NotificationCategory.DirectMessage, back.notificationCategory)
+        val summary = reopened.getConversationSummaries(ig).single()
+        assertEquals(NotificationCategory.DirectMessage, summary.category)
+        assertTrue(isConversationSummary(summary))
     }
 
     private fun notification(key: String, post: Long, observed: Long) = ObservedNotification(
