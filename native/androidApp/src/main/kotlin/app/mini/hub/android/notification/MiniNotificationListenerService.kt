@@ -109,13 +109,16 @@ class MiniNotificationListenerService : NotificationListenerService() {
         val subText = extras?.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
         val lines = extras?.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
             ?.mapNotNull { it?.toString() } ?: emptyList()
-        val isGroup = extras?.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false) ?: false
+        val isGroupConversation = extras?.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false) ?: false
+        val messagingStyle = androidx.core.app.NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(notification)
+        val hasMessagingStyle = messagingStyle != null && messagingStyle.messages.isNotEmpty()
         // Carry caller-supplied correlation ID if present (set by SyntheticNotificationReceiver)
         val correlationId = extras?.getString("mini_correlation_id")
 
         val textFragments = buildList {
             if (bigText != null && bigText != text) add(bigText)
             addAll(lines)
+            messagingStyle?.messages?.mapNotNull { it.text?.toString() }?.let { addAll(it) }
             if (isEmpty() && text.isNotBlank()) add(text)
         }
 
@@ -127,10 +130,12 @@ class MiniNotificationListenerService : NotificationListenerService() {
             postTimeMillis = sbn.postTime,
             senderHint = title ?: subText ?: pkg,
             title = title,
-            text = text.ifBlank { bigText ?: "" },
+            text = text.ifBlank { bigText ?: messagingStyle?.messages?.lastOrNull()?.text?.toString() ?: "" },
             subText = subText,
-            textFragments = textFragments,
-            isGroupSummary = (notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0 || isGroup,
+            textFragments = textFragments.distinct(),
+            isGroupSummary = (notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0,
+            isGroupConversation = isGroupConversation || messagingStyle?.isGroupConversation == true,
+            hasMessagingStyle = hasMessagingStyle,
             isOngoing = sbn.isOngoing,
             category = notification.category,
             isRemoved = false,

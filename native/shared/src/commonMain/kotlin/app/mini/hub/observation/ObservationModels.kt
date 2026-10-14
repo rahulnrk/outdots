@@ -77,6 +77,8 @@ data class NotificationRawPayload(
     val subText: String? = null,
     val textFragments: List<String> = emptyList(),
     val isGroupSummary: Boolean = false,
+    val isGroupConversation: Boolean = false,
+    val hasMessagingStyle: Boolean = false,
     val isOngoing: Boolean = false,
     val category: String? = null,
     val appLabel: String? = null,

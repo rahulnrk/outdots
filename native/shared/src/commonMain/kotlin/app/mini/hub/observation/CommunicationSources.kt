@@ -98,18 +98,17 @@ class CommunicationSourcePolicy(
     fun sourceForPackage(packageId: String): CommunicationSource? =
         CommunicationSource.forExactPackage(packageId)
 
-    fun isEligible(payload: NotificationRawPayload): Boolean =
-        payload.tag == "synthetic_test" ||
-            (isEligiblePackage(payload.packageId) && isCommunicationPayload(payload) &&
-                (payload.packageId != "com.linkedin.android" ||
-                    isLinkedInCommunication(payload) ||
-                    classifyLinkedInActivity(payload)?.let { it in selectedLinkedInActivities() } == true))
-
-    /** LinkedIn publishes many non-conversation notifications through the same app package. */
-    private fun isCommunicationPayload(payload: NotificationRawPayload): Boolean =
-        payload.packageId != "com.linkedin.android" ||
-            isLinkedInCommunication(payload) ||
-            classifyLinkedInActivity(payload) != null
+    fun isEligible(payload: NotificationRawPayload): Boolean {
+        if (payload.tag == "synthetic_test") return true
+        if (!isEligiblePackage(payload.packageId)) return false
+        if (payload.isRemoved) return true
+        return when (classifyCommunication(payload)) {
+            CommunicationKind.ConversationMessage -> true
+            CommunicationKind.LinkedInActivity ->
+                classifyLinkedInActivity(payload)?.let { it in selectedLinkedInActivities() } == true
+            CommunicationKind.NotCommunication -> false
+        }
+    }
 
     fun isEligiblePackage(packageId: String): Boolean {
         val source = sourceForPackage(packageId) ?: return false
@@ -125,48 +124,4 @@ class CommunicationSourcePolicy(
         packageId.startsWith(CommunicationSource.API_PACKAGE_PREFIX) || isEligiblePackage(packageId)
 
     fun selected(): Set<CommunicationSource> = selectedSources()
-}
-
-/** Classifies only known LinkedIn non-message notification families. Unknown activity is ignored. */
-fun classifyLinkedInActivity(payload: NotificationRawPayload): LinkedInActivityType? {
-    if (payload.packageId != "com.linkedin.android") return null
-    val haystack = listOf(payload.category, payload.title, payload.subText, payload.text)
-        .filterNotNull()
-        .joinToString(" ")
-        .trim()
-        .lowercase()
-    if (haystack.isBlank() || isLinkedInCommunication(payload)) return null
-    return when {
-        "connection request" in haystack || "invitation" in haystack || "connect with" in haystack -> LinkedInActivityType.ConnectionRequests
-        "job" in haystack || "jobs" in haystack || "hiring" in haystack || "applicant" in haystack -> LinkedInActivityType.Jobs
-        "post" in haystack || "comment" in haystack || "article" in haystack -> LinkedInActivityType.Posts
-        "like" in haystack || "reaction" in haystack || "reposted" in haystack || "mentioned" in haystack -> LinkedInActivityType.Reactions
-        "profile" in haystack || "birthday" in haystack || "follow" in haystack || "followers" in haystack -> LinkedInActivityType.ProfileAlerts
-        else -> null
-    }
-}
-
-/**
- * Conservative notification classifier for personal LinkedIn testing.
- *
- * LinkedIn does not expose a personal inbox API to MINI, so only notifications that visibly look
- * like a message are admitted. Connection, job, post, reaction and profile notifications remain
- * outside the communication history. Unknown notifications are intentionally excluded rather
- * than silently presenting them as conversations.
- */
-internal fun isLinkedInCommunication(payload: NotificationRawPayload): Boolean {
-    val haystack = listOf(payload.category, payload.title, payload.subText, payload.text)
-        .filterNotNull()
-        .joinToString(" ")
-        .trim()
-        .lowercase()
-    if (payload.category.equals("msg", ignoreCase = true) || payload.category.equals("message", ignoreCase = true)) return true
-    if (haystack.isBlank()) return false
-    val nonCommunication = listOf(
-        "connection request", "people you may know", "job", "jobs", "hiring", "post",
-        "comment", "like", "reaction", "profile", "birthday", "follow",
-    )
-    if (nonCommunication.any { it in haystack }) return false
-    return listOf("message", "messaged", "sent you", "replied", "reply", "inmail", "in mail", "conversation")
-        .any { it in haystack }
 }

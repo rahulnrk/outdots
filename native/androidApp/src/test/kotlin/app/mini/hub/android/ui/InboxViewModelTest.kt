@@ -360,4 +360,55 @@ class InboxViewModelTest {
         assertTrue(vm.laterPresets().size >= 3)
         assertTrue(vm.laterPresets().all { it.second.epochMillis > clock.now().epochMillis })
     }
+
+    @Test
+    fun doneConversationLeavesActiveInboxAndFocusUntilUndo() {
+        val obsStore = InMemoryObservationStore()
+        val attentionStore = InMemoryAttentionStore()
+        val vm = InboxViewModel(obsStore, ScopedRetrievalEngine(obsStore), AdaptiveStyleEngine(), ActionController(clock, digest, DomainActionIdGenerator(idGen)), InMemoryActionStore(), clock, attentionStore)
+        obsStore.persistObservation(
+            ObservedNotification(
+                id = ScopedId(account, ScopedId.Kind.OBSERVATION, "obs_done"), accountId = account, conversationId = convId,
+                packageId = "com.whatsapp", notificationKey = "notif_done", notificationId = 41, tag = null,
+                senderHint = "Alice", title = "Alice", textFragments = listOf("Hi"), rawTextDigest = "digest_done",
+                observedAt = clock.now(), postTime = clock.now(), revision = 1L, isRemoved = false, isGroupSummary = false,
+                truncationState = TruncationState.Complete, correlationConfidence = CorrelationConfidence.High,
+                provenance = ObservationProvenance.AndroidNotificationListener,
+            ),
+        )
+        vm.refresh(true, true)
+        assertEquals(1, vm.state.value.conversations.size)
+        assertEquals(1, vm.state.value.attentionView?.needsAttention?.size)
+        vm.applyAttentionAction(convId, AttentionAction.MarkDone)
+        assertEquals(FollowUpStatus.Done, vm.state.value.attentionRecords[convId.key]?.status)
+        assertTrue(vm.state.value.attentionView?.needsAttention.orEmpty().isEmpty())
+        assertEquals(1, vm.state.value.attentionView?.done?.size)
+        vm.undoLastAttention()
+        assertEquals(FollowUpStatus.NeedsAttention, vm.state.value.attentionRecords[convId.key]?.status)
+        assertEquals(1, vm.state.value.attentionView?.needsAttention?.size)
+    }
+
+    @Test
+    fun linkedinJobsStayInActivityNotInbox() {
+        val obsStore = InMemoryObservationStore()
+        val vm = InboxViewModel(obsStore, ScopedRetrievalEngine(obsStore), AdaptiveStyleEngine(), ActionController(clock, digest, DomainActionIdGenerator(idGen)), InMemoryActionStore(), clock, InMemoryAttentionStore())
+        val linkedin = AccountId(Provider.LINKEDIN, "local_user")
+        val jobId = ScopedId(linkedin, ScopedId.Kind.CONVERSATION, "li_activity_job")
+        obsStore.persistObservation(
+            ObservedNotification(
+                id = ScopedId(linkedin, ScopedId.Kind.OBSERVATION, "obs_job"), accountId = linkedin, conversationId = jobId,
+                packageId = "com.linkedin.android", notificationKey = "notif_job", notificationId = 9, tag = null,
+                senderHint = "LinkedIn", title = "Job alert", textFragments = listOf("12 new roles for you"), rawTextDigest = "digest_job",
+                observedAt = clock.now(), postTime = clock.now(), revision = 1L, isRemoved = false, isGroupSummary = false,
+                truncationState = TruncationState.Complete, correlationConfidence = CorrelationConfidence.High,
+                provenance = ObservationProvenance.AndroidNotificationListener,
+            ),
+        )
+        vm.refresh(true, true)
+        assertTrue(vm.state.value.conversations.none { it.conversationId == jobId })
+        assertTrue(vm.state.value.linkedinActivity.any { it.conversationId == jobId })
+        vm.applyAttentionAction(jobId, AttentionAction.MarkDone)
+        assertEquals(FollowUpStatus.Done, vm.state.value.attentionRecords[jobId.key]?.status)
+        assertTrue(vm.state.value.linkedinActivity.any { it.conversationId == jobId })
+    }
 }

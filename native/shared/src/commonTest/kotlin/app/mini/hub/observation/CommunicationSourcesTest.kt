@@ -98,4 +98,65 @@ class CommunicationSourcesTest {
         assertEquals(NotificationCategory.DirectMessage, normalizer.deriveNotificationCategory(payload("com.linkedin.android").copy(title = "New message from Alex", text = "Can we talk?")))
         assertTrue(observation.conversationId.value.endsWith("Alex"))
     }
+
+    @Test
+    fun mixedBatchKeepsMessagesAndDropsNonCommunication() {
+        val policy = CommunicationSourcePolicy(
+            selectedSources = {
+                setOf(
+                    CommunicationSource.WhatsApp,
+                    CommunicationSource.Gmail,
+                    CommunicationSource.Instagram,
+                    CommunicationSource.LinkedIn,
+                )
+            },
+            selectedLinkedInActivities = { emptySet() },
+        )
+        assertTrue(policy.isEligible(payload("com.whatsapp").copy(title = "Alice", text = "On my way", category = "msg")))
+        assertTrue(policy.isEligible(payload("com.google.android.gm").copy(title = "Pat", text = "Invoice attached", category = "email")))
+        assertFalse(policy.isEligible(payload("com.google.android.gm").copy(title = "Gmail", text = "Deals for you", category = "promo")))
+        assertFalse(policy.isEligible(payload("com.whatsapp").copy(title = "WhatsApp", text = "Backup in progress", isOngoing = true)))
+        assertFalse(policy.isEligible(payload("com.whatsapp").copy(title = "Family", text = "5 new messages", isGroupSummary = true, category = "msg")))
+        assertFalse(policy.isEligible(payload("com.instagram.android").copy(title = "Sam", text = "liked your photo", category = "social")))
+        assertTrue(policy.isEligible(payload("com.instagram.android").copy(title = "Sam", text = "Are you free?", hasMessagingStyle = true, category = "msg")))
+        assertTrue(policy.isEligible(payload("com.linkedin.android").copy(title = "New message from Alex", text = "Can we talk about the job?")))
+        assertFalse(policy.isEligible(payload("com.linkedin.android").copy(title = "Job alert", text = "12 new roles for you")))
+        assertEquals(
+            CommunicationKind.ConversationMessage,
+            classifyCommunication(payload("com.linkedin.android").copy(title = "New message from Alex", text = "Did you see my post?")),
+        )
+    }
+
+    @Test
+    fun linkedinActivityStaysOutOfConversationSummaries() {
+        val job = ConversationObservationSummary(
+            conversationId = app.mini.hub.domain.ScopedId(app.mini.hub.domain.AccountId(app.mini.hub.domain.Provider.LINKEDIN, "local_user"), app.mini.hub.domain.ScopedId.Kind.CONVERSATION, "li_activity_1"),
+            accountId = app.mini.hub.domain.AccountId(app.mini.hub.domain.Provider.LINKEDIN, "local_user"),
+            title = "Job alert",
+            appName = "LinkedIn",
+            senderHint = "LinkedIn",
+            packageId = "com.linkedin.android",
+            latestSnippet = "12 new roles for you",
+            category = NotificationCategory.SocialUpdate,
+            coverage = ConversationCoverage.NotificationOnly,
+            coverageExplanation = "notification",
+            latestEventAt = clock.now(),
+            observationCount = 1,
+            unreadCount = 1,
+            isRemoved = false,
+        )
+        val dm = job.copy(
+            conversationId = app.mini.hub.domain.ScopedId(job.accountId, app.mini.hub.domain.ScopedId.Kind.CONVERSATION, "Alex"),
+            title = "New message from Alex",
+            latestSnippet = "Can we talk?",
+            category = NotificationCategory.DirectMessage,
+        )
+        assertTrue(isLinkedInActivitySummary(job))
+        assertFalse(isConversationSummary(job))
+        assertTrue(isConversationSummary(dm))
+        assertEquals(
+            linkedInActivityConversationValue("Job alert", "12 new roles"),
+            linkedInActivityConversationValue("Job alert", "12 new roles"),
+        )
+    }
 }

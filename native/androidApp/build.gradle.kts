@@ -87,6 +87,7 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
     implementation(libs.compose.ui.tooling.preview)
+    debugImplementation("androidx.compose.ui:ui-tooling")
     implementation(libs.activity.compose)
     implementation(libs.mediapipe.tasks.genai)
     val whatsappJar = rootProject.file("whatsappRuntime/build/aar-extract/classes.jar")

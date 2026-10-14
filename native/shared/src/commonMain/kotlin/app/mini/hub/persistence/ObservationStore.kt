@@ -8,6 +8,7 @@ import app.mini.hub.observation.ConversationObservationSummary
 import app.mini.hub.observation.IngestCursor
 import app.mini.hub.observation.NotificationCategory
 import app.mini.hub.observation.ObservedNotification
+import app.mini.hub.observation.categoryForStoredObservation
 import app.mini.hub.observation.coverageExplanationFor
 import app.mini.hub.observation.coverageFor
 
@@ -124,14 +125,7 @@ class InMemoryObservationStore : ObservationStore {
         val gapCount = cursors[observation.packageId]?.gapCount ?: 0L
         val coverageExplanation = coverageExplanationFor(observation.provenance, gapCount)
 
-        val category = when {
-            observation.isOngoing -> NotificationCategory.OngoingService
-            observation.isGroupSummary -> NotificationCategory.GroupMessage
-            observation.packageId.contains("twitter") || observation.packageId.contains("instagram") -> NotificationCategory.SocialUpdate
-            observation.packageId == "android" || observation.packageId.startsWith("com.android.systemui") -> NotificationCategory.SystemStatus
-            observation.packageId.contains("whatsapp") || observation.packageId.contains("orca") -> NotificationCategory.DirectMessage
-            else -> NotificationCategory.GeneralNotification
-        }
+        val category = categoryForStoredObservation(observation)
 
         val appName = app.mini.hub.observation.SourceAppNames.forPackage(observation.packageId)
 

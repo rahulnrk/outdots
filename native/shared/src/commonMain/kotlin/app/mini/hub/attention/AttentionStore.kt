@@ -65,6 +65,7 @@ object AttentionReconciler {
         stored: Map<String, ConversationAttention>,
         summaries: List<ConversationObservationSummary>,
         now: UtcInstant,
+        resurfaceOnNewActivity: (ConversationObservationSummary) -> Boolean = { true },
     ): AttentionReconciliation {
         val result = LinkedHashMap(stored)
         val changed = mutableListOf<ConversationAttention>()
@@ -72,7 +73,7 @@ object AttentionReconciler {
             val key = summary.conversationId.key
             val existing = stored[key]
             val base = existing ?: AttentionRules.default(summary.conversationId, now)
-            val next = AttentionRules.reconcile(base, summary.latestEventAt, now)
+            val next = AttentionRules.reconcile(base, summary.latestEventAt, now, resurfaceOnNewActivity(summary))
             result[key] = next
             // Defaults are not written until something meaningful changes or the user chooses.
             if (existing != null && next != existing) changed += next

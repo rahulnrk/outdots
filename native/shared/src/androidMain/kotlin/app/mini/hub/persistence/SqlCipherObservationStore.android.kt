@@ -15,6 +15,7 @@ import app.mini.hub.observation.IngestCursor
 import app.mini.hub.observation.NotificationCategory
 import app.mini.hub.observation.ObservationProvenance
 import app.mini.hub.observation.ObservedNotification
+import app.mini.hub.observation.categoryForStoredObservation
 import app.mini.hub.observation.coverageExplanationFor
 import app.mini.hub.observation.coverageFor
 import app.mini.hub.observation.TruncationState
@@ -419,14 +420,7 @@ class SqlCipherObservationStore(
 
         val appName = app.mini.hub.observation.SourceAppNames.forPackage(obs.packageId)
 
-        val notifCategory = when {
-            obs.isOngoing -> NotificationCategory.OngoingService
-            obs.isGroupSummary -> NotificationCategory.GroupMessage
-            obs.packageId.contains("twitter") || obs.packageId.contains("instagram") -> NotificationCategory.SocialUpdate
-            obs.packageId == "android" || obs.packageId.startsWith("com.android.systemui") -> NotificationCategory.SystemStatus
-            obs.packageId.contains("whatsapp") || obs.packageId.contains("orca") -> NotificationCategory.DirectMessage
-            else -> NotificationCategory.GeneralNotification
-        }
+        val notifCategory = categoryForStoredObservation(obs)
 
         // Summary reflects the newest message by provider time, not whichever row was written last
         // (history sync delivers old messages after new ones).

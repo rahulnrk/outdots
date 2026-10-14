@@ -167,22 +167,29 @@ class NotificationNormalizer(
         }
     }
 
-    fun deriveNotificationCategory(payload: NotificationRawPayload): NotificationCategory = when {
-        payload.isOngoing || payload.category == "service" || payload.packageId.contains("whoop", ignoreCase = true) ->
-            NotificationCategory.OngoingService
-        payload.packageId == "com.linkedin.android" && isLinkedInCommunication(payload) ->
-            if (payload.isGroupSummary) NotificationCategory.GroupMessage else NotificationCategory.DirectMessage
-        payload.category == "msg" || payload.category == "message" ||
-            payload.packageId.contains("whatsapp", ignoreCase = true) ||
-            payload.packageId.contains("facebook.orca", ignoreCase = true) ->
-            if (payload.isGroupSummary) NotificationCategory.GroupMessage else NotificationCategory.DirectMessage
-        payload.category == "social" || payload.packageId.contains("twitter", ignoreCase = true) ||
-            payload.packageId.contains("instagram", ignoreCase = true) ||
-            payload.packageId.contains("facebook", ignoreCase = true) ->
-            NotificationCategory.SocialUpdate
-        payload.category == "sys" || payload.packageId == "android" || payload.packageId.startsWith("com.android.systemui") ->
-            NotificationCategory.SystemStatus
-        else -> NotificationCategory.GeneralNotification
+    fun deriveNotificationCategory(payload: NotificationRawPayload): NotificationCategory {
+        if (payload.isOngoing || payload.category == "service" || payload.packageId.contains("whoop", ignoreCase = true)) {
+            return NotificationCategory.OngoingService
+        }
+        if (payload.isGroupSummary) return NotificationCategory.GroupMessage
+        if (payload.category == "sys" || payload.packageId == "android" || payload.packageId.startsWith("com.android.systemui")) {
+            return NotificationCategory.SystemStatus
+        }
+        val kind = classifyCommunication(payload)
+        val grouped = payload.isGroupSummary || payload.isGroupConversation
+        return when (kind) {
+            CommunicationKind.ConversationMessage ->
+                if (grouped) NotificationCategory.GroupMessage else NotificationCategory.DirectMessage
+            CommunicationKind.LinkedInActivity -> NotificationCategory.SocialUpdate
+            CommunicationKind.NotCommunication -> when {
+                payload.category == "social" ||
+                    payload.packageId.contains("twitter", ignoreCase = true) ||
+                    payload.packageId.contains("instagram", ignoreCase = true) ||
+                    payload.packageId.contains("facebook", ignoreCase = true) ->
+                    NotificationCategory.SocialUpdate
+                else -> NotificationCategory.GeneralNotification
+            }
+        }
     }
 
     private fun deriveDisplayTitle(payload: NotificationRawPayload, appName: String, category: NotificationCategory): String {
@@ -207,6 +214,9 @@ class NotificationNormalizer(
     }
 
     private fun deriveConversationKey(payload: NotificationRawPayload, appName: String, category: NotificationCategory): String {
+        if (classifyCommunication(payload) == CommunicationKind.LinkedInActivity) {
+            return linkedInActivityConversationValue(payload.title, payload.text)
+        }
         // Direct messages and group messages group by thread / sender
         if (category == NotificationCategory.DirectMessage || category == NotificationCategory.GroupMessage) {
             val titleSource = if (providerForPayload(payload) == Provider.LINKEDIN) {

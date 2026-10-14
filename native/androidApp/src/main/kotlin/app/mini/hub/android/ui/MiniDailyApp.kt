@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -81,7 +82,7 @@ fun MiniDailyApp(
     onSyncNow: () -> Unit,
     capabilities: (ConnectedAccount) -> app.mini.hub.connector.CapabilitySnapshot?,
     thread: @Composable () -> Unit,
-    extraList: @Composable () -> Unit,
+    extraList: @Composable () -> Unit = {},
 ) {
     var tab by rememberSaveable { mutableStateOf(MiniTab.Inbox.name) }
     val current = MiniTab.valueOf(tab)
@@ -114,7 +115,6 @@ fun MiniDailyApp(
                         labels = labels,
                         onCompose = onCompose,
                         onRequestPermission = onRequestPermission,
-                        extraList = extraList,
                     )
                     MiniTab.Focus -> MiniFocusPane(
                         state = state,
@@ -203,7 +203,7 @@ private fun MiniBottomBar(current: MiniTab, onSelect: (MiniTab) -> Unit) {
 }
 
 @Composable
-private fun MiniInboxPane(
+private fun UnusedOldInboxPane(
     state: InboxViewState,
     viewModel: InboxViewModel,
     accountStore: ConnectedAccountStore,
@@ -267,14 +267,14 @@ private fun MiniInboxPane(
             }
         }
         if (!state.isPermissionGranted) {
-            MiniBanner(
+            UnusedMiniBanner(
                 title = "Notification access needed",
                 body = "MINI can still show connected accounts. Grant access to capture notifications.",
                 action = "Open settings",
                 onAction = onRequestPermission,
             )
         } else if (!state.isListenerConnected) {
-            MiniBanner(
+            UnusedMiniBanner(
                 title = "Notification listener idle",
                 body = "New notifications aren't being saved until the listener is connected.",
                 action = "Fix",
@@ -282,7 +282,7 @@ private fun MiniInboxPane(
             )
         }
         state.storageFailure?.let {
-            MiniBanner(title = "Storage error", body = it, action = null, onAction = {})
+            UnusedMiniBanner(title = "Storage error", body = it, action = null, onAction = {})
         }
         extraList()
         val chats = state.conversations
@@ -303,7 +303,7 @@ private fun MiniInboxPane(
                     }
                 }
                 items(chats, key = { it.conversationId.key }) { conv ->
-                    MiniPeopleRow(
+                    UnusedMiniPeopleRow(
                         conv = conv,
                         label = labels[conv.conversationId.key],
                         attention = state.attentionRecords[conv.conversationId.key],
@@ -335,7 +335,7 @@ private fun MiniInboxPane(
 }
 
 @Composable
-private fun MiniPeopleRow(
+private fun UnusedMiniPeopleRow(
     conv: ConversationObservationSummary,
     label: String?,
     attention: app.mini.hub.attention.ConversationAttention?,
@@ -406,6 +406,8 @@ private fun MiniFocusPane(
     accountStore: ConnectedAccountStore,
     labels: Map<String, String>,
 ) {
+    val context = LocalContext.current
+    val seen = remember { LocalSeenStore(context) }
     var section by rememberSaveable { mutableStateOf("needs") }
     var laterFor by remember { mutableStateOf<AttentionEntry?>(null) }
     val view = state.attentionView
@@ -431,10 +433,10 @@ private fun MiniFocusPane(
         if (state.canUndoAttention) {
             TextButton(onClick = { viewModel.undoLastAttention() }) { Text("Undo last attention change") }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(top = 12.dp)) {
-            FocusTab("Needs you ${needs.size}", section == "needs") { section = "needs" }
-            FocusTab("Waiting ${waiting.size}", section == "waiting") { section = "waiting" }
-            FocusTab("Later ${later.size}", section == "later") { section = "later" }
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+            FocusTab("Needs you ${needs.size}", section == "needs", Modifier.weight(1f)) { section = "needs" }
+            FocusTab("Waiting ${waiting.size}", section == "waiting", Modifier.weight(1f)) { section = "waiting" }
+            FocusTab("Later ${later.size}", section == "later", Modifier.weight(1f)) { section = "later" }
         }
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
         if (!state.isListenerConnected) {
@@ -463,9 +465,12 @@ private fun MiniFocusPane(
                     MiniFocusCard(
                         entry = entry,
                         understanding = state.understanding[entry.summary.conversationId.key],
-                        accountAlias = accountAlias(accountStore.get(entry.summary.accountId), entry.summary),
+                        accountAlias = inboxAccountAlias(accountStore.get(entry.summary.accountId), entry.summary),
                         category = labels[entry.summary.conversationId.key],
-                        onReply = { viewModel.selectConversation(entry.summary) },
+                        onReply = {
+                            seen.markSeen(entry.summary.conversationId.key, entry.summary.latestEventAt.epochMillis)
+                            viewModel.selectConversation(entry.summary)
+                        },
                         onLater = { laterFor = entry },
                         onDone = { viewModel.applyAttentionAction(entry.summary.conversationId, AttentionAction.MarkDone) },
                         onWaiting = { viewModel.applyAttentionAction(entry.summary.conversationId, AttentionAction.MarkWaiting) },
@@ -495,9 +500,15 @@ private fun MiniFocusPane(
 }
 
 @Composable
-private fun FocusTab(label: String, selected: Boolean, onClick: () -> Unit) {
-    Column(modifier = Modifier.clickable(onClick = onClick).padding(bottom = 4.dp)) {
-        Text(label, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+private fun FocusTab(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Column(
+        modifier = modifier
+            .heightIn(min = MiniInk.primaryTarget.dp)
+            .clickable(onClick = onClick)
+            .padding(bottom = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(label, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
         Box(
             Modifier
                 .padding(top = 4.dp)
@@ -531,17 +542,17 @@ private fun MiniFocusCard(
             Box(
                 Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center,
-            ) { Text(initials(entry.summary.title), fontWeight = FontWeight.Bold) }
+            ) { Text(inboxInitials(entry.summary.title), fontWeight = FontWeight.Bold) }
             Spacer(Modifier.size(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(entry.summary.title, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "$accountAlias${category?.let { " · $it" } ?: ""} · ${timeLabel(entry.summary.latestEventAt.epochMillis)}",
+                    "$accountAlias${category?.let { " · $it" } ?: ""} · ${inboxTimeLabel(entry.summary.latestEventAt.epochMillis)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            attentionChip(entry.attention)
+            MiniAttentionChip(entry.attention)
         }
         Spacer(Modifier.height(8.dp))
         Text(understanding?.explanation ?: entry.summary.latestSnippet, style = MaterialTheme.typography.bodyMedium)
@@ -618,10 +629,12 @@ private fun MiniConsolePane(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("${account.id.provider.wire} · ${account.displayName ?: account.providerAccountId}", style = MaterialTheme.typography.titleMedium)
+                        account.userActionRequired?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+                        }
+                        Text(lastCheckLabel(account), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
-                            account.userActionRequired
-                                ?: cap?.let { "Reply ${if (it.enabled.contains(app.mini.hub.connector.Capability.Reply)) "available" else "off"}" }
-                                ?: lastCheckLabel(account),
+                            "Reply ${if (cap?.enabled?.contains(app.mini.hub.connector.Capability.Reply) == true) "available" else "off"}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -664,7 +677,7 @@ private fun MiniConsolePane(
 }
 
 @Composable
-private fun MiniBanner(title: String, body: String, action: String?, onAction: () -> Unit) {
+private fun UnusedMiniBanner(title: String, body: String, action: String?, onAction: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()

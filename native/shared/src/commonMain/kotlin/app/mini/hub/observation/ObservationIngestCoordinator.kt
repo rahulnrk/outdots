@@ -62,6 +62,13 @@ class ObservationIngestCoordinator(
         return try {
             val normalized = normalizer.normalize(payload, clock.now())
             ledger?.record(lk, PipelineStage.Normalized, clock.now().epochMillis)
+            if (!payload.isRemoved && classifyCommunication(payload) == CommunicationKind.LinkedInActivity) {
+                val existingActivity = store.getObservationsForConversation(normalized.conversationId)
+                if (existingActivity.any { !it.isRemoved }) {
+                    ledger?.record(lk, PipelineStage.DeduplicatedDrop, clock.now().epochMillis)
+                    return IngestProcessResult.DuplicateIgnored(normalized.notificationKey)
+                }
+            }
             val action = deduplicator.evaluate(normalized)
 
             when (action) {

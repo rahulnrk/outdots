@@ -17,6 +17,7 @@ data class InboxViewState(
     val isPermissionGranted: Boolean = false,
     val isListenerConnected: Boolean = false,
     val conversations: List<ConversationObservationSummary> = emptyList(),
+    val linkedinActivity: List<ConversationObservationSummary> = emptyList(),
     val attentionView: AttentionView? = null,
     val attentionRecords: Map<String, ConversationAttention> = emptyMap(),
     val understanding: Map<String, MessageUnderstanding> = emptyMap(),

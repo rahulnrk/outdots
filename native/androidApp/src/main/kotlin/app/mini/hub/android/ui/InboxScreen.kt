@@ -561,7 +561,7 @@ private fun CommunicationSourceSettingsDialog(
                         Spacer(modifier = Modifier.height(6.dp))
                         Text("LinkedIn activity", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                         Text(
-                            "Messages always appear in Chats. Choose which non-message activity appears in Notifications.",
+                            "Messages always appear in Inbox. Non-message activity is off by default and opens from Inbox → Activity.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

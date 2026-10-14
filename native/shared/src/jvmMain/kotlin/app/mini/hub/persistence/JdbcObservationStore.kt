@@ -12,6 +12,7 @@ import app.mini.hub.observation.ObservationProvenance
 import app.mini.hub.observation.ObservedNotification
 import app.mini.hub.observation.SourceAppNames
 import app.mini.hub.observation.TruncationState
+import app.mini.hub.observation.categoryForStoredObservation
 import app.mini.hub.observation.coverageExplanationFor
 import app.mini.hub.observation.coverageFor
 import java.sql.Connection
@@ -375,14 +376,7 @@ class JdbcObservationStore(path: String) : ObservationStore {
         ).use { it.executeUpdate() }
     }
 
-    private fun categoryOf(obs: ObservedNotification): NotificationCategory = when {
-        obs.isOngoing -> NotificationCategory.OngoingService
-        obs.isGroupSummary -> NotificationCategory.GroupMessage
-        obs.packageId.contains("twitter") || obs.packageId.contains("instagram") -> NotificationCategory.SocialUpdate
-        obs.packageId == "android" || obs.packageId.startsWith("com.android.systemui") -> NotificationCategory.SystemStatus
-        obs.packageId.contains("whatsapp") || obs.packageId.contains("orca") -> NotificationCategory.DirectMessage
-        else -> NotificationCategory.GeneralNotification
-    }
+    private fun categoryOf(obs: ObservedNotification): NotificationCategory = categoryForStoredObservation(obs)
 
     private fun prepare(sql: String, vararg args: Any?): PreparedStatement {
         val ps = connection.prepareStatement(sql)

@@ -91,8 +91,13 @@ object AttentionRules {
     }
 
     /** Applies automatic transitions. Returns the same instance when nothing changes. */
-    fun reconcile(record: ConversationAttention, latestActivityAt: UtcInstant?, now: UtcInstant): ConversationAttention {
-        val newActivity = hasNewActivity(record, latestActivityAt)
+    fun reconcile(
+        record: ConversationAttention,
+        latestActivityAt: UtcInstant?,
+        now: UtcInstant,
+        resurfaceOnNewActivity: Boolean = true,
+    ): ConversationAttention {
+        val newActivity = resurfaceOnNewActivity && hasNewActivity(record, latestActivityAt)
         return when (record.status) {
             FollowUpStatus.NeedsAttention -> record
             FollowUpStatus.Waiting -> if (!newActivity) record else record.copy(
@@ -171,11 +176,12 @@ data class AttentionEntry(
     val attention: ConversationAttention,
 )
 
-/** Attention view grouping. Done conversations remain available in the chronological inbox. */
+/** Attention view grouping. Done conversations remain available in archived history. */
 data class AttentionView(
     val needsAttention: List<AttentionEntry>,
     val waiting: List<AttentionEntry>,
     val snoozed: List<AttentionEntry>,
+    val done: List<AttentionEntry> = emptyList(),
 ) {
     val isEmpty: Boolean get() = needsAttention.isEmpty() && waiting.isEmpty() && snoozed.isEmpty()
 
@@ -197,6 +203,8 @@ data class AttentionView(
                     ),
                 snoozed = entries.filter { it.attention.status == FollowUpStatus.Snoozed }
                     .sortedWith(compareBy<AttentionEntry> { it.attention.snoozedUntil?.epochMillis ?: Long.MAX_VALUE }.then(byRecency)),
+                done = entries.filter { it.attention.status == FollowUpStatus.Done }
+                    .sortedWith(byRecency),
             )
         }
     }

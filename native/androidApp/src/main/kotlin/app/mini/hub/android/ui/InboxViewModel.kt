@@ -76,10 +76,13 @@ class InboxViewModel(
     private val conversationLoader: ((ConversationObservationSummary) -> List<app.mini.hub.observation.ObservedNotification>?)? = null,
     /** Runs provider sends off the main thread. Tests inject a deterministic runner. */
     private val sendRunner: (Runnable) -> Unit = { r -> Thread(r, "mini-send").start() },
+    /**
+     * Local MINI seen watermark. Opening a chat marks it seen here and never as a provider read.
+     */
+    private val markConversationSeen: (String, Long) -> Unit = { _, _ -> },
     /** Runs refresh store reads off the main thread. Tests inject a deterministic runner; null = default. */
     refreshRunner: ((Runnable) -> Unit)? = null,
 ) {
-    /** Monotonic token: a refresh result older than the latest request is dropped. */
     private var refreshGeneration = 0L
     /** Understanding cache keyed by conversation, valid while its change signature is unchanged. */
     private val understandingCache = HashMap<String, Pair<String, MessageUnderstanding>>()
@@ -151,6 +154,7 @@ class InboxViewModel(
 
     private class RefreshResult(
         val summaries: List<ConversationObservationSummary>,
+        val activity: List<ConversationObservationSummary>,
         val records: Map<String, app.mini.hub.attention.ConversationAttention>,
         val failure: String?,
         val view: AttentionView,
@@ -173,12 +177,16 @@ class InboxViewModel(
                 all.filterNot { it.coverage == app.mini.hub.observation.ConversationCoverage.NotificationOnly && it.accountId.provider in linked }
             }
             .filterNot { it.latestSnippet.isBlank() && it.observationCount <= 1 }
+        val conversations = summaries.filter { app.mini.hub.observation.isConversationSummary(it) }
+        val activity = summaries.filter { app.mini.hub.observation.isLinkedInActivitySummary(it) }
         val loadResult = attentionStore.loadAll()
 
         var failure: String? = null
         var records = previousRecords
         if (loadResult is AttentionStoreResult.Ok) {
-            val rec = AttentionReconciler.reconcile(loadResult.value, summaries, clock.now())
+            val rec = AttentionReconciler.reconcile(loadResult.value, summaries, clock.now()) {
+                app.mini.hub.observation.isConversationSummary(it)
+            }
             records = rec.records
             if (rec.changed.isNotEmpty()) {
                 val saveResult = attentionStore.saveAll(rec.changed)
@@ -190,14 +198,14 @@ class InboxViewModel(
             failure = loadResult.message
         }
 
-        val entries = summaries.map {
+        val entries = conversations.map {
             AttentionEntry(it, records[it.conversationId.key] ?: AttentionRules.default(it.conversationId, clock.now()))
         }
         val view = AttentionView.build(entries)
         // Re-read a conversation's messages only when its summary or attention record changed.
         val understanding = synchronized(understandingCache) {
-            understandingCache.keys.retainAll(summaries.map { it.conversationId.key }.toSet())
-            summaries.associate { summary ->
+            understandingCache.keys.retainAll(conversations.map { it.conversationId.key }.toSet())
+            conversations.associate { summary ->
                 val key = summary.conversationId.key
                 val record = records[key] ?: AttentionRules.default(summary.conversationId, clock.now())
                 val signature = "${summary.latestEventAt.epochMillis}|${summary.observationCount}|${summary.latestSnippet.hashCode()}|${summary.isRemoved}|$record"
@@ -210,7 +218,7 @@ class InboxViewModel(
             }
         }
         return RefreshResult(
-            summaries, records, failure, view, understanding,
+            conversations, activity, records, failure, view, understanding,
             actionStore.snapshot().reviewedSnapshots,
             draftStore?.listDrafts().orEmpty(),
         )
@@ -219,12 +227,14 @@ class InboxViewModel(
     private fun applyRefresh(result: RefreshResult, isPermissionGranted: Boolean, isListenerConnected: Boolean) {
         val summaries = result.summaries
         val selected = _state.value.selectedConversation?.takeIf { current ->
-            summaries.any { it.conversationId == current.conversationId }
+            summaries.any { it.conversationId == current.conversationId } ||
+                result.activity.any { it.conversationId == current.conversationId }
         }
         _state.value = _state.value.copy(
             isPermissionGranted = isPermissionGranted,
             isListenerConnected = isListenerConnected,
             conversations = summaries,
+            linkedinActivity = result.activity,
             attentionRecords = result.records,
             understanding = result.understanding,
             attentionView = result.view,
@@ -239,7 +249,9 @@ class InboxViewModel(
 
     fun applyAttentionAction(conversationId: app.mini.hub.domain.ScopedId, action: AttentionAction) {
         val existing = _state.value.attentionRecords[conversationId.key] ?: AttentionRules.default(conversationId, clock.now())
-        val decision = AttentionRules.apply(existing, action, _state.value.conversations.find { it.conversationId == conversationId }?.latestEventAt, clock.now())
+        val latest = _state.value.conversations.find { it.conversationId == conversationId }?.latestEventAt
+            ?: _state.value.linkedinActivity.find { it.conversationId == conversationId }?.latestEventAt
+        val decision = AttentionRules.apply(existing, action, latest, clock.now())
         if (decision is app.mini.hub.attention.AttentionDecision.Applied) {
             val saveResult = attentionStore.saveAll(listOf(decision.record))
             if (saveResult is AttentionStoreResult.Failed) {
@@ -264,6 +276,10 @@ class InboxViewModel(
             _state.value = _state.value.copy(canUndoAttention = false)
             refresh(_state.value.isPermissionGranted, _state.value.isListenerConnected)
         }
+    }
+
+    fun reportUserMessage(message: String) {
+        _state.value = _state.value.copy(outboxStatusMessage = message)
     }
 
     fun laterPresets(): List<Pair<String, app.mini.hub.domain.UtcInstant>> {
@@ -318,8 +334,11 @@ class InboxViewModel(
             // Search runs off the main thread; logs contain no query text or message content.
             val query = app.mini.hub.search.SearchQuery(queryText = trimmed, sourceFilter = sourceFilter, limit = 50)
             val rawResults = observationStore.search(query)
-            // Filter out sources that are disabled in settings
-            val filtered = rawResults.filter { it.packageId in enabledSources || it.packageId.startsWith("provider.") }
+            val conversationKeys = _state.value.conversations.map { it.conversationId.key }.toSet()
+            val filtered = rawResults.filter { result ->
+                (result.packageId in enabledSources || result.packageId.startsWith("provider.")) &&
+                    result.conversationId.key in conversationKeys
+            }
             postToMain("search-result") {
                 if (gen != searchGeneration) return@postToMain
                 _state.value = _state.value.copy(searchResults = filtered, isSearching = false)
@@ -537,6 +556,7 @@ class InboxViewModel(
 
         persistCurrentDraft()
         abandonLocalDraft()
+        markConversationSeen(summary.conversationId.key, summary.latestEventAt.epochMillis)
         val draft = loadedDraft(summary.conversationId.key)
         _state.value = _state.value.copy(
             selectedConversation = summary,
