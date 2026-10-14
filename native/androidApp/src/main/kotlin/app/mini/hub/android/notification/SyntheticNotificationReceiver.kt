@@ -186,7 +186,8 @@ class SyntheticNotificationReceiver : BroadcastReceiver() {
                         packageId = context.packageName,
                         notificationId = notifId,
                         tag = SYNTHETIC_TAG,
-                        postTimeMillis = System.currentTimeMillis(),
+                        // Optional fixed post time replays an exact duplicate (same id, text, time).
+                        postTimeMillis = intent.getLongExtra("post_time", 0L).takeIf { it > 0L } ?: System.currentTimeMillis(),
                         senderHint = sender,
                         text = text,
                         correlationId = correlationId,

@@ -77,6 +77,35 @@ class UnifiedSearchTest {
     }
 
     @Test(timeout = 30_000)
+    fun groupedFtsQueryRejectsSnippetButAcceptsAndroidShape() {
+        // The Android store once used snippet() with GROUP BY, which SQLite rejects at runtime,
+        // so every on-device search silently returned nothing. Prove both shapes on real SQLite.
+        val path = File.createTempFile("mini-fts-shape", ".db").apply { delete(); deleteOnExit() }.path
+        java.sql.DriverManager.getConnection("jdbc:sqlite:$path").use { c ->
+            c.createStatement().use { s ->
+                s.execute("CREATE VIRTUAL TABLE obs_fts USING fts5(obs_id UNINDEXED, conversation_key UNINDEXED, body)")
+                s.execute("INSERT INTO obs_fts VALUES ('1','c1','acceptp2 alpha'),('2','c1','acceptp2 beta'),('3','c2','other')")
+            }
+            val bad = runCatching {
+                c.prepareStatement(
+                    "SELECT conversation_key, snippet(obs_fts, 2, '', '', '…', 15) FROM obs_fts WHERE obs_fts MATCH ? GROUP BY conversation_key",
+                ).use { ps -> ps.setString(1, "\"acceptp2\"*"); ps.executeQuery().use { it.next() } }
+            }
+            assertTrue(bad.isFailure, "snippet() in a grouped query must fail on SQLite")
+            c.prepareStatement(
+                "SELECT conversation_key, substr(body, 1, 160) AS s FROM obs_fts WHERE obs_fts MATCH ? GROUP BY conversation_key",
+            ).use { ps ->
+                ps.setString(1, "\"acceptp2\"*")
+                ps.executeQuery().use { rs ->
+                    var n = 0
+                    while (rs.next()) n++
+                    assertEquals(1, n, "one grouped conversation for the query")
+                }
+            }
+        }
+    }
+
+    @Test(timeout = 30_000)
     fun sourceFilterNarrowsResults() {
         for ((name, store) in stores()) {
             store.persistObservation(makeObs(acctGmail, "conv_g", "10", "Quarterly Plan", "Q3 targets", "com.google.android.gm"))

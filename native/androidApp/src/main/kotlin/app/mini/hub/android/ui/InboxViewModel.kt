@@ -82,6 +82,11 @@ class InboxViewModel(
     private val markConversationSeen: (String, Long) -> Unit = { _, _ -> },
     /** Runs refresh store reads off the main thread. Tests inject a deterministic runner; null = default. */
     refreshRunner: ((Runnable) -> Unit)? = null,
+    /**
+     * Extra packages shown in Inbox and search. Debug builds pass MINI's own package so synthetic
+     * acceptance probes are visible. Release builds pass nothing.
+     */
+    private val extraVisiblePackages: Set<String> = emptySet(),
 ) {
     private var refreshGeneration = 0L
     /** Understanding cache keyed by conversation, valid while its change signature is unchanged. */
@@ -167,7 +172,7 @@ class InboxViewModel(
     private fun loadRefresh(previousRecords: Map<String, app.mini.hub.attention.ConversationAttention>): RefreshResult {
         val policy = CommunicationSourcePolicy(selectedSources = selectedSources)
         val summaries = observationStore.getConversationSummaries()
-            .filter { policy.isVisibleInInbox(it.packageId) }
+            .filter { policy.isVisibleInInbox(it.packageId) || it.packageId in extraVisiblePackages }
             .filterNot { isHiddenWhatsAppChat(it.conversationId.value) }
             .let { all ->
                 // When a provider account is linked (WhatsApp, Gmail...), its notification-only copies
@@ -339,7 +344,7 @@ class InboxViewModel(
         }
         val gen = ++searchGeneration
         _state.value = _state.value.copy(isSearching = true)
-        val enabledSources = selectedSources().flatMap { it.packageIds }.toSet()
+        val enabledSources = selectedSources().flatMap { it.packageIds }.toSet() + extraVisiblePackages
         refreshRunner(Runnable {
             // Search runs off the main thread; logs contain no query text or message content.
             val query = app.mini.hub.search.SearchQuery(queryText = trimmed, sourceFilter = sourceFilter, limit = 50)

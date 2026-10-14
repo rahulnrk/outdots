@@ -89,6 +89,7 @@ class MainActivity : ComponentActivity() {
             conversationLoader = { summary ->
                 accountStore.get(summary.accountId)?.let { registry.loadConversation(it, summary.conversationId) }
             },
+            extraVisiblePackages = if (BuildConfig.DEBUG) setOf(packageName) else emptySet(),
         ) })[app.mini.hub.android.ui.InboxViewModelHolder::class.java].viewModel
 
         handoffLauncher = AndroidNativeHandoffLauncher(this)

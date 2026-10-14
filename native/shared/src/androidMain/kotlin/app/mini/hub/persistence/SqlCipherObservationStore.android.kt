@@ -151,9 +151,11 @@ class SqlCipherObservationStore(
             db.execSQL(ObservationSchema.CREATE_FTS_OBSERVATIONS)
             db.execSQL(ObservationSchema.POPULATE_FTS_FROM_EXISTING)
             true
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            android.util.Log.w("MiniSearch", "fts5 unavailable: ${t.javaClass.simpleName}: ${t.message?.take(160)}")
             false
         }
+        android.util.Log.i("MiniSearch", "fts5 supported=$isFts5Supported")
         db
     }
 
@@ -654,19 +656,22 @@ class SqlCipherObservationStore(
         val filterClause = if (query.sourceFilter != null) " AND f.package_id = ?" else ""
         val args = if (query.sourceFilter != null) arrayOf(ftsQuery, query.sourceFilter, query.limit.toString()) else arrayOf(ftsQuery, query.limit.toString())
 
+        // snippet() cannot be used with GROUP BY (SQLite: "unable to use function snippet in the
+        // requested context"), which made every on-device search return nothing. max(post_time)
+        // makes SQLite take the bare columns from the newest matching message per conversation.
         val sql = """
             SELECT o.conversation_key, o.account_key, o.package_id,
                    coalesce(s.title, o.title, o.sender_hint) AS conv_title,
                    o.sender_hint,
-                   snippet(obs_fts, 5, '', '', '…', 15) AS match_snippet,
-                   o.post_time,
+                   substr(f.body, 1, 160) AS match_snippet,
+                   max(o.post_time) AS post_time,
                    coalesce(s.observation_count, 1) AS msg_count
             FROM obs_fts f
             JOIN notification_observations o ON o.id = f.obs_id
             LEFT JOIN conversation_summaries s ON s.conversation_key = o.conversation_key
             WHERE obs_fts MATCH ? AND (o.is_removed = 0 OR o.notification_key NOT LIKE 'provider:%')$filterClause
             GROUP BY o.conversation_key
-            ORDER BY o.post_time DESC
+            ORDER BY post_time DESC
             LIMIT ?
         """.trimIndent()
 
@@ -689,7 +694,9 @@ class SqlCipherObservationStore(
                     }
                 }
             }
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            // Never log query text or content: only the failure type and the SQL error message.
+            android.util.Log.w("MiniSearch", "search failed: ${t.javaClass.simpleName}: ${t.message?.take(160)}")
             emptyList()
         }
     }

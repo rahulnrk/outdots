@@ -248,6 +248,17 @@ fun InboxScreen(
                 var showCcBcc by remember(selectedKey) { mutableStateOf(state.composeCc.isNotBlank() || state.composeBcc.isNotBlank()) }
                 if (state.composeNewTo != null) {
                     val emailKb = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Email)
+                    val fromAccount = state.selectedConversation!!.accountId
+                    val fromLabel = accountStore.get(fromAccount)?.let { it.providerAccountId.ifBlank { it.displayName ?: "" } }
+                        ?.ifBlank { null } ?: fromAccount.localId
+                    // Several mail accounts can be connected. Always show which one a new email or
+                    // restored draft belongs to, so the sender is never ambiguous.
+                    Text(
+                        "From: $fromLabel",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+                    )
                     OutlinedTextField(state.composeNewTo!!, { viewModel.updateComposeTo(it) }, label = { Text("To (comma separated)") }, singleLine = true, keyboardOptions = emailKb, modifier = Modifier.fillMaxWidth())
                     if (showCcBcc) {
                         OutlinedTextField(state.composeCc, { viewModel.updateComposeCc(it) }, label = { Text("Cc") }, singleLine = true, keyboardOptions = emailKb, modifier = Modifier.fillMaxWidth())
