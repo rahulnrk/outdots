@@ -159,4 +159,66 @@ class CommunicationSourcesTest {
             linkedInActivityConversationValue("Job alert", "12 new roles"),
         )
     }
+
+    @Test
+    fun acceptedDirectMessagesSurvivePersistAndSummaryRebuild() {
+        val store = InMemoryObservationStore()
+        val policy = CommunicationSourcePolicy(
+            selectedSources = {
+                setOf(CommunicationSource.Instagram, CommunicationSource.LinkedIn, CommunicationSource.X)
+            },
+        )
+        val coordinator = ObservationIngestCoordinator(
+            normalizer = NotificationNormalizer(ids, digest),
+            store = store,
+            clock = clock,
+            isPayloadEligible = policy::isEligible,
+        )
+        assertEquals(
+            IngestOfferResult.Accepted,
+            coordinator.enqueue(
+                payload("com.instagram.android").copy(
+                    title = "Sam",
+                    text = "Are you free to look at my post?",
+                    hasMessagingStyle = true,
+                    category = "msg",
+                ),
+            ),
+        )
+        assertEquals(
+            IngestOfferResult.Accepted,
+            coordinator.enqueue(
+                payload("com.linkedin.android").copy(
+                    title = "New message from Alex",
+                    text = "Can we talk about the job?",
+                ),
+            ),
+        )
+        assertEquals(
+            IngestOfferResult.Filtered,
+            coordinator.enqueue(
+                payload("com.instagram.android").copy(title = "Sam", text = "liked your photo", category = "social"),
+            ),
+        )
+        assertEquals(
+            IngestOfferResult.Filtered,
+            coordinator.enqueue(
+                payload("com.linkedin.android").copy(title = "Job alert", text = "12 new roles for you"),
+            ),
+        )
+        assertTrue(coordinator.processNext() is IngestProcessResult.Created)
+        assertTrue(coordinator.processNext() is IngestProcessResult.Created)
+        val summaries = store.getConversationSummaries()
+        assertEquals(2, summaries.size)
+        assertTrue(summaries.all(::isConversationSummary))
+        assertTrue(summaries.none(::isLinkedInActivitySummary))
+        assertTrue(summaries.any { it.packageId == "com.instagram.android" && it.category == NotificationCategory.DirectMessage })
+        assertTrue(summaries.any { it.packageId == "com.linkedin.android" && it.category == NotificationCategory.DirectMessage })
+        val rebuilt = store.getConversationSummaries()
+        assertTrue(rebuilt.all(::isConversationSummary))
+        rebuilt.filter { it.packageId == "com.instagram.android" }.forEach { summary ->
+            val recovered = summary.copy(category = NotificationCategory.SocialUpdate)
+            assertTrue(isConversationSummary(recovered), "legacy Instagram DMs must remain conversations after restart")
+        }
+    }
 }

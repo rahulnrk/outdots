@@ -411,4 +411,30 @@ class InboxViewModelTest {
         assertEquals(FollowUpStatus.Done, vm.state.value.attentionRecords[jobId.key]?.status)
         assertTrue(vm.state.value.linkedinActivity.any { it.conversationId == jobId })
     }
+
+    @Test
+    fun doneConversationDoesNotReappearInActiveSearch() {
+        val obsStore = InMemoryObservationStore()
+        val attentionStore = InMemoryAttentionStore()
+        val vm = InboxViewModel(obsStore, ScopedRetrievalEngine(obsStore), AdaptiveStyleEngine(), ActionController(clock, digest, DomainActionIdGenerator(idGen)), InMemoryActionStore(), clock, attentionStore)
+        obsStore.persistObservation(
+            ObservedNotification(
+                id = ScopedId(account, ScopedId.Kind.OBSERVATION, "obs_search_done"), accountId = account, conversationId = convId,
+                packageId = "com.whatsapp", notificationKey = "notif_search_done", notificationId = 51, tag = null,
+                senderHint = "Alice", title = "Alice", textFragments = listOf("UniqueSearchNeedle"), rawTextDigest = "digest_search_done",
+                observedAt = clock.now(), postTime = clock.now(), revision = 1L, isRemoved = false, isGroupSummary = false,
+                truncationState = TruncationState.Complete, correlationConfidence = CorrelationConfidence.High,
+                provenance = ObservationProvenance.AndroidNotificationListener,
+            ),
+        )
+        vm.refresh(true, true)
+        vm.onSearchQueryChanged("UniqueSearchNeedle")
+        assertTrue(vm.state.value.searchResults.any { it.conversationId == convId })
+        vm.applyAttentionAction(convId, AttentionAction.MarkDone)
+        vm.onSearchQueryChanged("UniqueSearchNeedle")
+        assertTrue(vm.state.value.searchResults.none { it.conversationId == convId })
+        vm.setShowArchived(true)
+        vm.onSearchQueryChanged("UniqueSearchNeedle")
+        assertTrue(vm.state.value.searchResults.any { it.conversationId == convId })
+    }
 }

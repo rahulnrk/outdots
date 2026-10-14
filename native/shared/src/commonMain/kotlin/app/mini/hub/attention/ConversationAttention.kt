@@ -209,3 +209,16 @@ data class AttentionView(
         }
     }
 }
+
+fun ConversationAttention?.isHandledDone(): Boolean = this?.status == FollowUpStatus.Done
+
+/** Active Inbox keys exclude Done; archived keys are only Done. */
+fun scopedConversationKeys(
+    keys: Iterable<String>,
+    records: Map<String, ConversationAttention>,
+    showArchived: Boolean,
+): Set<String> = keys.filter { key ->
+    val done = records[key].isHandledDone()
+    if (showArchived) done else !done
+}.toSet()
+

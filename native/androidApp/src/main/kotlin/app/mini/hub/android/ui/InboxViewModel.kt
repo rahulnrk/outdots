@@ -303,6 +303,16 @@ class InboxViewModel(
         )
     }
 
+    fun setShowArchived(showArchived: Boolean) {
+        _state.value = _state.value.copy(inboxShowArchived = showArchived)
+        executeSearch(_state.value.searchQuery, _state.value.searchSourceFilter)
+    }
+
+    fun setInboxAccountKey(accountKey: String?) {
+        _state.value = _state.value.copy(inboxAccountKey = accountKey)
+        executeSearch(_state.value.searchQuery, _state.value.searchSourceFilter)
+    }
+
     fun onSearchQueryChanged(text: String) {
         val filter = _state.value.searchSourceFilter
         _state.value = _state.value.copy(searchQuery = text)
@@ -334,10 +344,16 @@ class InboxViewModel(
             // Search runs off the main thread; logs contain no query text or message content.
             val query = app.mini.hub.search.SearchQuery(queryText = trimmed, sourceFilter = sourceFilter, limit = 50)
             val rawResults = observationStore.search(query)
-            val conversationKeys = _state.value.conversations.map { it.conversationId.key }.toSet()
+            val conversationKeys = app.mini.hub.attention.scopedConversationKeys(
+                _state.value.conversations.map { it.conversationId.key },
+                _state.value.attentionRecords,
+                _state.value.inboxShowArchived,
+            )
+            val accountKey = _state.value.inboxAccountKey
             val filtered = rawResults.filter { result ->
                 (result.packageId in enabledSources || result.packageId.startsWith("provider.")) &&
-                    result.conversationId.key in conversationKeys
+                    result.conversationId.key in conversationKeys &&
+                    (accountKey == null || result.accountId.key == accountKey)
             }
             postToMain("search-result") {
                 if (gen != searchGeneration) return@postToMain

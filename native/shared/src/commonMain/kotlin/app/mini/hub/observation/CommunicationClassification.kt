@@ -100,6 +100,7 @@ fun linkedInActivityConversationValue(title: String?, text: String): String {
 
 fun categoryForStoredObservation(obs: ObservedNotification): NotificationCategory {
     if (obs.isOngoing) return NotificationCategory.OngoingService
+    obs.notificationCategory?.let { return it }
     if (obs.provenance == ObservationProvenance.OfficialProviderApi ||
         obs.provenance == ObservationProvenance.ThirdPartyBridge ||
         obs.provenance == ObservationProvenance.UserImport ||
@@ -108,27 +109,35 @@ fun categoryForStoredObservation(obs: ObservedNotification): NotificationCategor
         return if (obs.isGroupSummary) NotificationCategory.GroupMessage else NotificationCategory.DirectMessage
     }
     if (obs.isGroupSummary) return NotificationCategory.GroupMessage
-    val source = CommunicationSource.forExactPackage(obs.packageId)
-    return when (source) {
-        CommunicationSource.Gmail,
-        CommunicationSource.Outlook,
-        CommunicationSource.WhatsApp,
-        CommunicationSource.FacebookMessenger,
-        CommunicationSource.Slack,
-        CommunicationSource.Teams,
-        CommunicationSource.GoogleChat,
-        CommunicationSource.GoogleMessages,
-        CommunicationSource.Discord,
-        CommunicationSource.Line,
-        CommunicationSource.Signal,
-        CommunicationSource.Telegram,
-        -> NotificationCategory.DirectMessage
-        CommunicationSource.Instagram, CommunicationSource.X -> NotificationCategory.SocialUpdate
-        CommunicationSource.LinkedIn -> NotificationCategory.GeneralNotification
-        null -> when {
-            obs.packageId == "android" || obs.packageId.startsWith("com.android.systemui") ->
-                NotificationCategory.SystemStatus
-            else -> NotificationCategory.GeneralNotification
+    val reconstructed = NotificationRawPayload(
+        key = obs.notificationKey,
+        packageId = obs.packageId,
+        notificationId = obs.notificationId,
+        tag = obs.tag,
+        postTimeMillis = obs.postTime.epochMillis,
+        senderHint = obs.senderHint,
+        title = obs.title,
+        text = obs.textFragments.lastOrNull().orEmpty(),
+        textFragments = obs.textFragments,
+        isGroupSummary = obs.isGroupSummary,
+        isOngoing = obs.isOngoing,
+    )
+    return when (classifyCommunication(reconstructed)) {
+        CommunicationKind.ConversationMessage ->
+            if (obs.isGroupSummary) NotificationCategory.GroupMessage else NotificationCategory.DirectMessage
+        CommunicationKind.LinkedInActivity -> NotificationCategory.SocialUpdate
+        CommunicationKind.NotCommunication -> {
+            val source = CommunicationSource.forExactPackage(obs.packageId)
+            when (source) {
+                CommunicationSource.Instagram, CommunicationSource.X -> NotificationCategory.SocialUpdate
+                CommunicationSource.LinkedIn -> NotificationCategory.GeneralNotification
+                null -> when {
+                    obs.packageId == "android" || obs.packageId.startsWith("com.android.systemui") ->
+                        NotificationCategory.SystemStatus
+                    else -> NotificationCategory.GeneralNotification
+                }
+                else -> NotificationCategory.DirectMessage
+            }
         }
     }
 }
@@ -145,7 +154,8 @@ fun isConversationSummary(summary: ConversationObservationSummary): Boolean {
         CommunicationSource.LinkedIn -> isLinkedInMessageSummary(summary)
         CommunicationSource.Instagram, CommunicationSource.X, CommunicationSource.FacebookMessenger ->
             summary.category == NotificationCategory.DirectMessage ||
-                summary.category == NotificationCategory.GroupMessage
+                summary.category == NotificationCategory.GroupMessage ||
+                classifyCommunication(summaryAsPayload(summary)) == CommunicationKind.ConversationMessage
         CommunicationSource.Gmail, CommunicationSource.Outlook -> true
         null -> summary.category == NotificationCategory.DirectMessage ||
             summary.category == NotificationCategory.GroupMessage

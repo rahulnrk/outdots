@@ -124,6 +124,7 @@ class NotificationNormalizer(
             truncationState = truncation,
             correlationConfidence = if (payload.isGroupSummary) CorrelationConfidence.Medium else CorrelationConfidence.High,
             provenance = ObservationProvenance.AndroidNotificationListener,
+            notificationCategory = category,
         )
     }
 

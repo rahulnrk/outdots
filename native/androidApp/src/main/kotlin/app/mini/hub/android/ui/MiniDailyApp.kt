@@ -82,6 +82,7 @@ fun MiniDailyApp(
     onSyncNow: () -> Unit,
     capabilities: (ConnectedAccount) -> app.mini.hub.connector.CapabilitySnapshot?,
     thread: @Composable () -> Unit,
+    onCheckSource: (app.mini.hub.action.ReviewedActionSnapshot) -> Unit = {},
     extraList: @Composable () -> Unit = {},
 ) {
     var tab by rememberSaveable { mutableStateOf(MiniTab.Inbox.name) }
@@ -115,6 +116,7 @@ fun MiniDailyApp(
                         labels = labels,
                         onCompose = onCompose,
                         onRequestPermission = onRequestPermission,
+                        onCheckSource = onCheckSource,
                     )
                     MiniTab.Focus -> MiniFocusPane(
                         state = state,

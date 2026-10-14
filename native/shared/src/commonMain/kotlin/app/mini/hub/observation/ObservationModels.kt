@@ -125,6 +125,8 @@ data class ObservedNotification(
     val recipients: List<String>? = null,
     /** Provider message reference used to thread a reply (e.g. RFC 822 Message-ID). Null = unknown. */
     val replyAnchor: String? = null,
+    /** Category decided at ingest. Null on older rows; summaries then reconstruct it. */
+    val notificationCategory: NotificationCategory? = null,
 ) {
     init {
         require(id.kind == ScopedId.Kind.OBSERVATION) { "ObservedNotification id must be OBSERVATION kind" }

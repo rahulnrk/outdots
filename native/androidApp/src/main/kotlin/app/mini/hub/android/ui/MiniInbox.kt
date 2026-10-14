@@ -64,6 +64,7 @@ internal fun MiniInboxPane(
     labels: Map<String, String>,
     onCompose: () -> Unit,
     onRequestPermission: () -> Unit,
+    onCheckSource: (app.mini.hub.action.ReviewedActionSnapshot) -> Unit = {},
 ) {
     val context = LocalContext.current
     val seen = remember { LocalSeenStore(context) }
@@ -86,8 +87,17 @@ internal fun MiniInboxPane(
             seen.isUnseen(conv.conversationId.key, conv.latestEventAt.epochMillis)
     }
     val listedKeys = chats.map { it.conversationId.key }.toSet()
-    val drafts = state.savedDrafts.filter { it.isNewEmail || it.conversationKey !in listedKeys }
+    val doneKeys = state.attentionRecords.filter { it.value.status == FollowUpStatus.Done }.keys
+    val drafts = state.savedDrafts
         .filter { accountFilter == null || it.accountId == accountFilter }
+        .filter { draft ->
+            if (draft.isNewEmail) !showArchived
+            else {
+                val done = draft.conversationKey in doneKeys
+                if (showArchived) done else !done
+            }
+        }
+        .filter { it.isNewEmail || it.conversationKey !in listedKeys }
     val liveActivity = state.linkedinActivity.filter {
         state.attentionRecords[it.conversationId.key]?.status != FollowUpStatus.Done
     }
@@ -97,15 +107,18 @@ internal fun MiniInboxPane(
     if (showActivity) {
         MiniActivityPane(
             items = liveActivity,
+            notice = state.outboxStatusMessage,
             onBack = { showActivity = false },
             onAcknowledge = { viewModel.applyAttentionAction(it.conversationId, AttentionAction.MarkDone) },
             onOpen = { summary ->
                 if (openLinkedInApp(context)) {
                     viewModel.applyAttentionAction(summary.conversationId, AttentionAction.MarkDone)
+                    viewModel.reportUserMessage("")
                 } else {
                     viewModel.reportUserMessage("Couldn't open LinkedIn. The item is still here.")
                 }
             },
+            onDismissNotice = { viewModel.reportUserMessage("") },
         )
         return
     }
@@ -113,6 +126,7 @@ internal fun MiniInboxPane(
         emptyList<app.mini.hub.android.connector.AndroidConnectorRegistry.ContactRoute>(),
         state.searchQuery,
         accountFilter,
+        showArchived,
     ) {
         if (state.searchQuery.isBlank()) {
             value = emptyList()
@@ -123,6 +137,15 @@ internal fun MiniInboxPane(
             runCatching { app.mini.hub.android.MiniHubRuntime.connectors.findContacts(state.searchQuery) }
                 .getOrDefault(emptyList())
                 .filter { accountFilter == null || it.accountId.key == accountFilter }
+                .filter { route ->
+                    val existing = state.conversations.firstOrNull {
+                        it.accountId == route.accountId &&
+                            (it.conversationId.value.equals(route.address, ignoreCase = true) ||
+                                it.senderHint.contains(route.address, ignoreCase = true))
+                    } ?: return@filter !showArchived
+                    val done = state.attentionRecords[existing.conversationId.key]?.status == FollowUpStatus.Done
+                    if (showArchived) done else !done
+                }
         }
     }
     val searchHits = state.searchResults
@@ -167,9 +190,15 @@ internal fun MiniInboxPane(
             FilterChip(selected = category == null && !unseenOnly && accountFilter == null && !showArchived, onClick = {
                 category = null; unseenOnly = false; accountFilter = null; showArchived = false
                 viewModel.onSearchSourceFilterChanged(null)
+                viewModel.setShowArchived(false)
+                viewModel.setInboxAccountKey(null)
             }, label = { Text("All") })
-            FilterChip(selected = unseenOnly, onClick = { unseenOnly = !unseenOnly; showArchived = false }, label = { Text("Unseen in MINI $unseenCount") })
-            FilterChip(selected = showArchived, onClick = { showArchived = !showArchived; unseenOnly = false }, label = { Text("Done") })
+            FilterChip(selected = unseenOnly, onClick = { unseenOnly = !unseenOnly; showArchived = false; viewModel.setShowArchived(false) }, label = { Text("Unseen in MINI $unseenCount") })
+            FilterChip(selected = showArchived, onClick = {
+                showArchived = !showArchived
+                unseenOnly = false
+                viewModel.setShowArchived(showArchived)
+            }, label = { Text("Done") })
             if (liveActivity.isNotEmpty() || archivedActivity.isNotEmpty()) {
                 FilterChip(selected = false, onClick = { showActivity = true }, label = { Text("Activity ${liveActivity.size}") })
             }
@@ -180,7 +209,10 @@ internal fun MiniInboxPane(
                 val alias = accountStore.get(id)?.displayName ?: accountStore.get(id)?.providerAccountId ?: id.provider.wire
                 FilterChip(
                     selected = accountFilter == id.key,
-                    onClick = { accountFilter = if (accountFilter == id.key) null else id.key },
+                    onClick = {
+                        accountFilter = if (accountFilter == id.key) null else id.key
+                        viewModel.setInboxAccountKey(accountFilter)
+                    },
                     label = { Text(alias) },
                 )
             }
@@ -203,22 +235,27 @@ internal fun MiniInboxPane(
         state.storageFailure?.let {
             MiniBanner(title = "Storage error", body = it, action = null, onAction = {})
         }
-        state.outboxStatusMessage?.let {
+        state.outboxStatusMessage?.takeIf { !showActivity }?.let {
             MiniBanner(title = "Notice", body = it, action = "Dismiss", onAction = { viewModel.reportUserMessage("") })
         }
         val visibleOutcomes = state.reviewedSnapshots.filter { snap ->
             snap.state == app.mini.hub.action.OutboxState.OutcomeUnknown ||
                 snap.state == app.mini.hub.action.OutboxState.Rejected ||
                 snap.state == app.mini.hub.action.OutboxState.HandoffOpened
-        }
-        visibleOutcomes.takeLast(5).forEach { snap ->
-            MiniOutcomeCard(snap)
-        }
+        }.takeLast(5)
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = MiniInk.gutter.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(MiniInk.rowGap.dp),
         ) {
+            if (visibleOutcomes.isNotEmpty() && state.searchQuery.isBlank()) {
+                item {
+                    Text("Action history", style = MaterialTheme.typography.titleMedium)
+                }
+                items(visibleOutcomes, key = { "out-${it.commandId}" }) { snap ->
+                    MiniOutcomeCard(snap, onCheckSource = { onCheckSource(snap) })
+                }
+            }
             if (state.searchQuery.isNotBlank()) {
                 if (contactRoutes.isNotEmpty()) {
                     item {
@@ -342,9 +379,11 @@ internal fun MiniInboxPane(
 @Composable
 internal fun MiniActivityPane(
     items: List<ConversationObservationSummary>,
+    notice: String? = null,
     onBack: () -> Unit,
     onAcknowledge: (ConversationObservationSummary) -> Unit,
     onOpen: (ConversationObservationSummary) -> Unit,
+    onDismissNotice: () -> Unit = {},
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = MiniInk.gutter.dp)) {
         TextButton(onClick = onBack, modifier = Modifier.height(MiniInk.primaryTarget.dp)) { Text("Back to Inbox") }
@@ -354,6 +393,9 @@ internal fun MiniActivityPane(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        notice?.takeIf { it.isNotBlank() }?.let {
+            MiniBanner(title = "Couldn't open LinkedIn", body = it, action = "Dismiss", onAction = onDismissNotice)
+        }
         Spacer(Modifier.height(12.dp))
         if (items.isEmpty()) {
             Text("No LinkedIn activity waiting.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
@@ -467,10 +509,13 @@ internal fun MiniBanner(title: String, body: String, action: String?, onAction: 
 }
 
 @Composable
-private fun MiniOutcomeCard(snap: app.mini.hub.action.ReviewedActionSnapshot) {
+private fun MiniOutcomeCard(
+    snap: app.mini.hub.action.ReviewedActionSnapshot,
+    onCheckSource: () -> Unit,
+) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = MiniInk.gutter.dp, vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth(),
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
@@ -489,6 +534,9 @@ private fun MiniOutcomeCard(snap: app.mini.hub.action.ReviewedActionSnapshot) {
             snap.subject?.let { Text("Subject: $it", style = MaterialTheme.typography.bodySmall) }
             Text(snap.body, style = MaterialTheme.typography.bodySmall, maxLines = 4)
             snap.failureReason?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
+            TextButton(onClick = onCheckSource, modifier = Modifier.height(MiniInk.primaryTarget.dp)) {
+                Text("Check in source app")
+            }
         }
     }
 }

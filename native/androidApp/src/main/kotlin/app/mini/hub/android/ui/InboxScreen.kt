@@ -327,6 +327,14 @@ fun InboxScreen(
             }
             }
         },
+        onCheckSource = { snap ->
+            val pkg = runCatching {
+                app.mini.hub.observation.CommunicationSource.primaryPackageFor(
+                    app.mini.hub.domain.AccountId.parse(snap.accountId).provider,
+                )
+            }.getOrNull()
+            if (pkg != null) (handoffLauncher as? AndroidNativeHandoffLauncher)?.openSourceApp(pkg)
+        },
         extraList = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 // Search results and drafts live here; MiniInbox owns the conversation list.

@@ -66,6 +66,8 @@ data class InboxViewState(
     /** Composer drafts that can be reopened after leaving a thread or restarting. */
     val savedDrafts: List<app.mini.hub.persistence.ConversationDraft> = emptyList(),
     val canUndoAttention: Boolean = false,
+    val inboxShowArchived: Boolean = false,
+    val inboxAccountKey: String? = null,
 )
 
 data class ReviewContext(
