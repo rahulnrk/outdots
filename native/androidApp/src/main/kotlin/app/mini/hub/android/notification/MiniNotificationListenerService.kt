@@ -29,6 +29,10 @@ class MiniNotificationListenerService : NotificationListenerService() {
         var isConnected: Boolean = false
             private set
 
+        @Volatile
+        var lastTransitionAtMillis: Long = 0L
+            private set
+
         /**
          * Checks if the user has explicitly granted notification listener access to this app.
          */
@@ -75,13 +79,21 @@ class MiniNotificationListenerService : NotificationListenerService() {
         super.onListenerConnected()
         MiniHubRuntime.init(applicationContext)
         isConnected = true
+        lastTransitionAtMillis = System.currentTimeMillis()
+        android.util.Log.i("MiniListener", "listener connected")
         // Logged once per connection, never per notification, so a broken store cannot spam logs.
         if (!MiniHubRuntime.isStorageReady) MiniHubRuntime.logState("work=notification_listener skipped storage=unavailable")
+        // The Activity may have refreshed before the system bound us. Push the new state to the UI.
+        MiniHubRuntime.notifyInboxChanged()
     }
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
         isConnected = false
+        lastTransitionAtMillis = System.currentTimeMillis()
+        android.util.Log.i("MiniListener", "listener disconnected; requesting rebind")
+        rebindIfNeeded(applicationContext)
+        MiniHubRuntime.notifyInboxChanged()
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {

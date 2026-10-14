@@ -18,6 +18,9 @@ call :cap console 0 1.3 console-large
 call :cap activity 0 1.0 activity-light
 call :cap activity 1 1.0 activity-dark
 call :cap activity 0 1.3 activity-large
+call :cap activity 0 2.0 activity-xlarge
+call :cap activity 1 1.3 activity-dark-large
+call :cap inbox 0 2.0 inbox-xlarge
 echo ALL_CAPTURES_DONE
 exit /b 0
 

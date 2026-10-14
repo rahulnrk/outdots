@@ -97,6 +97,7 @@ internal data class InboxUiActions(
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 internal fun MiniInboxPane(
     state: InboxViewState,
@@ -204,28 +205,33 @@ internal fun MiniInboxPane(
     val broaderLookup = scopedPeople.any { it.second == ContactLookupKind.NewContact } &&
         (scope.categoryLabel != null || scope.unseenOnly || scope.accountKey != null || scope.showDone)
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
+        // Pinned header is kept compact (one-line subtitle and placeholder). Banners and history scroll
+        // with the list so conversations remain the main Inbox content at large text sizes.
+        androidx.compose.foundation.layout.FlowRow(
             modifier = Modifier.fillMaxWidth().padding(horizontal = MiniInk.gutter.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.Center,
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column {
                 Text(if (showArchived) "Done" else "Inbox", style = MaterialTheme.typography.headlineLarge)
                 Text(
                     if (showArchived) "Handled conversations stay here." else "Conversations, not notifications.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             TextButton(
                 onClick = onCompose,
-                modifier = Modifier.height(MiniInk.primaryTarget.dp),
+                modifier = Modifier.heightIn(min = MiniInk.primaryTarget.dp),
             ) { Text("Compose") }
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = state.searchQuery,
             onValueChange = { actions.onSearchQueryChanged(it) },
-            placeholder = { Text("Search people and messages") },
+            placeholder = { Text("Search people and messages", maxLines = 1, overflow = TextOverflow.Ellipsis) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = MiniInk.gutter.dp),
             shape = RoundedCornerShape(MiniInk.controlRadius.dp),
@@ -268,43 +274,52 @@ internal fun MiniInboxPane(
                 )
             }
         }
-        if (!state.isPermissionGranted) {
-            MiniBanner(
-                title = "Notification access needed",
-                body = "MINI can still show connected accounts. Grant access to capture notifications.",
-                action = "Open settings",
-                onAction = onRequestPermission,
-            )
-        } else if (!state.isListenerConnected) {
-            MiniBanner(
-                title = "Notification listener idle",
-                body = "New notifications aren't being saved until the listener is connected.",
-                action = "Fix",
-                onAction = onRequestPermission,
-            )
+        val banners: @Composable () -> Unit = {
+            if (!state.isPermissionGranted) {
+                MiniBanner(
+                    title = "Notification access needed",
+                    body = "MINI can still show connected accounts. Grant access to capture notifications.",
+                    action = "Open settings",
+                    onAction = onRequestPermission,
+                    inset = false,
+                )
+            } else if (!state.isListenerConnected) {
+                MiniBanner(
+                    title = "Reconnecting notification listener",
+                    body = "Connected accounts are unaffected. New phone notifications are saved once it reconnects.",
+                    action = "Fix",
+                    onAction = onRequestPermission,
+                    inset = false,
+                )
+            }
+            state.storageFailure?.let {
+                MiniBanner(title = "Storage error", body = it, action = null, onAction = {}, inset = false)
+            }
+            state.outboxStatusMessage?.takeIf { !showActivity }?.let {
+                MiniBanner(title = "Notice", body = it, action = "Dismiss", onAction = { actions.reportUserMessage("") }, inset = false)
+            }
         }
-        state.storageFailure?.let {
-            MiniBanner(title = "Storage error", body = it, action = null, onAction = {})
-        }
-        state.outboxStatusMessage?.takeIf { !showActivity }?.let {
-            MiniBanner(title = "Notice", body = it, action = "Dismiss", onAction = { actions.reportUserMessage("") })
-        }
-        val visibleOutcomes = state.reviewedSnapshots.filter { snap ->
-            snap.state == app.mini.hub.action.OutboxState.OutcomeUnknown ||
-                snap.state == app.mini.hub.action.OutboxState.Rejected ||
-                snap.state == app.mini.hub.action.OutboxState.HandoffOpened
-        }.takeLast(5)
+        val visibleOutcomes = outcomeHistoryOrder(state.reviewedSnapshots)
+        var historyExpanded by rememberSaveable { mutableStateOf(false) }
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = MiniInk.gutter.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(MiniInk.rowGap.dp),
         ) {
+            item(key = "inbox-banners") { Column { banners() } }
             if (visibleOutcomes.isNotEmpty() && state.searchQuery.isBlank()) {
-                item {
-                    Text("Action history", style = MaterialTheme.typography.titleMedium)
+                item(key = "history-strip") {
+                    MiniHistoryStrip(
+                        outcomes = visibleOutcomes,
+                        expanded = historyExpanded,
+                        onToggle = { historyExpanded = !historyExpanded },
+                        onCheckSource = onCheckSource,
+                    )
                 }
-                items(visibleOutcomes, key = { "out-${it.commandId}" }) { snap ->
-                    MiniOutcomeCard(snap, onCheckSource = { onCheckSource(snap) })
+                if (historyExpanded) {
+                    items(visibleOutcomes, key = { "out-${it.commandId}" }) { snap ->
+                        MiniOutcomeCard(snap, onCheckSource = { onCheckSource(snap) })
+                    }
                 }
             }
             if (state.searchQuery.isNotBlank()) {
@@ -383,21 +398,28 @@ internal fun MiniInboxPane(
                                 .clip(RoundedCornerShape(MiniInk.cardRadius.dp))
                                 .background(MaterialTheme.colorScheme.tertiaryContainer)
                                 .clickable { actions.openSavedDraft(draft) }
-                                .padding(12.dp),
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
                         ) {
                             Text(
-                                if (InboxScopeFilter.isStandaloneDraft(draft)) "New email draft" else "Draft",
+                                listOf(
+                                    if (InboxScopeFilter.isStandaloneDraft(draft)) "New email draft" else "Draft",
+                                    draft.subject.ifBlank { "(no subject)" },
+                                ).joinToString(" · "),
                                 fontWeight = FontWeight.SemiBold,
                                 style = MaterialTheme.typography.labelLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
-                            if (draft.to.isNotBlank()) Text("To: ${draft.to}", style = MaterialTheme.typography.bodySmall)
-                            Text(draft.subject.ifBlank { "(no subject)" }, style = MaterialTheme.typography.titleSmall)
-                            if (draft.body.isNotBlank()) Text(draft.body, style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                            if (draft.to.isNotBlank()) Text("To: ${draft.to}", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
                 item {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    androidx.compose.foundation.layout.FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
                         Text(if (showArchived) "Done and archived" else "Latest conversations", style = MaterialTheme.typography.titleMedium)
                         Text("${chats.size} conversations", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -443,6 +465,7 @@ internal fun MiniInboxPane(
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 internal fun MiniActivityPane(
     items: List<ConversationObservationSummary>,
@@ -453,15 +476,15 @@ internal fun MiniActivityPane(
     onDismissNotice: () -> Unit = {},
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = MiniInk.gutter.dp)) {
-        TextButton(onClick = onBack, modifier = Modifier.height(MiniInk.primaryTarget.dp)) { Text("Back to Inbox") }
-        Text("Activity", style = MaterialTheme.typography.headlineLarge)
+        TextButton(onClick = onBack, modifier = Modifier.heightIn(min = MiniInk.primaryTarget.dp)) { Text("Back to Inbox") }
+        Text("Activity", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onBackground)
         Text(
             "LinkedIn posts, jobs, and other non-message alerts. Messages stay in Inbox.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         notice?.takeIf { it.isNotBlank() }?.let {
-            MiniBanner(title = "Couldn't open LinkedIn", body = it, action = "Dismiss", onAction = onDismissNotice)
+            MiniBanner(title = "Couldn't open LinkedIn", body = it, action = "Dismiss", onAction = onDismissNotice, inset = false)
         }
         Spacer(Modifier.height(12.dp))
         if (items.isEmpty()) {
@@ -476,17 +499,23 @@ internal fun MiniActivityPane(
                             .background(MaterialTheme.colorScheme.surface)
                             .padding(12.dp),
                     ) {
-                        Text(summary.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(summary.latestSnippet, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        val onCard = MaterialTheme.colorScheme.onSurface
+                        Text(summary.title, fontWeight = FontWeight.SemiBold, color = onCard, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(summary.latestSnippet, style = MaterialTheme.typography.bodySmall, color = onCard, maxLines = 3, overflow = TextOverflow.Ellipsis)
                         Text("LinkedIn activity", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // FlowRow + min height: at large text the second action wraps to its own line
+                        // instead of being clipped by a fixed-height row.
+                        androidx.compose.foundation.layout.FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
                             TextButton(
                                 onClick = { onAcknowledge(summary) },
-                                modifier = Modifier.height(MiniInk.primaryTarget.dp),
+                                modifier = Modifier.heightIn(min = MiniInk.primaryTarget.dp),
                             ) { Text("Acknowledge") }
                             OutlinedButton(
                                 onClick = { onOpen(summary) },
-                                modifier = Modifier.height(MiniInk.primaryTarget.dp),
+                                modifier = Modifier.heightIn(min = MiniInk.primaryTarget.dp),
                             ) { Text("Open in LinkedIn") }
                         }
                     }
@@ -560,11 +589,11 @@ internal fun MiniAttentionChip(attention: app.mini.hub.attention.ConversationAtt
 }
 
 @Composable
-internal fun MiniBanner(title: String, body: String, action: String?, onAction: () -> Unit) {
+internal fun MiniBanner(title: String, body: String, action: String?, onAction: () -> Unit, inset: Boolean = true) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = MiniInk.gutter.dp, vertical = 8.dp)
+            .padding(horizontal = if (inset) MiniInk.gutter.dp else 0.dp, vertical = 8.dp)
             .clip(RoundedCornerShape(MiniInk.cardRadius.dp))
             .background(MaterialTheme.colorScheme.tertiaryContainer)
             .padding(14.dp),
@@ -573,6 +602,78 @@ internal fun MiniBanner(title: String, body: String, action: String?, onAction: 
         Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
         if (action != null) TextButton(onClick = onAction) { Text(action) }
     }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun MiniHistoryStrip(
+    outcomes: List<app.mini.hub.action.ReviewedActionSnapshot>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onCheckSource: (app.mini.hub.action.ReviewedActionSnapshot) -> Unit,
+) {
+    // One strip instead of a header plus cards: conversations stay the main Inbox content.
+    // The most urgent outcome (uncertain first) keeps a direct "Check in source app" action.
+    val first = outcomes.first()
+    val uncertain = first.state == app.mini.hub.action.OutboxState.OutcomeUnknown
+    val who = first.recipients.joinToString().ifBlank { "this conversation" }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(MiniInk.cardRadius.dp))
+            .background(
+                if (uncertain) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+            )
+            .padding(start = 12.dp, end = 4.dp, top = 8.dp),
+    ) {
+        Text(
+            "${outcomeTitle(first.state)} · $who",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = if (uncertain) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSecondaryContainer,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            TextButton(
+                onClick = { onCheckSource(first) },
+                modifier = Modifier.heightIn(min = MiniInk.primaryTarget.dp),
+                contentPadding = PaddingValues(horizontal = 0.dp),
+            ) { Text("Check in source app") }
+            TextButton(onClick = onToggle, modifier = Modifier.heightIn(min = MiniInk.primaryTarget.dp)) {
+                Text(
+                    when {
+                        expanded -> "Hide history"
+                        outcomes.size > 1 -> "History (${outcomes.size})"
+                        else -> "Details"
+                    },
+                )
+            }
+        }
+    }
+}
+
+internal fun outcomeTitle(state: app.mini.hub.action.OutboxState): String = when (state) {
+    app.mini.hub.action.OutboxState.OutcomeUnknown -> "Send outcome unknown"
+    app.mini.hub.action.OutboxState.Rejected -> "Not sent"
+    app.mini.hub.action.OutboxState.HandoffOpened -> "Opened in another app. Not sent by MINI."
+    else -> state.name
+}
+
+/** Outcomes shown in Inbox history, uncertain first, then not sent, then hand-offs; newest first within each. */
+internal fun outcomeHistoryOrder(
+    snapshots: List<app.mini.hub.action.ReviewedActionSnapshot>,
+): List<app.mini.hub.action.ReviewedActionSnapshot> {
+    val rank = mapOf(
+        app.mini.hub.action.OutboxState.OutcomeUnknown to 0,
+        app.mini.hub.action.OutboxState.Rejected to 1,
+        app.mini.hub.action.OutboxState.HandoffOpened to 2,
+    )
+    return snapshots
+        .filter { it.state in rank }
+        .takeLast(5)
+        .reversed()
+        .sortedBy { rank.getValue(it.state) }
 }
 
 @Composable
@@ -586,12 +687,7 @@ private fun MiniOutcomeCard(
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
-                when (snap.state) {
-                    app.mini.hub.action.OutboxState.OutcomeUnknown -> "Send outcome unknown"
-                    app.mini.hub.action.OutboxState.Rejected -> "Not sent"
-                    app.mini.hub.action.OutboxState.HandoffOpened -> "Opened in another app. Not sent by MINI."
-                    else -> snap.state.name
-                },
+                outcomeTitle(snap.state),
                 fontWeight = FontWeight.SemiBold,
                 style = MaterialTheme.typography.labelLarge,
             )
@@ -601,7 +697,7 @@ private fun MiniOutcomeCard(
             snap.subject?.let { Text("Subject: $it", style = MaterialTheme.typography.bodySmall) }
             Text(snap.body, style = MaterialTheme.typography.bodySmall, maxLines = 4)
             snap.failureReason?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
-            TextButton(onClick = onCheckSource, modifier = Modifier.height(MiniInk.primaryTarget.dp)) {
+            TextButton(onClick = onCheckSource, modifier = Modifier.heightIn(min = MiniInk.primaryTarget.dp)) {
                 Text("Check in source app")
             }
         }

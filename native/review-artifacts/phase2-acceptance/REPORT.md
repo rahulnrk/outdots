@@ -28,6 +28,6 @@ MainActivity keeps FLAG_SECURE. Private Inbox was not screenshotted. Live UI dum
 
 ## Remaining limitations
 - Duplicate/resurface checks used a synthetic debug notification, not a real WhatsApp/Gmail message.
-- Header shows "Needs setup" after cold restart until the notification listener reconnects. Pre-existing, not a Phase 2 regression. Worth checking later.
+- After a cold restart the header showed "Needs setup" and Focus said the notification listener was idle, while Console showed all accounts Connected/Healthy. Unverified: whether this predates Phase 2, and whether the listener reconnects on its own. Under investigation.
 - Drafts survival was confirmed by store presence, not by opening a specific saved draft.
 - No instrumented tests (`connectedDebugAndroidTest` wipes authorizations).

@@ -153,6 +153,21 @@ private fun previewInboxState(): InboxViewState {
         ),
         reviewedSnapshots = listOf(
             ReviewedActionSnapshot(
+                commandId = "cmd-preview-unknown",
+                accountId = previewWhatsApp.key,
+                conversationId = alice.conversationId.key,
+                route = ActionRoute.NativeHandoff,
+                recipients = listOf("Alice Chen"),
+                cc = emptyList(),
+                bcc = emptyList(),
+                subject = null,
+                body = "Sending the deck now.",
+                attachmentNames = emptyList(),
+                replyTarget = null,
+                state = OutboxState.OutcomeUnknown,
+                createdAt = previewNow,
+            ),
+            ReviewedActionSnapshot(
                 commandId = "cmd-preview",
                 accountId = previewGmail.key,
                 conversationId = pat.conversationId.key,
@@ -190,7 +205,7 @@ internal fun MiniProductionPreview(tab: MiniTab) {
                     .background(MaterialTheme.colorScheme.background)
                     .padding(padding),
             ) {
-                MiniBrandBar(onThisPhone = true)
+                MiniBrandBar(status = MiniPhoneStatus.OnThisPhone)
                 when (tab) {
                     MiniTab.Inbox -> MiniInboxPane(
                         state = state,
@@ -253,21 +268,32 @@ fun MiniConsoleScreenPreview() {
 @Preview(showBackground = true, name = "Activity large text", fontScale = 1.3f)
 @Composable
 fun MiniActivityScreenPreview() {
+    // Same host as production: MiniTheme > Scaffold (content color) > background Column.
     MiniTheme {
-        MiniActivityPane(
-            items = listOf(
-                previewConv(
-                    AccountId(Provider.LINKEDIN, "local_user"),
-                    "Job alert",
-                    "12 new roles for you",
-                    "com.linkedin.android",
-                    NotificationCategory.SocialUpdate,
-                ),
-            ),
-            notice = "Couldn't open LinkedIn. The item is still here.",
-            onBack = {},
-            onAcknowledge = {},
-            onOpen = {},
-        )
+        Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(padding),
+            ) {
+                MiniBrandBar(status = MiniPhoneStatus.OnThisPhone)
+                MiniActivityPane(
+                    items = listOf(
+                        previewConv(
+                            AccountId(Provider.LINKEDIN, "local_user"),
+                            "Job alert",
+                            "12 new roles for you",
+                            "com.linkedin.android",
+                            NotificationCategory.SocialUpdate,
+                        ),
+                    ),
+                    notice = "Couldn't open LinkedIn. The item is still here.",
+                    onBack = {},
+                    onAcknowledge = {},
+                    onOpen = {},
+                )
+            }
+        }
     }
 }

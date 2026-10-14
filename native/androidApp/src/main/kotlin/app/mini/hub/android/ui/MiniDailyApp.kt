@@ -107,7 +107,7 @@ fun MiniDailyApp(
             if (inThread) {
                 thread()
             } else {
-                MiniBrandBar(onThisPhone = state.isListenerConnected && state.isPermissionGranted)
+                MiniBrandBar(status = miniPhoneStatus(state, accountStore.list()))
                 val actions = InboxUiActions.from(viewModel)
                 when (current) {
                     MiniTab.Inbox -> MiniInboxPane(
@@ -142,7 +142,8 @@ fun MiniDailyApp(
 }
 
 @Composable
-internal fun MiniBrandBar(onThisPhone: Boolean) {
+internal fun MiniBrandBar(status: MiniPhoneStatus) {
+    val onThisPhone = status.healthy
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -162,7 +163,7 @@ internal fun MiniBrandBar(onThisPhone: Boolean) {
         Text("MINI", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Spacer(Modifier.weight(1f))
         Text(
-            if (onThisPhone) "On this phone" else "Needs setup",
+            status.label,
             style = MaterialTheme.typography.labelSmall,
             color = if (onThisPhone) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.tertiary,
             modifier = Modifier
@@ -443,7 +444,7 @@ internal fun MiniFocusPane(
         }
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
         if (!state.isListenerConnected) {
-            Text("Notification listener is idle. Source health is unchanged by an empty Focus list.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
+            Text("Notification listener is reconnecting. Account health is shown in Console.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
         }
         state.storageFailure?.let {
             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -601,7 +602,7 @@ internal fun MiniConsolePane(
     onSyncNow: () -> Unit,
 ) {
     val accounts = accountStore.list()
-    val needs = accounts.count { it.state != ConnectionState.Healthy && it.state != ConnectionState.Authorized && it.state != ConnectionState.Syncing }
+    val needs = accounts.count { accountNeedsAttention(it.state) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -671,7 +672,13 @@ internal fun MiniConsolePane(
         Text("YOUR PREFERENCES", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         TextButton(onClick = onOpenLearning) { Text("Writing style") }
         Text(
-            "Listener: ${if (state.isListenerConnected) "connected" else "idle"} · Permission: ${if (state.isPermissionGranted) "granted" else "needed"}",
+            "Listener: ${
+                when {
+                    state.isListenerConnected -> "connected"
+                    state.isPermissionGranted -> "reconnecting"
+                    else -> "off"
+                }
+            } · Permission: ${if (state.isPermissionGranted) "granted" else "needed"}",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 24.dp),
