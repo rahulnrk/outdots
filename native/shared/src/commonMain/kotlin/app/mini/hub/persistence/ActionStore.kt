@@ -30,6 +30,7 @@ data class ConversationDraft(
     val bcc: String = "",
     val subject: String = "",
     val isNewEmail: Boolean = false,
+    val originalGeneratedDraft: String? = null,
     val updatedAtMillis: Long,
 )
 
@@ -37,6 +38,7 @@ interface ConversationDraftStore {
     fun saveDraft(draft: ConversationDraft)
     fun loadDraft(conversationKey: String): ConversationDraft?
     fun deleteDraft(conversationKey: String)
+    fun listDrafts(): List<ConversationDraft>
 }
 
 /**
@@ -64,6 +66,7 @@ class InMemoryActionStore(initial: ActionState = ActionState()) : ActionStore, C
     override fun deleteDraft(conversationKey: String) {
         drafts.remove(conversationKey)
     }
+    override fun listDrafts(): List<ConversationDraft> = drafts.values.sortedByDescending { it.updatedAtMillis }
 }
 
 /** Contract for the Android SQLCipher implementation. No implementation is claimed until key lifecycle and migration tests pass. */

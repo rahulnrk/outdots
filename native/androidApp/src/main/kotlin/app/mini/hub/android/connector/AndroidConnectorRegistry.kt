@@ -410,6 +410,8 @@ class AndroidConnectorRegistry(
             runCatching { gmail.fetchAttachment(account, parsed.messageId, parsed.attachmentId) }.getOrNull()
         }
     }
+
+    fun sweepAttachmentExports(): Int = mediaCache.sweepStaleExports()
     fun startWhatsAppPairing() = whatsappHost.startPairing()
     fun startWhatsAppPhonePairing(phoneE164: String) = whatsappHost.startPhonePairing(phoneE164)
     fun pollWhatsAppPairing() = whatsappHost.pollPairing()

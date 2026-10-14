@@ -177,6 +177,7 @@ object MiniHubRuntime {
                     if (learned > 0) styleStore.save(styleEngine)
                 },
             )
+            runCatching { connectors.sweepAttachmentExports() }
             runCatching { connectors.restoreWhatsAppSession() }
                 .getOrNull()
                 ?.takeIf { it is app.mini.hub.connector.WhatsAppReconnect.Restored }

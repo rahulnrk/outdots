@@ -62,6 +62,8 @@ data class InboxViewState(
     val composeSubject: String = "",
     /** Durable reviewed actions, including unknowns recovered after restart. */
     val reviewedSnapshots: List<app.mini.hub.action.ReviewedActionSnapshot> = emptyList(),
+    /** Composer drafts that can be reopened after leaving a thread or restarting. */
+    val savedDrafts: List<app.mini.hub.persistence.ConversationDraft> = emptyList(),
 )
 
 data class ReviewContext(

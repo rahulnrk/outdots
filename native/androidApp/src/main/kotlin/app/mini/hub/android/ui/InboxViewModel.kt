@@ -156,6 +156,7 @@ class InboxViewModel(
         val view: AttentionView,
         val understanding: Map<String, MessageUnderstanding>,
         val reviewedSnapshots: List<app.mini.hub.action.ReviewedActionSnapshot>,
+        val savedDrafts: List<app.mini.hub.persistence.ConversationDraft>,
     )
 
     /** Store reads and analysis; runs on the refresh worker. */
@@ -208,7 +209,11 @@ class InboxViewModel(
                 ).also { understandingCache[key] = signature to it })
             }
         }
-        return RefreshResult(summaries, records, failure, view, understanding, actionStore.snapshot().reviewedSnapshots)
+        return RefreshResult(
+            summaries, records, failure, view, understanding,
+            actionStore.snapshot().reviewedSnapshots,
+            draftStore?.listDrafts().orEmpty(),
+        )
     }
 
     private fun applyRefresh(result: RefreshResult, isPermissionGranted: Boolean, isListenerConnected: Boolean) {
@@ -226,6 +231,7 @@ class InboxViewModel(
             storageFailure = result.failure,
             selectedConversation = selected,
             reviewedSnapshots = result.reviewedSnapshots,
+            savedDrafts = result.savedDrafts,
         )
     }
 
@@ -294,7 +300,8 @@ class InboxViewModel(
             s.composeBcc.isBlank() &&
             s.composeSubject.isBlank()
         if (empty) {
-            store.deleteDraft(selected.conversationId.key)
+            if (!s.isLocalDraftInProgress) store.deleteDraft(selected.conversationId.key)
+            publishDrafts()
             return
         }
         store.saveDraft(
@@ -307,9 +314,15 @@ class InboxViewModel(
                 bcc = s.composeBcc,
                 subject = s.composeSubject,
                 isNewEmail = s.composeNewTo != null,
+                originalGeneratedDraft = s.originalGeneratedDraft,
                 updatedAtMillis = clock.now().epochMillis,
             ),
         )
+        publishDrafts()
+    }
+
+    private fun publishDrafts() {
+        _state.value = _state.value.copy(savedDrafts = draftStore?.listDrafts().orEmpty())
     }
 
     private fun loadedDraft(conversationKey: String): app.mini.hub.persistence.ConversationDraft? =
@@ -358,6 +371,7 @@ class InboxViewModel(
             ),
             activeReviewPayload = null,
             localDraftText = draft?.body.orEmpty(),
+            originalGeneratedDraft = draft?.originalGeneratedDraft,
             draftVersions = emptyList(),
             localDraftStatus = null,
             conversationLoadStatus = null,
@@ -396,6 +410,7 @@ class InboxViewModel(
             ),
             activeReviewPayload = null,
             localDraftText = draft?.body.orEmpty(),
+            originalGeneratedDraft = draft?.originalGeneratedDraft,
             draftVersions = emptyList(),
             localDraftStatus = null,
             conversationLoadStatus = null,
@@ -403,6 +418,55 @@ class InboxViewModel(
             composeCc = draft?.cc.orEmpty(),
             composeBcc = draft?.bcc.orEmpty(),
             composeSubject = draft?.subject.orEmpty(),
+        )
+    }
+
+    /** Reopens a persisted composer draft, including new emails that have no inbox thread yet. */
+    fun openSavedDraft(draft: app.mini.hub.persistence.ConversationDraft) {
+        val conversationId = runCatching { app.mini.hub.domain.ScopedId.parse(draft.conversationKey) }.getOrNull() ?: return
+        val existing = _state.value.conversations.firstOrNull { it.conversationId == conversationId }
+            ?: observationStore.getConversationSummaries(conversationId.account).firstOrNull { it.conversationId == conversationId }
+        if (existing != null && !draft.isNewEmail) {
+            selectConversation(existing)
+            return
+        }
+        val accountId = conversationId.account
+        val pkg = CommunicationSource.primaryPackageFor(accountId.provider)
+            ?: if (accountId.provider == app.mini.hub.domain.Provider.GMAIL) "com.google.android.gm"
+            else CommunicationSource.API_PACKAGE_PREFIX + accountId.provider.wire
+        val summary = ConversationObservationSummary(
+            conversationId = conversationId,
+            accountId = accountId,
+            title = draft.subject.ifBlank { if (draft.to.isBlank()) "Draft" else "Draft to ${draft.to}" },
+            appName = app.mini.hub.observation.SourceAppNames.forPackage(pkg),
+            senderHint = draft.to,
+            packageId = pkg,
+            latestSnippet = draft.body,
+            category = app.mini.hub.observation.NotificationCategory.DirectMessage,
+            coverage = app.mini.hub.observation.ConversationCoverage.PartialApiSync,
+            coverageExplanation = "Saved draft",
+            latestEventAt = app.mini.hub.domain.UtcInstant(draft.updatedAtMillis),
+            observationCount = 0, unreadCount = 0, isRemoved = false,
+        )
+        clearSearch()
+        persistCurrentDraft()
+        abandonLocalDraft()
+        _state.value = _state.value.copy(
+            selectedConversation = summary,
+            selectedTimeline = emptyList(),
+            retrievedContext = retrievalEngine.retrieve(
+                ScopedRetrievalQuery(conversationId = summary.conversationId, compartment = CompartmentId(accountId.key), tokenBudget = 650),
+            ),
+            activeReviewPayload = null,
+            localDraftText = draft.body,
+            originalGeneratedDraft = draft.originalGeneratedDraft,
+            draftVersions = emptyList(),
+            localDraftStatus = "Saved draft restored.",
+            conversationLoadStatus = null,
+            composeNewTo = if (draft.isNewEmail) draft.to else null,
+            composeCc = draft.cc,
+            composeBcc = draft.bcc,
+            composeSubject = draft.subject,
         )
     }
 
@@ -445,7 +509,7 @@ class InboxViewModel(
             activeReviewPayload = null,
             outboxStatusMessage = null,
             localDraftText = draft?.body.orEmpty(),
-            originalGeneratedDraft = null,
+            originalGeneratedDraft = draft?.originalGeneratedDraft,
             draftVersions = emptyList(),
             composeNewTo = if (draft?.isNewEmail == true) draft.to else null,
             composeCc = draft?.cc.orEmpty(),
@@ -537,11 +601,12 @@ class InboxViewModel(
             )
             return
         }
+        persistCurrentDraft()
         val generation = ++localDraftGeneration
-        val previous = if (revise) _state.value.localDraftText.takeIf { it.isNotBlank() } else null
+        val retained = _state.value.localDraftText
         _state.value = _state.value.copy(
-            localDraftStatus = if (previous != null) "Rewriting on this device…" else "Generating locally on this device…",
-            localDraftText = previous ?: "",
+            localDraftStatus = if (revise || retained.isNotBlank()) "Rewriting on this device…" else "Generating locally on this device…",
+            localDraftText = retained,
             localDraftWarning = retrieved.coverageWarning.ifBlank { null },
             isLocalDraftInProgress = true,
             localDraftFeedback = null,
@@ -560,41 +625,46 @@ class InboxViewModel(
                 userIntent = userIntent,
                 styleProfile = _state.value.activeStyleProfile,
                 understandingNote = _state.value.understanding[selected.conversationId.key]?.explanation,
-                previousDraft = previous,
+                previousDraft = retained.takeIf { it.isNotBlank() },
             ),
         ) { result ->
-            val applyResult = applyResult@{
-                if (generation != localDraftGeneration) return@applyResult
-                when (result) {
-                    is LocalDraftResult.Success -> _state.value = _state.value.copy(
-                        localDraftText = result.proposal.text,
-                        originalGeneratedDraft = result.proposal.text,
-                        draftVersions = (_state.value.draftVersions + result.proposal.text).takeLast(5),
-                        localDraftWarning = result.warning.ifBlank { null },
-                        localDraftStatus = "Local draft ready (${result.latencyMs} ms). Review it before use.",
-                        isLocalDraftInProgress = false,
-                    )
-                    is LocalDraftResult.Refused -> _state.value = _state.value.copy(
-                        localDraftWarning = result.warning.ifBlank { null },
-                        localDraftStatus = result.reason,
-                        isLocalDraftInProgress = false,
-                    )
-                    is LocalDraftResult.Failed -> _state.value = _state.value.copy(
-                        localDraftWarning = result.warning.ifBlank { null },
-                        localDraftStatus = when {
-                            result.cancelled -> "Local draft cancelled."
-                            result.needsRecovery || result.restartRequired -> result.reason
-                            else -> "Local draft unavailable: ${result.reason}"
-                        },
-                        isLocalDraftInProgress = false,
-                        isLocalAiRetryAvailable = result.needsRecovery,
-                    )
-                }
-                persistCurrentDraft()
+            postToMain("draft-result") {
+                if (generation != localDraftGeneration) return@postToMain
+                applyGenerationResult(result)
             }
-            postToMain("draft-result", applyResult)
         }
     }
+
+    private fun applyGenerationResult(result: LocalDraftResult) {
+        when (result) {
+            is LocalDraftResult.Success -> _state.value = _state.value.copy(
+                localDraftText = result.proposal.text,
+                originalGeneratedDraft = result.proposal.text,
+                draftVersions = (_state.value.draftVersions + result.proposal.text).takeLast(5),
+                localDraftWarning = result.warning.ifBlank { null },
+                localDraftStatus = "Local draft ready (${result.latencyMs} ms). Review it before use.",
+                isLocalDraftInProgress = false,
+            )
+            is LocalDraftResult.Refused -> _state.value = _state.value.copy(
+                localDraftWarning = result.warning.ifBlank { null },
+                localDraftStatus = result.reason,
+                isLocalDraftInProgress = false,
+            )
+            is LocalDraftResult.Failed -> _state.value = _state.value.copy(
+                localDraftWarning = result.warning.ifBlank { null },
+                localDraftStatus = when {
+                    result.cancelled -> "Local draft cancelled."
+                    result.needsRecovery || result.restartRequired -> result.reason
+                    else -> "Local draft unavailable: ${result.reason}"
+                },
+                isLocalDraftInProgress = false,
+                isLocalAiRetryAvailable = result.needsRecovery,
+            )
+        }
+        persistCurrentDraft()
+    }
+
+    internal fun applyGenerationResultForTest(result: LocalDraftResult) = applyGenerationResult(result)
 
     // Drops any in-flight draft so its result cannot appear in a different conversation.
     private fun abandonLocalDraft() {
@@ -615,6 +685,7 @@ class InboxViewModel(
             localDraftStatus = "Local draft cancelled.",
             isLocalDraftInProgress = false,
         )
+        persistCurrentDraft()
     }
 
     /** Called by the host when Android backgrounds the app; typed/generated text remains visible. */

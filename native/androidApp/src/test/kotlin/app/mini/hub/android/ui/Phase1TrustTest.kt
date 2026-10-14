@@ -8,6 +8,7 @@ import app.mini.hub.action.GatewayResult
 import app.mini.hub.action.HandoffLauncher
 import app.mini.hub.action.OutboxState
 import app.mini.hub.action.ProviderGateway
+import app.mini.hub.action.toReviewedSnapshot
 import app.mini.hub.attention.InMemoryAttentionStore
 import app.mini.hub.connector.AccountType
 import app.mini.hub.connector.ConnectedAccount
@@ -183,6 +184,118 @@ class Phase1TrustTest {
         assertEquals(listOf(TextAuthorship.UserAuthoredSentMessage), learned)
         assertEquals(OutboxState.AcceptedByProvider, actions.snapshot().reviewedSnapshots.single().state)
         assertEquals("Reviewed reply body", actions.snapshot().reviewedSnapshots.single().body)
+    }
+
+    @Test
+    fun newEmailDraftIsDiscoverableAndReopenableAfterRestart() {
+        val account = AccountId(Provider.GMAIL, "work")
+        val actions = InMemoryActionStore()
+        val first = vm(actions = actions)
+        first.startComposeEmail(account)
+        first.updateComposeTo("to@example.com")
+        first.updateComposeCc("cc@example.com")
+        first.updateComposeBcc("bcc@example.com")
+        first.updateComposeSubject("Quarterly note")
+        first.updateLocalDraftText("Please review the attached plan.")
+        val key = first.state.value.selectedConversation!!.conversationId.key
+        first.clearSelection()
+        assertTrue(first.state.value.savedDrafts.any { it.conversationKey == key && it.isNewEmail })
+
+        val restarted = vm(actions = actions)
+        restarted.refresh(true, true)
+        val saved = restarted.state.value.savedDrafts.single { it.conversationKey == key }
+        assertEquals("to@example.com", saved.to)
+        assertEquals("cc@example.com", saved.cc)
+        assertEquals("bcc@example.com", saved.bcc)
+        assertEquals("Quarterly note", saved.subject)
+        restarted.openSavedDraft(saved)
+        assertEquals("Please review the attached plan.", restarted.state.value.localDraftText)
+        assertEquals("to@example.com", restarted.state.value.composeNewTo)
+        assertEquals("cc@example.com", restarted.state.value.composeCc)
+        assertEquals("bcc@example.com", restarted.state.value.composeBcc)
+        assertEquals("Quarterly note", restarted.state.value.composeSubject)
+    }
+
+    @Test(timeout = 30_000)
+    fun restoredUneditedAiTextDoesNotTeachStyle() {
+        val obs = InMemoryObservationStore()
+        val actions = InMemoryActionStore()
+        val account = AccountId(Provider.GMAIL, "work")
+        val conv = ScopedId(account, ScopedId.Kind.CONVERSATION, "thread")
+        obs.persistObservation(message(account, conv, packageId = "com.google.android.gm", sender = "Bob <bob@example.com>"))
+        actions.saveDraft(
+            app.mini.hub.persistence.ConversationDraft(
+                conversationKey = conv.key,
+                accountId = account.key,
+                body = "AI proposed reply",
+                originalGeneratedDraft = "AI proposed reply",
+                updatedAtMillis = clock.now().epochMillis,
+            ),
+        )
+        val accounts = InMemoryConnectedAccountStore().apply {
+            upsert(
+                ConnectedAccount(
+                    account, "me@work.com", "Me Work", AccountType.GoogleConsumer,
+                    ConnectorRoute.OfficialProviderApi, ConnectionState.Healthy,
+                    grantedScopes = setOf("https://www.googleapis.com/auth/gmail.send"),
+                ),
+            )
+        }
+        val learned = mutableListOf<TextAuthorship>()
+        val vm = vm(
+            obs, actions, accounts,
+            gateway = ProviderGateway { _, _ -> GatewayResult.Accepted("r1") },
+            learn = { _, authorship -> learned += authorship },
+            apiAllowed = { true },
+        )
+        vm.refresh(true, true)
+        vm.selectConversation(vm.state.value.conversations.first())
+        assertEquals("AI proposed reply", vm.state.value.localDraftText)
+        vm.prepareDraft("AI proposed reply", "")
+        vm.approveAndDispatch(HandoffLauncher { _, _ -> error("handoff") })
+        assertEquals(emptyList(), learned)
+    }
+
+    @Test
+    fun failedGenerationKeepsExistingDraftText() {
+        val obs = InMemoryObservationStore()
+        val account = AccountId(Provider.WHATSAPP, "local")
+        val conv = ScopedId(account, ScopedId.Kind.CONVERSATION, "Alice")
+        obs.persistObservation(message(account, conv))
+        val vm = vm(obs)
+        vm.refresh(true, true)
+        vm.selectConversation(vm.state.value.conversations.first())
+        vm.updateLocalDraftText("keep this typed draft")
+        vm.applyGenerationResultForTest(app.mini.hub.android.intelligence.LocalDraftResult.Failed("model missing", ""))
+        assertEquals("keep this typed draft", vm.state.value.localDraftText)
+        vm.applyGenerationResultForTest(app.mini.hub.android.intelligence.LocalDraftResult.Failed("stopped", "", cancelled = true))
+        assertEquals("keep this typed draft", vm.state.value.localDraftText)
+    }
+
+    @Test
+    fun recoveredUnknownsAreVisibleWithoutSelectingAConversation() {
+        val actions = InMemoryActionStore()
+        val payload = app.mini.hub.action.ExactActionPayload(
+            accountId = "gmail|work", conversationId = "gmail|work|conversation|t1",
+            route = ActionRoute.Api, recipients = listOf("bob@example.com"), subject = "Re: x",
+            body = "Exact reviewed body", attachments = emptyList(), sourceVersions = emptyList(),
+            grantVersion = "g", policyVersion = "p",
+        )
+        val controller = ActionController(clock, digest, DomainActionIdGenerator(idGen))
+        val approved = controller.approve(app.mini.hub.action.ActionState(), payload)
+        actions.transaction {
+            approved.first.copy(
+                outbox = approved.first.outbox.map { it.copy(state = OutboxState.Dispatching) },
+                reviewedSnapshots = listOf(payload.toReviewedSnapshot(approved.second).copy(state = OutboxState.Dispatching)),
+            )
+        }
+        actions.recoverInterrupted(controller)
+        val vm = vm(actions = actions)
+        vm.refresh(true, true)
+        assertNull(vm.state.value.selectedConversation)
+        val unknown = vm.state.value.reviewedSnapshots.single()
+        assertEquals(OutboxState.OutcomeUnknown, unknown.state)
+        assertEquals("Exact reviewed body", unknown.body)
     }
 
     private fun message(

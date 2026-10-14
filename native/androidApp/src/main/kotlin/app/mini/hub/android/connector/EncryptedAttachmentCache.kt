@@ -17,11 +17,16 @@ import javax.crypto.spec.GCMParameterSpec
  *
  * Durable bytes stay encrypted. FileProvider export is a short-lived plaintext file under
  * `wa-media/` so the existing provider path can open it; those files are not the cache.
+ * Export cleanup runs on construction, not only when another attachment is opened.
  */
 class EncryptedAttachmentCache(context: Context) {
     private val appContext = context.applicationContext
     private val encRoot = File(appContext.cacheDir, "media-enc")
     private val exportRoot = File(appContext.cacheDir, "wa-media")
+
+    init {
+        sweepStaleExports()
+    }
 
     fun export(
         accountId: AccountId,
@@ -30,7 +35,7 @@ class EncryptedAttachmentCache(context: Context) {
         fileName: String,
         fetch: () -> ByteArray?,
     ): File? {
-        sweepExports()
+        sweepStaleExports()
         val partition = GmailAttachmentRef.cachePartition(accountId)
         val encDir = File(encRoot, partition).apply { mkdirs() }
         val encFile = File(encDir, "${safe(messageId)}_${safe(attachmentId)}.bin")
@@ -50,25 +55,54 @@ class EncryptedAttachmentCache(context: Context) {
         return export
     }
 
-    private fun sweepExports() {
+    /** Deletes expired plaintext exports. Safe to call at process start. */
+    fun sweepStaleExports(): Int {
         val cutoff = System.currentTimeMillis() - EXPORT_TTL_MS
+        var removed = 0
         exportRoot.listFiles()?.forEach { file ->
-            if (file.name.startsWith("exp_") && file.lastModified() < cutoff) file.delete()
+            if (file.name.startsWith("exp_") && file.lastModified() < cutoff) {
+                if (file.delete()) removed++
+            }
         }
+        return removed
     }
 
     private fun encrypt(plain: ByteArray): ByteArray {
         val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, secretKey()) }
-        return cipher.iv + cipher.doFinal(plain)
+        val iv = cipher.iv
+        require(iv.isNotEmpty()) { "Keystore GCM IV missing" }
+        val ciphertext = cipher.doFinal(plain)
+        val envelope = ByteArray(2 + iv.size + ciphertext.size)
+        envelope[0] = ((iv.size ushr 8) and 0xFF).toByte()
+        envelope[1] = (iv.size and 0xFF).toByte()
+        System.arraycopy(iv, 0, envelope, 2, iv.size)
+        System.arraycopy(ciphertext, 0, envelope, 2 + iv.size, ciphertext.size)
+        return envelope
     }
 
     private fun decrypt(payload: ByteArray): ByteArray {
-        require(payload.size > IV_BYTES) { "truncated attachment envelope" }
-        val iv = payload.copyOfRange(0, IV_BYTES)
+        val keyed = parseKeyedEnvelope(payload)
+        if (keyed != null) return decryptWith(keyed.first, keyed.second)
+        // Previous build prefixed a 12-byte IV with no length. Read that once, then rewrite on next save.
+        require(payload.size > LEGACY_IV_BYTES) { "truncated attachment envelope" }
+        return decryptWith(payload.copyOfRange(0, LEGACY_IV_BYTES), payload.copyOfRange(LEGACY_IV_BYTES, payload.size))
+    }
+
+    private fun parseKeyedEnvelope(payload: ByteArray): Pair<ByteArray, ByteArray>? {
+        if (payload.size < 3) return null
+        val ivLen = ((payload[0].toInt() and 0xFF) shl 8) or (payload[1].toInt() and 0xFF)
+        if (ivLen !in MIN_IV_BYTES..MAX_IV_BYTES) return null
+        if (payload.size <= 2 + ivLen) return null
+        val iv = payload.copyOfRange(2, 2 + ivLen)
+        val ciphertext = payload.copyOfRange(2 + ivLen, payload.size)
+        return iv to ciphertext
+    }
+
+    private fun decryptWith(iv: ByteArray, ciphertext: ByteArray): ByteArray {
         val cipher = Cipher.getInstance(TRANSFORMATION).apply {
             init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, iv))
         }
-        return cipher.doFinal(payload, IV_BYTES, payload.size - IV_BYTES)
+        return cipher.doFinal(ciphertext)
     }
 
     private fun secretKey(): SecretKey {
@@ -94,7 +128,9 @@ class EncryptedAttachmentCache(context: Context) {
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val KEY_ALIAS = "mini.hub.media.cache.v1"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
-        private const val IV_BYTES = 12
+        private const val LEGACY_IV_BYTES = 12
+        private const val MIN_IV_BYTES = 12
+        private const val MAX_IV_BYTES = 16
         private const val EXPORT_TTL_MS = 10 * 60 * 1000L
     }
 }

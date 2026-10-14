@@ -53,6 +53,7 @@ class SqlCipherActionStore(
         db.execSQL(SCHEMA_OUTBOX)
         db.execSQL(SCHEMA_SNAPSHOTS)
         db.execSQL(SCHEMA_DRAFTS)
+        runCatching { db.execSQL("ALTER TABLE conversation_drafts ADD COLUMN original_generated_draft TEXT") }
         db
     }
 
@@ -228,6 +229,7 @@ class SqlCipherActionStore(
                 put("compose_subject", draft.subject)
                 put("is_new_email", if (draft.isNewEmail) 1 else 0)
                 put("updated_at", draft.updatedAtMillis)
+                put("original_generated_draft", draft.originalGeneratedDraft)
             },
             SQLiteDatabase.CONFLICT_REPLACE,
         )
@@ -245,17 +247,7 @@ class SqlCipherActionStore(
             null,
         ).use { cursor ->
             if (!cursor.moveToFirst()) return@use null
-            ConversationDraft(
-                conversationKey = cursor.text("conversation_key"),
-                accountId = cursor.text("account_id"),
-                body = cursor.text("body"),
-                to = cursor.text("compose_to"),
-                cc = cursor.text("compose_cc"),
-                bcc = cursor.text("compose_bcc"),
-                subject = cursor.text("compose_subject"),
-                isNewEmail = cursor.int("is_new_email") != 0,
-                updatedAtMillis = cursor.long("updated_at"),
-            )
+            cursor.toDraft()
         }
     }
 
@@ -263,6 +255,36 @@ class SqlCipherActionStore(
     override fun deleteDraft(conversationKey: String) {
         database.delete("conversation_drafts", "conversation_key = ?", arrayOf(conversationKey))
     }
+
+    @Synchronized
+    override fun listDrafts(): List<ConversationDraft> {
+        return database.query(
+            "conversation_drafts",
+            DRAFT_COLUMNS,
+            null,
+            null,
+            null,
+            null,
+            "updated_at DESC",
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) add(cursor.toDraft())
+            }
+        }
+    }
+
+    private fun android.database.Cursor.toDraft(): ConversationDraft = ConversationDraft(
+        conversationKey = text("conversation_key"),
+        accountId = text("account_id"),
+        body = text("body"),
+        to = text("compose_to"),
+        cc = text("compose_cc"),
+        bcc = text("compose_bcc"),
+        subject = text("compose_subject"),
+        isNewEmail = int("is_new_email") != 0,
+        originalGeneratedDraft = optionalText("original_generated_draft"),
+        updatedAtMillis = long("updated_at"),
+    )
 
     private companion object {
         const val SCHEMA_APPROVALS = """
@@ -319,7 +341,8 @@ class SqlCipherActionStore(
                 compose_bcc TEXT NOT NULL,
                 compose_subject TEXT NOT NULL,
                 is_new_email INTEGER NOT NULL CHECK (is_new_email IN (0, 1)),
-                updated_at INTEGER NOT NULL
+                updated_at INTEGER NOT NULL,
+                original_generated_draft TEXT
             )
         """
         val SNAPSHOT_COLUMNS = arrayOf(
@@ -328,7 +351,7 @@ class SqlCipherActionStore(
         )
         val DRAFT_COLUMNS = arrayOf(
             "conversation_key", "account_id", "body", "compose_to", "compose_cc", "compose_bcc",
-            "compose_subject", "is_new_email", "updated_at",
+            "compose_subject", "is_new_email", "updated_at", "original_generated_draft",
         )
     }
 }

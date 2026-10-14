@@ -71,4 +71,27 @@ class ActionStoreTest {
         assertEquals("other", store.loadDraft("conv-b")?.body)
         assertEquals(0, store.snapshot().approvals.size)
     }
+
+    @Test fun wrapperStoreKeepsReviewedSnapshotsThroughTransaction() {
+        val inner = InMemoryActionStore()
+        val wrapper = object : ActionStore by inner {}
+        val approved = controller.approve(ActionState(), payload)
+        val command = approved.second
+        wrapper.transaction {
+            approved.first.copy(reviewedSnapshots = listOf(payload.toReviewedSnapshot(command)))
+        }
+        assertEquals("body", wrapper.snapshot().reviewedSnapshots.single().body)
+        assertEquals(command.id, wrapper.snapshot().reviewedSnapshots.single().commandId)
+        assertEquals("acct", wrapper.snapshot().reviewedSnapshots.single().accountId)
+    }
+
+    @Test fun listDraftsReturnsNewEmailDraftsForDiscovery() {
+        val store = InMemoryActionStore()
+        store.saveDraft(ConversationDraft("k1", "acct", "body", to = "a@b.c", subject = "Hi", isNewEmail = true, originalGeneratedDraft = "body", updatedAtMillis = 2L))
+        store.saveDraft(ConversationDraft("k2", "acct", "other", updatedAtMillis = 1L))
+        val listed = store.listDrafts()
+        assertEquals(listOf("k1", "k2"), listed.map { it.conversationKey })
+        assertEquals("body", listed.first().originalGeneratedDraft)
+        assertEquals(true, listed.first().isNewEmail)
+    }
 }

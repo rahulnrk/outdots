@@ -424,6 +424,28 @@ fun InboxScreen(
                     }
                 } else {
                     // Chat-style list for every source
+                    val listedKeys = state.conversations.map { it.conversationId.key }.toSet()
+                    val discoverableDrafts = state.savedDrafts.filter { it.isNewEmail || it.conversationKey !in listedKeys }
+                    discoverableDrafts.forEach { draft ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable { viewModel.openSavedDraft(draft) },
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text("Draft", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
+                                if (draft.to.isNotBlank()) Text("To: ${draft.to}", style = MaterialTheme.typography.bodySmall)
+                                if (draft.cc.isNotBlank()) Text("Cc: ${draft.cc}", style = MaterialTheme.typography.bodySmall)
+                                if (draft.bcc.isNotBlank()) Text("Bcc: ${draft.bcc}", style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    draft.subject.ifBlank { "(no subject)" },
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                                if (draft.body.isNotBlank()) {
+                                    Text(draft.body, style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                                }
+                            }
+                        }
+                    }
                     ChatListView(
                         conversations = state.conversations,
                         labels = labels,
