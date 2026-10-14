@@ -334,4 +334,30 @@ class InboxViewModelTest {
 
         assertEquals(1, vm.state.value.conversations.size, "a stale refresh must not overwrite a newer one")
     }
+
+    @Test
+    fun attentionUndoRestoresPreviousFollowUp() {
+        val obsStore = InMemoryObservationStore()
+        val attentionStore = InMemoryAttentionStore()
+        val vm = InboxViewModel(obsStore, ScopedRetrievalEngine(obsStore), AdaptiveStyleEngine(), ActionController(clock, digest, DomainActionIdGenerator(idGen)), InMemoryActionStore(), clock, attentionStore)
+        obsStore.persistObservation(
+            ObservedNotification(
+                id = ScopedId(account, ScopedId.Kind.OBSERVATION, "obs_undo"), accountId = account, conversationId = convId,
+                packageId = "com.whatsapp", notificationKey = "notif_undo", notificationId = 31, tag = null,
+                senderHint = "Alice", title = "Alice", textFragments = listOf("Hi"), rawTextDigest = "digest_undo",
+                observedAt = clock.now(), postTime = clock.now(), revision = 1L, isRemoved = false, isGroupSummary = false,
+                truncationState = TruncationState.Complete, correlationConfidence = CorrelationConfidence.High,
+                provenance = ObservationProvenance.AndroidNotificationListener,
+            ),
+        )
+        vm.refresh(true, true)
+        vm.applyAttentionAction(convId, AttentionAction.MarkWaiting)
+        assertEquals(FollowUpStatus.Waiting, vm.state.value.attentionRecords[convId.key]?.status)
+        assertEquals(true, vm.state.value.canUndoAttention)
+        vm.undoLastAttention()
+        assertEquals(FollowUpStatus.NeedsAttention, vm.state.value.attentionRecords[convId.key]?.status)
+        assertEquals(false, vm.state.value.canUndoAttention)
+        assertTrue(vm.laterPresets().size >= 3)
+        assertTrue(vm.laterPresets().all { it.second.epochMillis > clock.now().epochMillis })
+    }
 }

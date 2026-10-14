@@ -84,6 +84,7 @@ object MiniHubRuntime {
 
     private val backgroundExecutor = Executors.newSingleThreadExecutor()
     private val whatsappPoller = Executors.newSingleThreadScheduledExecutor()
+    private val exportSweeper = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "mini-export-sweep").apply { isDaemon = true } }
     private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile private var whatsappPoll: ScheduledFuture<*>? = null
     @Volatile var inboxRefresh: (() -> Unit)? = null
@@ -178,6 +179,9 @@ object MiniHubRuntime {
                 },
             )
             runCatching { connectors.sweepAttachmentExports() }
+            exportSweeper.scheduleAtFixedRate({
+                runCatching { connectors.sweepAttachmentExports() }
+            }, 2, 5, TimeUnit.MINUTES)
             runCatching { connectors.restoreWhatsAppSession() }
                 .getOrNull()
                 ?.takeIf { it is app.mini.hub.connector.WhatsAppReconnect.Restored }

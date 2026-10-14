@@ -235,6 +235,8 @@ class InboxViewModel(
         )
     }
 
+    private var attentionUndo: app.mini.hub.attention.ConversationAttention? = null
+
     fun applyAttentionAction(conversationId: app.mini.hub.domain.ScopedId, action: AttentionAction) {
         val existing = _state.value.attentionRecords[conversationId.key] ?: AttentionRules.default(conversationId, clock.now())
         val decision = AttentionRules.apply(existing, action, _state.value.conversations.find { it.conversationId == conversationId }?.latestEventAt, clock.now())
@@ -243,11 +245,46 @@ class InboxViewModel(
             if (saveResult is AttentionStoreResult.Failed) {
                 _state.value = _state.value.copy(storageFailure = saveResult.message)
             } else {
+                attentionUndo = existing
+                _state.value = _state.value.copy(canUndoAttention = true)
                 refresh(_state.value.isPermissionGranted, _state.value.isListenerConnected)
             }
         } else if (decision is app.mini.hub.attention.AttentionDecision.Rejected) {
             _state.value = _state.value.copy(outboxStatusMessage = decision.reason)
         }
+    }
+
+    fun undoLastAttention() {
+        val previous = attentionUndo ?: return
+        val saveResult = attentionStore.saveAll(listOf(previous))
+        attentionUndo = null
+        if (saveResult is AttentionStoreResult.Failed) {
+            _state.value = _state.value.copy(storageFailure = saveResult.message, canUndoAttention = false)
+        } else {
+            _state.value = _state.value.copy(canUndoAttention = false)
+            refresh(_state.value.isPermissionGranted, _state.value.isListenerConnected)
+        }
+    }
+
+    fun laterPresets(): List<Pair<String, app.mini.hub.domain.UtcInstant>> {
+        val now = clock.now().epochMillis
+        fun atHour(daysAhead: Int, hour: Int): Long {
+            val c = java.util.Calendar.getInstance()
+            c.timeInMillis = now
+            c.add(java.util.Calendar.DAY_OF_YEAR, daysAhead)
+            c.set(java.util.Calendar.HOUR_OF_DAY, hour)
+            c.set(java.util.Calendar.MINUTE, 0)
+            c.set(java.util.Calendar.SECOND, 0)
+            c.set(java.util.Calendar.MILLISECOND, 0)
+            if (c.timeInMillis <= now) c.add(java.util.Calendar.DAY_OF_YEAR, 1)
+            return c.timeInMillis
+        }
+        return listOf(
+            "In 1 hour" to app.mini.hub.domain.UtcInstant(now + 60 * 60_000L),
+            "This evening" to app.mini.hub.domain.UtcInstant(atHour(0, 20)),
+            "Tomorrow morning" to app.mini.hub.domain.UtcInstant(atHour(1, 9)),
+            "In 2 days" to app.mini.hub.domain.UtcInstant(now + 2 * 24 * 60 * 60_000L),
+        )
     }
 
     fun onSearchQueryChanged(text: String) {

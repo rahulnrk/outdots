@@ -108,47 +108,27 @@ fun InboxScreen(
         if (connectionStatus != null) showAccountSettings = true
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("MINI") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                ),
-                actions = {
-                    TextButton(onClick = {
-                        val gmail = accountStore.list().firstOrNull {
-                            it.id.provider == app.mini.hub.domain.Provider.GMAIL && it.state != app.mini.hub.connector.ConnectionState.Disconnected
-                        }
-                        if (gmail != null) viewModel.startComposeEmail(gmail.id) else showAccountSettings = true
-                    }) { Text("✏ Compose") }
-                    TextButton(onClick = { showSourceSettings = true }) {
-                        Text("Sources")
-                    }
-                    TextButton(onClick = { showAccountSettings = true }) {
-                        Text("Accounts")
-                    }
-                    TextButton(onClick = { showLearningSettings = true }) {
-                        Text("Learning")
-                    }
-                    val statusText = if (state.isListenerConnected) "Listener Active" else "Listener Idle"
-                    val statusColor = if (state.isListenerConnected) Color(0xFF2E7D32) else Color(0xFFC62828)
-                    Text(
-                        text = statusText,
-                        color = statusColor,
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(end = 12.dp),
-                    )
-                },
-            )
+    MiniDailyApp(
+        state = state,
+        viewModel = viewModel,
+        accountStore = accountStore,
+        labels = labels,
+        onCompose = {
+            val mail = accountStore.list().firstOrNull {
+                it.id.provider == app.mini.hub.domain.Provider.GMAIL && it.state != app.mini.hub.connector.ConnectionState.Disconnected
+            } ?: accountStore.list().firstOrNull {
+                it.id.provider == app.mini.hub.domain.Provider.OUTLOOK && it.state != app.mini.hub.connector.ConnectionState.Disconnected
+            }
+            if (mail != null) viewModel.startComposeEmail(mail.id) else showAccountSettings = true
         },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp),
-        ) {
+        onOpenSources = { showSourceSettings = true },
+        onOpenAccounts = { showAccountSettings = true },
+        onOpenLearning = { showLearningSettings = true },
+        onRequestPermission = onRequestPermission,
+        onSyncNow = onSyncNow,
+        capabilities = capabilities,
+        thread = {
+            Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
             // Permission Banner if access is not granted
             if (!state.isPermissionGranted) {
                 Card(
@@ -344,22 +324,12 @@ fun InboxScreen(
                     onDraftPrepared = { body, recip -> viewModel.prepareDraft(body, recip) },
                     onAttentionAction = { action -> viewModel.applyAttentionAction(state.selectedConversation!!.conversationId, action) },
                 )
-            } else {
-                // Unified search box across every enabled source
-                androidx.compose.material3.OutlinedTextField(
-                    value = state.searchQuery,
-                    onValueChange = { viewModel.onSearchQueryChanged(it) },
-                    placeholder = { Text("Search messages across all sources…") },
-                    singleLine = true,
-                    trailingIcon = {
-                        if (state.searchQuery.isNotBlank()) {
-                            TextButton(onClick = { viewModel.clearSearch() }) {
-                                Text("✕", style = MaterialTheme.typography.bodyLarge)
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                )
+            }
+            }
+        },
+        extraList = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Search results and drafts live here; MiniInbox owns the conversation list.
 
                 if (state.searchQuery.isNotBlank()) {
                     // People: reach this person on any connected account
@@ -447,15 +417,19 @@ fun InboxScreen(
                         }
                     }
                     ChatListView(
-                        conversations = state.conversations,
+                        conversations = state.conversations.filter {
+                            it.packageId == "com.linkedin.android" &&
+                                it.category != app.mini.hub.observation.NotificationCategory.DirectMessage &&
+                                it.category != app.mini.hub.observation.NotificationCategory.GroupMessage
+                        },
                         labels = labels,
                         onSelect = { viewModel.selectConversation(it) },
                         onAttention = { conversationId, action -> viewModel.applyAttentionAction(conversationId, action) },
                     )
                 }
             }
-        }
-    }
+        },
+    )
 
     if (showSourceSettings) {
         CommunicationSourceSettingsDialog(

@@ -19,6 +19,7 @@ import app.mini.hub.android.notification.MiniNotificationListenerService
 import app.mini.hub.android.ui.AndroidNativeHandoffLauncher
 import app.mini.hub.android.ui.InboxScreen
 import app.mini.hub.android.ui.InboxViewModel
+import app.mini.hub.android.ui.MiniTheme
 import app.mini.hub.domain.Provider
 import app.mini.hub.style.StyleContext
 
@@ -93,7 +94,7 @@ class MainActivity : ComponentActivity() {
         handoffLauncher = AndroidNativeHandoffLauncher(this)
 
         setContent {
-            MaterialTheme {
+            MiniTheme {
                 InboxScreen(
                     viewModel = viewModel,
                     handoffLauncher = handoffLauncher,
