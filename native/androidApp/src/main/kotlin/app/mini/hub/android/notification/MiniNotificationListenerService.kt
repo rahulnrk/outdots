@@ -5,6 +5,9 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -19,10 +22,48 @@ import app.mini.hub.observation.NotificationRawPayload
  * 1. Non-blocking callback: pushes payload into bounded queue and dispatches background persistence.
  * 2. Headless startup: initializes runtime and persists events even if UI Activity is closed.
  * 3. Explicit permission gating: checks whether user enabled notification access.
- * 4. Lifecycle state: tracks listener connection/disconnection and supports rebind.
+ * 4. Lifecycle state: tracks listener connection/disconnection and supports bounded, throttled rebind.
  * 5. Filters out self-notifications to avoid loops (except synthetic test notifications).
  */
 class MiniNotificationListenerService : NotificationListenerService() {
+
+    interface RebindScheduler {
+        fun postDelayed(delayMillis: Long, action: Runnable)
+        fun cancel()
+        fun isScheduled(): Boolean
+    }
+
+    class HandlerRebindScheduler(
+        private val getHandler: () -> Handler = { Handler(Looper.getMainLooper()) },
+    ) : RebindScheduler {
+        private var pending: Runnable? = null
+        private var handlerInstance: Handler? = null
+
+        private fun handler(): Handler =
+            handlerInstance ?: getHandler().also { handlerInstance = it }
+
+        @Synchronized
+        override fun postDelayed(delayMillis: Long, action: Runnable) {
+            cancel()
+            val wrapped = Runnable {
+                synchronized(this) {
+                    if (pending === action) pending = null
+                }
+                action.run()
+            }
+            pending = action
+            handler().postDelayed(wrapped, delayMillis)
+        }
+
+        @Synchronized
+        override fun cancel() {
+            pending = null
+            handlerInstance?.removeCallbacksAndMessages(null)
+        }
+
+        @Synchronized
+        override fun isScheduled(): Boolean = pending != null
+    }
 
     companion object {
         @Volatile
@@ -30,14 +71,30 @@ class MiniNotificationListenerService : NotificationListenerService() {
             private set
 
         @Volatile
+        var activeInstance: MiniNotificationListenerService? = null
+            internal set
+
+        @Volatile
+        var lastTransitionElapsedRealtime: Long = 0L
+            internal set
+
+        @Volatile
         var lastTransitionAtMillis: Long = 0L
             internal set
 
         @Volatile
-        var lastRebindAttemptAtMillis: Long = 0L
+        var lastRebindAttemptElapsedRealtime: Long = 0L
             internal set
 
         const val REBIND_COOLDOWN_MILLIS: Long = 15_000L
+
+        @Volatile
+        var elapsedRealtimeClock: () -> Long = { SystemClock.elapsedRealtime() }
+            internal set
+
+        @Volatile
+        var scheduler: RebindScheduler = HandlerRebindScheduler()
+            internal set
 
         /**
          * Checks if the user has explicitly granted notification listener access to this app.
@@ -63,44 +120,122 @@ class MiniNotificationListenerService : NotificationListenerService() {
 
         /**
          * Pure gate for controlled rebind requests.
-         * Enforces cooldown to prevent uncontrolled rebind loops against Android's ManagedServices.
+         * Enforces cooldown using monotonic elapsed time to prevent uncontrolled rebind loops.
          */
         fun shouldAttemptRebind(
             isPermissionGranted: Boolean,
             isConnected: Boolean,
-            lastTransitionAtMillis: Long,
-            lastRebindAttemptAtMillis: Long,
-            nowMillis: Long,
+            lastTransitionElapsedRealtime: Long,
+            lastRebindAttemptElapsedRealtime: Long,
+            nowElapsedRealtime: Long,
             cooldownMillis: Long = REBIND_COOLDOWN_MILLIS,
         ): Boolean {
             if (!isPermissionGranted || isConnected) return false
-            if (nowMillis - lastTransitionAtMillis < cooldownMillis) return false
-            if (nowMillis - lastRebindAttemptAtMillis < cooldownMillis) return false
+            if (nowElapsedRealtime - lastTransitionElapsedRealtime < cooldownMillis) return false
+            if (nowElapsedRealtime - lastRebindAttemptElapsedRealtime < cooldownMillis) return false
             return true
         }
 
         /**
          * Requests the system to rebind this service if permission is granted, currently disconnected,
          * and the cooldown period has elapsed since the last transition or attempt.
-         * Controlled recovery: does NOT hammer the OS binder in a tight loop.
+         *
+         * If currently within cooldown, schedules a single bounded deferred recovery attempt once the
+         * cooldown expires. Duplicate scheduled attempts are suppressed, and pending attempts are
+         * cancelled on reconnect or permission loss.
          */
-        fun rebindIfNeeded(context: Context, nowMillis: Long = System.currentTimeMillis()): Boolean {
-            if (!isPermissionGranted(context)) return false
+        fun rebindIfNeeded(
+            context: Context,
+            nowElapsedRealtime: Long = elapsedRealtimeClock(),
+        ): Boolean {
+            if (!isPermissionGranted(context)) {
+                cancelPendingRecovery()
+                return false
+            }
+            if (isConnected) {
+                cancelPendingRecovery()
+                return false
+            }
+
+            if (shouldAttemptRebind(
+                    isPermissionGranted = true,
+                    isConnected = isConnected,
+                    lastTransitionElapsedRealtime = lastTransitionElapsedRealtime,
+                    lastRebindAttemptElapsedRealtime = lastRebindAttemptElapsedRealtime,
+                    nowElapsedRealtime = nowElapsedRealtime,
+                )
+            ) {
+                cancelPendingRecovery()
+                lastRebindAttemptElapsedRealtime = nowElapsedRealtime
+                return performRequestRebind(context)
+            }
+
+            // Cooldown active. Schedule a single bounded deferred attempt if not already scheduled.
+            if (!scheduler.isScheduled()) {
+                val timeSinceTransition = nowElapsedRealtime - lastTransitionElapsedRealtime
+                val timeSinceAttempt = nowElapsedRealtime - lastRebindAttemptElapsedRealtime
+                val remainingCooldown = maxOf(
+                    REBIND_COOLDOWN_MILLIS - timeSinceTransition,
+                    REBIND_COOLDOWN_MILLIS - timeSinceAttempt,
+                    1L,
+                )
+                val appContext = context.applicationContext ?: context
+                scheduler.postDelayed(remainingCooldown) {
+                    executeDeferredRecovery(appContext)
+                }
+            }
+            return false
+        }
+
+        fun executeDeferredRecovery(
+            context: Context,
+            nowElapsedRealtime: Long = elapsedRealtimeClock(),
+        ): Boolean {
+            if (!isPermissionGranted(context) || isConnected) {
+                cancelPendingRecovery()
+                return false
+            }
             if (!shouldAttemptRebind(
                     isPermissionGranted = true,
                     isConnected = isConnected,
-                    lastTransitionAtMillis = lastTransitionAtMillis,
-                    lastRebindAttemptAtMillis = lastRebindAttemptAtMillis,
-                    nowMillis = nowMillis,
+                    lastTransitionElapsedRealtime = lastTransitionElapsedRealtime,
+                    lastRebindAttemptElapsedRealtime = lastRebindAttemptElapsedRealtime,
+                    nowElapsedRealtime = nowElapsedRealtime,
                 )
-            ) return false
+            ) {
+                return false
+            }
+            lastRebindAttemptElapsedRealtime = nowElapsedRealtime
+            return performRequestRebind(context)
+        }
 
-            lastRebindAttemptAtMillis = nowMillis
+        fun cancelPendingRecovery() {
+            scheduler.cancel()
+        }
+
+        fun performRequestRebind(context: Context): Boolean {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                try {
+                return try {
                     requestRebind(ComponentName(context, MiniNotificationListenerService::class.java))
-                    return true
+                    true
                 } catch (_: Throwable) {
+                    false
+                }
+            }
+            return false
+        }
+
+        /**
+         * Diagnostic helper: requests unbind while keeping the host process alive.
+         */
+        fun requestUnbindForDebug(): Boolean {
+            val instance = activeInstance ?: return false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                return try {
+                    instance.requestUnbind()
+                    true
+                } catch (_: Throwable) {
+                    false
                 }
             }
             return false
@@ -115,8 +250,11 @@ class MiniNotificationListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         MiniHubRuntime.init(applicationContext)
+        activeInstance = this
         isConnected = true
+        lastTransitionElapsedRealtime = elapsedRealtimeClock()
         lastTransitionAtMillis = System.currentTimeMillis()
+        cancelPendingRecovery()
         android.util.Log.i("MiniListener", "listener connected")
         // Logged once per connection, never per notification, so a broken store cannot spam logs.
         if (!MiniHubRuntime.isStorageReady) MiniHubRuntime.logState("work=notification_listener skipped storage=unavailable")
@@ -126,13 +264,16 @@ class MiniNotificationListenerService : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
+        if (activeInstance === this) activeInstance = null
         isConnected = false
+        lastTransitionElapsedRealtime = elapsedRealtimeClock()
         lastTransitionAtMillis = System.currentTimeMillis()
+        cancelPendingRecovery()
         android.util.Log.i("MiniListener", "listener disconnected")
-        // Do NOT call rebindIfNeeded here. Android's ManagedServices framework
-        // handles reconnection automatically. Calling requestRebind immediately
-        // on disconnect creates a race condition with the OS teardown and triggers
-        // uncontrolled rebind churn.
+        // The Android framework's ManagedServices handles reconnection automatically
+        // after unbind or crash. An immediate requestRebind() here is omitted to let
+        // the platform rebind cycle proceed normally; an uncoordinated rebind request
+        // is suspected of racing binder teardown under rapid restart conditions.
         MiniHubRuntime.notifyInboxChanged()
     }
 

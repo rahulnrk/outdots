@@ -19,6 +19,8 @@
                 <action android:name="app.mini.hub.QUERY_DELIVERY_ACCOUNTING" />
                 <action android:name="app.mini.hub.SET_ATTENTION" />
                 <action android:name="app.mini.hub.DUMP_ATTENTION" />
+                <action android:name="app.mini.hub.TRIGGER_UNBIND" />
+                <action android:name="app.mini.hub.TRIGGER_REBIND" />
             </intent-filter>
         </receiver>
         <receiver

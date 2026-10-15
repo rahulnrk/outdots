@@ -121,6 +121,16 @@ class SyntheticNotificationReceiver : BroadcastReceiver() {
                 }
             }
 
+            ACTION_TRIGGER_UNBIND -> {
+                val ok = MiniNotificationListenerService.requestUnbindForDebug()
+                Log.i("MiniHubSynthetic", "TRIGGER_UNBIND requested result=$ok")
+            }
+
+            ACTION_TRIGGER_REBIND -> {
+                val ok = MiniNotificationListenerService.rebindIfNeeded(context)
+                Log.i("MiniHubSynthetic", "TRIGGER_REBIND requested result=$ok")
+            }
+
             ACTION_CANCEL_SYNTHETIC -> {
                 val notifId = readNotificationId(intent, 1001)
                 // Generate a cancellation correlationId so the removal can be traced end-to-end.
@@ -236,6 +246,8 @@ class SyntheticNotificationReceiver : BroadcastReceiver() {
         const val ACTION_DUMP_SYNTHETIC_STATE = "app.mini.hub.DUMP_SYNTHETIC_STATE"
         const val ACTION_SET_ATTENTION = "app.mini.hub.SET_ATTENTION"
         const val ACTION_DUMP_ATTENTION = "app.mini.hub.DUMP_ATTENTION"
+        const val ACTION_TRIGGER_UNBIND = "app.mini.hub.TRIGGER_UNBIND"
+        const val ACTION_TRIGGER_REBIND = "app.mini.hub.TRIGGER_REBIND"
         const val EXTRA_SENDER = "sender"
         const val EXTRA_TEXT = "text"
         const val EXTRA_ID = "id"
