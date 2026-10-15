@@ -163,9 +163,12 @@ private val MiniTypography = androidx.compose.material3.Typography(
 )
 
 @Composable
-fun MiniTheme(content: @Composable () -> Unit) {
+fun MiniTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    content: @Composable () -> Unit,
+) {
     MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) MiniDarkColors else MiniLightColors,
+        colorScheme = if (darkTheme) MiniDarkColors else MiniLightColors,
         typography = MiniTypography,
         content = content,
     )

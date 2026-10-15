@@ -38,7 +38,21 @@ data class DraftProvenance(
     val appliedStyleSummary: String? = null,
     val coverageWarning: String? = null,
     val excludedAttachments: List<String> = emptyList(),
+    val previousDraft: String? = null,
+    val understandingNote: String? = null,
     val generatedAtMillis: Long = 0L,
+)
+
+/**
+ * Coupled draft version holding text, its exact provenance (if AI generated),
+ * and the baseline original AI proposal text (to distinguish unedited AI text from user edits).
+ */
+data class DraftVersion(
+    val id: String = "",
+    val text: String,
+    val provenance: DraftProvenance? = null,
+    val originalAiText: String? = null,
+    val isAiGenerated: Boolean = provenance != null || originalAiText != null,
 )
 
 /** Editable composer text keyed by conversation. Approvals are never stored here. */
@@ -54,6 +68,7 @@ data class ConversationDraft(
     val originalGeneratedDraft: String? = null,
     val updatedAtMillis: Long,
     val provenance: DraftProvenance? = null,
+    val versions: List<DraftVersion> = emptyList(),
 )
 
 object DraftProvenanceSerializer {
@@ -64,6 +79,8 @@ object DraftProvenanceSerializer {
         append("\"userInstruction\":\"").append(escape(p.userInstruction)).append("\",")
         append("\"appliedStyleSummary\":").append(p.appliedStyleSummary?.let { "\"${escape(it)}\"" } ?: "null").append(",")
         append("\"coverageWarning\":").append(p.coverageWarning?.let { "\"${escape(it)}\"" } ?: "null").append(",")
+        append("\"previousDraft\":").append(p.previousDraft?.let { "\"${escape(it)}\"" } ?: "null").append(",")
+        append("\"understandingNote\":").append(p.understandingNote?.let { "\"${escape(it)}\"" } ?: "null").append(",")
         append("\"generatedAtMillis\":").append(p.generatedAtMillis).append(",")
         append("\"excludedAttachments\":[").append(p.excludedAttachments.joinToString(",") { "\"${escape(it)}\"" }).append("],")
         append("\"sourceMessageReferences\":[")
@@ -89,6 +106,8 @@ object DraftProvenanceSerializer {
         val userInstruction = obj["userInstruction"] as? String ?: ""
         val appliedStyleSummary = obj["appliedStyleSummary"] as? String
         val coverageWarning = obj["coverageWarning"] as? String
+        val previousDraft = obj["previousDraft"] as? String
+        val understandingNote = obj["understandingNote"] as? String
         val generatedAtMillis = (obj["generatedAtMillis"] as? Number)?.toLong() ?: 0L
         val excludedAttachments = (obj["excludedAttachments"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
         val refs = (obj["sourceMessageReferences"] as? List<*>)?.mapNotNull { item ->
@@ -115,11 +134,13 @@ object DraftProvenanceSerializer {
             appliedStyleSummary = appliedStyleSummary,
             coverageWarning = coverageWarning,
             excludedAttachments = excludedAttachments,
+            previousDraft = previousDraft,
+            understandingNote = understandingNote,
             generatedAtMillis = generatedAtMillis,
         )
     }.getOrNull()
 
-    private fun escape(s: String): String = buildString {
+    fun escape(s: String): String = buildString {
         for (c in s) {
             when (c) {
                 '\\' -> append("\\\\")
@@ -131,8 +152,75 @@ object DraftProvenanceSerializer {
             }
         }
     }
+}
 
-    private class SimpleJsonParser(private val src: String) {
+object DraftVersionSerializer {
+    fun serializeList(versions: List<DraftVersion>): String = buildString {
+        append("[")
+        versions.forEachIndexed { i, v ->
+            if (i > 0) append(",")
+            append("{")
+            append("\"id\":\"").append(DraftProvenanceSerializer.escape(v.id)).append("\",")
+            append("\"text\":\"").append(DraftProvenanceSerializer.escape(v.text)).append("\",")
+            append("\"originalAiText\":").append(v.originalAiText?.let { "\"${DraftProvenanceSerializer.escape(it)}\"" } ?: "null").append(",")
+            append("\"isAiGenerated\":").append(v.isAiGenerated).append(",")
+            append("\"provenance\":").append(v.provenance?.let { DraftProvenanceSerializer.serialize(it) } ?: "null")
+            append("}")
+        }
+        append("]")
+    }
+
+    fun deserializeList(raw: String): List<DraftVersion> = runCatching {
+        if (raw.isBlank()) return emptyList()
+        val arr = SimpleJsonParser(raw).parseArray() ?: return emptyList()
+        arr.mapNotNull { item ->
+            val obj = item as? Map<*, *> ?: return@mapNotNull null
+            val id = obj["id"] as? String ?: ""
+            val text = obj["text"] as? String ?: return@mapNotNull null
+            val originalAiText = obj["originalAiText"] as? String
+            val isAiGenerated = (obj["isAiGenerated"] as? Boolean) ?: (originalAiText != null)
+            val provRaw = obj["provenance"]
+            val provenance = when (provRaw) {
+                is Map<*, *> -> {
+                    val subRaw = DraftProvenanceSerializer.serialize(
+                        DraftProvenance(
+                            accountId = provRaw["accountId"] as? String ?: "",
+                            accountLabel = provRaw["accountLabel"] as? String ?: "",
+                            userInstruction = provRaw["userInstruction"] as? String ?: "",
+                            appliedStyleSummary = provRaw["appliedStyleSummary"] as? String,
+                            coverageWarning = provRaw["coverageWarning"] as? String,
+                            previousDraft = provRaw["previousDraft"] as? String,
+                            understandingNote = provRaw["understandingNote"] as? String,
+                            generatedAtMillis = (provRaw["generatedAtMillis"] as? Number)?.toLong() ?: 0L,
+                            excludedAttachments = (provRaw["excludedAttachments"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList(),
+                            sourceMessageReferences = (provRaw["sourceMessageReferences"] as? List<*>)?.mapNotNull { r ->
+                                val rObj = r as? Map<*, *> ?: return@mapNotNull null
+                                DraftSourceReference(
+                                    messageId = rObj["messageId"] as? String ?: return@mapNotNull null,
+                                    senderHint = rObj["senderHint"] as? String ?: "",
+                                    timestampMillis = (rObj["timestampMillis"] as? Number)?.toLong() ?: 0L,
+                                    snippet = rObj["snippet"] as? String ?: "",
+                                    isIncludedAsText = (rObj["isIncludedAsText"] as? Boolean) ?: true,
+                                )
+                            } ?: emptyList(),
+                        )
+                    )
+                    DraftProvenanceSerializer.deserialize(subRaw)
+                }
+                else -> null
+            }
+            DraftVersion(
+                id = id,
+                text = text,
+                provenance = provenance,
+                originalAiText = originalAiText,
+                isAiGenerated = isAiGenerated,
+            )
+        }
+    }.getOrElse { emptyList() }
+}
+
+internal class SimpleJsonParser(private val src: String) {
         private var idx = 0
 
         fun parseObject(): Map<String, Any?>? {
@@ -164,7 +252,7 @@ object DraftProvenanceSerializer {
             return result
         }
 
-        private fun parseArray(): List<Any?>? {
+        fun parseArray(): List<Any?>? {
             skipWhitespace()
             if (!consume('[')) return null
             val result = mutableListOf<Any?>()
@@ -268,7 +356,6 @@ object DraftProvenanceSerializer {
 
         private fun peek(): Char? = if (idx < src.length) src[idx] else null
     }
-}
 
 interface ConversationDraftStore {
     fun saveDraft(draft: ConversationDraft)

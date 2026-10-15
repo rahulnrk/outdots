@@ -312,7 +312,7 @@ fun InboxScreen(
                         draftText = state.localDraftText,
                         draftStatus = state.localDraftStatus,
                         draftVersions = state.draftVersions,
-                        selectedVersionIndex = state.draftVersions.indexOf(state.localDraftText).coerceAtLeast(0),
+                        selectedVersionIndex = state.selectedVersionIndex,
                         onSelectVersion = { idx -> viewModel.selectDraftVersion(idx) },
                         isDrafting = state.isLocalDraftInProgress,
                         hasProvenance = state.localDraftProvenance != null,

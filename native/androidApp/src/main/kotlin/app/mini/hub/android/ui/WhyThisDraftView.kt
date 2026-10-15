@@ -40,6 +40,7 @@ fun WhyThisDraftView(
     onOpenMessage: (String) -> Unit,
 ) {
     val scrollState = rememberScrollState()
+    val validProvenance = provenance?.takeIf { it.accountId == selected.accountId.key }
     val accountLabel = account?.displayName?.ifBlank { null }
         ?: account?.providerAccountId?.ifBlank { null }
         ?: selected.accountId.localId
@@ -103,7 +104,7 @@ fun WhyThisDraftView(
             }
         }
 
-        if (provenance == null) {
+        if (validProvenance == null) {
             Card(
                 shape = RoundedCornerShape(MiniInk.cardRadius.dp),
                 colors = CardDefaults.cardColors(
@@ -113,12 +114,12 @@ fun WhyThisDraftView(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Written manually",
+                        text = "Evidence unavailable",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = "This draft was typed directly by you, or earlier generation evidence is no longer available. Manual writing is never overwritten or attributed to AI inputs.",
+                        text = "Generation evidence is unavailable for this draft. Manual edits or drafts created before provenance tracking are preserved without simulated evidence.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 4.dp),
@@ -135,7 +136,7 @@ fun WhyThisDraftView(
                 modifier = Modifier.padding(bottom = 6.dp),
             )
 
-            if (provenance.sourceMessageReferences.isEmpty()) {
+            if (validProvenance.sourceMessageReferences.isEmpty()) {
                 Card(
                     shape = RoundedCornerShape(MiniInk.cardRadius.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -149,7 +150,7 @@ fun WhyThisDraftView(
                     )
                 }
             } else {
-                provenance.sourceMessageReferences.forEach { ref ->
+                validProvenance.sourceMessageReferences.forEach { ref ->
                     Card(
                         shape = RoundedCornerShape(MiniInk.cardRadius.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -170,7 +171,7 @@ fun WhyThisDraftView(
                                 Text(
                                     text = "${ref.senderHint} · ${SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()).format(Date(ref.timestampMillis))}",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.outline,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                                 TextButton(
                                     onClick = { onOpenMessage(ref.messageId) },
@@ -199,16 +200,32 @@ fun WhyThisDraftView(
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = "“${provenance.userInstruction}”",
+                        text = "“${validProvenance.userInstruction}”",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "This is a commitment you supplied, not a date inferred from another conversation.",
+                        text = "User-supplied instruction controlling this draft's tone, content, or length.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    validProvenance.previousDraft?.let { prev ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Based on earlier draft: “$prev”",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    validProvenance.understandingNote?.let { note ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Derived understanding: $note",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 
@@ -227,7 +244,7 @@ fun WhyThisDraftView(
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = provenance.appliedStyleSummary ?: "Standard neutral tone. No custom style profile applied.",
+                        text = validProvenance.appliedStyleSummary ?: "Standard neutral tone. No custom style profile applied.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
@@ -248,8 +265,8 @@ fun WhyThisDraftView(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
-                    if (provenance.excludedAttachments.isNotEmpty()) {
-                        provenance.excludedAttachments.forEach { att ->
+                    if (validProvenance.excludedAttachments.isNotEmpty()) {
+                        validProvenance.excludedAttachments.forEach { att ->
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.padding(vertical = 4.dp),
@@ -271,14 +288,14 @@ fun WhyThisDraftView(
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "The draft does not approve the price or claim you’ve reviewed unread files.",
+                        text = "Excluded attachments were not read by on-device AI. Verify any file details directly in the source document.",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
 
-            provenance.coverageWarning?.let { warning ->
+            validProvenance.coverageWarning?.let { warning ->
                 Card(
                     shape = RoundedCornerShape(MiniInk.controlRadius.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),

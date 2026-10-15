@@ -55,6 +55,7 @@ class SqlCipherActionStore(
         db.execSQL(SCHEMA_DRAFTS)
         runCatching { db.execSQL("ALTER TABLE conversation_drafts ADD COLUMN original_generated_draft TEXT") }
         runCatching { db.execSQL("ALTER TABLE conversation_drafts ADD COLUMN provenance_json TEXT") }
+        runCatching { db.execSQL("ALTER TABLE conversation_drafts ADD COLUMN versions_json TEXT") }
         db
     }
 
@@ -232,6 +233,7 @@ class SqlCipherActionStore(
                 put("updated_at", draft.updatedAtMillis)
                 put("original_generated_draft", draft.originalGeneratedDraft)
                 put("provenance_json", draft.provenance?.let { DraftProvenanceSerializer.serialize(it) })
+                put("versions_json", draft.versions.takeIf { it.isNotEmpty() }?.let { DraftVersionSerializer.serializeList(it) })
             },
             SQLiteDatabase.CONFLICT_REPLACE,
         )
@@ -275,19 +277,30 @@ class SqlCipherActionStore(
         }
     }
 
-    private fun android.database.Cursor.toDraft(): ConversationDraft = ConversationDraft(
-        conversationKey = text("conversation_key"),
-        accountId = text("account_id"),
-        body = text("body"),
-        to = text("compose_to"),
-        cc = text("compose_cc"),
-        bcc = text("compose_bcc"),
-        subject = text("compose_subject"),
-        isNewEmail = int("is_new_email") != 0,
-        originalGeneratedDraft = optionalText("original_generated_draft"),
-        updatedAtMillis = long("updated_at"),
-        provenance = optionalText("provenance_json")?.let { DraftProvenanceSerializer.deserialize(it) },
-    )
+    private fun android.database.Cursor.toDraft(): ConversationDraft {
+        val bodyText = text("body")
+        val prov = optionalText("provenance_json")?.let { DraftProvenanceSerializer.deserialize(it) }
+        val origAi = optionalText("original_generated_draft")
+        val vers = optionalText("versions_json")?.let { DraftVersionSerializer.deserializeList(it) } ?: emptyList()
+        val effectiveVersions = if (vers.isNotEmpty()) vers
+        else if (bodyText.isNotBlank()) listOf(DraftVersion(text = bodyText, provenance = prov, originalAiText = origAi))
+        else emptyList()
+
+        return ConversationDraft(
+            conversationKey = text("conversation_key"),
+            accountId = text("account_id"),
+            body = bodyText,
+            to = text("compose_to"),
+            cc = text("compose_cc"),
+            bcc = text("compose_bcc"),
+            subject = text("compose_subject"),
+            isNewEmail = int("is_new_email") != 0,
+            originalGeneratedDraft = origAi,
+            updatedAtMillis = long("updated_at"),
+            provenance = prov,
+            versions = effectiveVersions,
+        )
+    }
 
     private companion object {
         const val SCHEMA_APPROVALS = """
@@ -346,7 +359,8 @@ class SqlCipherActionStore(
                 is_new_email INTEGER NOT NULL CHECK (is_new_email IN (0, 1)),
                 updated_at INTEGER NOT NULL,
                 original_generated_draft TEXT,
-                provenance_json TEXT
+                provenance_json TEXT,
+                versions_json TEXT
             )
         """
         val SNAPSHOT_COLUMNS = arrayOf(
@@ -355,7 +369,7 @@ class SqlCipherActionStore(
         )
         val DRAFT_COLUMNS = arrayOf(
             "conversation_key", "account_id", "body", "compose_to", "compose_cc", "compose_bcc",
-            "compose_subject", "is_new_email", "updated_at", "original_generated_draft", "provenance_json",
+            "compose_subject", "is_new_email", "updated_at", "original_generated_draft", "provenance_json", "versions_json",
         )
     }
 }

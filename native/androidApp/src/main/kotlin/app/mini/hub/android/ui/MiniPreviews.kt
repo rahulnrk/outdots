@@ -2,6 +2,7 @@ package app.mini.hub.android.ui
 
 import android.content.res.Configuration
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -188,13 +189,13 @@ private fun previewInboxState(): InboxViewState {
 }
 
 @Composable
-internal fun MiniProductionPreview(tab: MiniTab) {
+internal fun MiniProductionPreview(tab: MiniTab, darkTheme: Boolean = isSystemInDarkTheme()) {
     val state = previewInboxState()
     val accounts = previewAccounts()
     val labels = mapOf(
         state.conversations.first().conversationId.key to "Work",
     )
-    MiniTheme {
+    MiniTheme(darkTheme = darkTheme) {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             bottomBar = { MiniBottomBar(tab) {} },
@@ -267,9 +268,9 @@ fun MiniConsoleScreenPreview() {
 @Preview(showBackground = true, name = "Activity dark", uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Preview(showBackground = true, name = "Activity large text", fontScale = 1.3f)
 @Composable
-fun MiniActivityScreenPreview() {
+fun MiniActivityScreenPreview(darkTheme: Boolean = isSystemInDarkTheme()) {
     // Same host as production: MiniTheme > Scaffold (content color) > background Column.
-    MiniTheme {
+    MiniTheme(darkTheme = darkTheme) {
         Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
             Column(
                 modifier = Modifier
@@ -363,7 +364,7 @@ private fun previewThreadMessages(summary: ConversationObservationSummary): List
 )
 
 private fun previewDraftProvenance(): app.mini.hub.persistence.DraftProvenance = app.mini.hub.persistence.DraftProvenance(
-    accountId = "gmail:work",
+    accountId = previewGmail.key,
     accountLabel = "Gmail · Work · rahul@studio.example",
     userInstruction = "agree to 42k and confirm Friday delivery",
     sourceMessageReferences = listOf(
@@ -378,6 +379,8 @@ private fun previewDraftProvenance(): app.mini.hub.persistence.DraftProvenance =
     appliedStyleSummary = "Professional, direct",
     coverageWarning = null,
     excludedAttachments = listOf("quote_v2.pdf (attachment content not read by AI)"),
+    previousDraft = "Earlier longer quote response that was shortened",
+    understandingNote = "Kiran requested confirmation of the revised ₹42,000 fee.",
     generatedAtMillis = previewNow.epochMillis + 120_000L,
 )
 
@@ -385,10 +388,29 @@ private fun previewDraftProvenance(): app.mini.hub.persistence.DraftProvenance =
 @Preview(showBackground = true, name = "Thread dark", uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Preview(showBackground = true, name = "Thread large text", fontScale = 1.3f)
 @Composable
-fun MiniThreadScreenPreview() {
+fun MiniThreadScreenPreview(
+    isDrafting: Boolean = false,
+    initialAiOpen: Boolean = isDrafting,
+    draftStatus: String? = if (isDrafting) "Generating locally on this device…" else "Local draft ready (210 ms). Review it before use.",
+    draftText: String = "Thanks Kiran. The ₹42,000 works for us. Please confirm delivery by Friday.",
+    hasProvenance: Boolean = true,
+    darkTheme: Boolean = isSystemInDarkTheme(),
+) {
     val summary = previewThreadSummary()
     val messages = previewThreadMessages(summary)
-    MiniTheme {
+    val versions = if (hasProvenance) {
+        listOf(
+            app.mini.hub.persistence.DraftVersion(
+                id = "ai-preview-1",
+                text = draftText,
+                provenance = previewDraftProvenance(),
+                originalAiText = draftText,
+                isAiGenerated = true,
+            ),
+        )
+    } else emptyList()
+
+    MiniTheme(darkTheme = darkTheme) {
         Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
             Column(
                 modifier = Modifier
@@ -403,12 +425,13 @@ fun MiniThreadScreenPreview() {
                     onLabel = {},
                     accountLabel = "Gmail · Work",
                     loadStatus = "Full conversation loaded (2 messages).",
-                    draftText = "Thanks Kiran. The ₹42,000 works for us. Please confirm delivery by Friday.",
-                    draftStatus = "Local draft ready (210 ms). Review it before use.",
-                    draftVersions = listOf("Thanks Kiran. The ₹42,000 works for us. Please confirm delivery by Friday."),
+                    draftText = draftText,
+                    draftStatus = draftStatus,
+                    draftVersions = versions,
                     selectedVersionIndex = 0,
-                    isDrafting = false,
-                    hasProvenance = true,
+                    isDrafting = isDrafting,
+                    initialAiOpen = initialAiOpen,
+                    hasProvenance = hasProvenance,
                     onBack = {},
                     onDraft = { _, _ -> },
                     onCancelDraft = {},
@@ -420,16 +443,36 @@ fun MiniThreadScreenPreview() {
     }
 }
 
+@Composable
+fun MiniThreadGeneratingPreview(darkTheme: Boolean = isSystemInDarkTheme()) {
+    MiniThreadScreenPreview(
+        isDrafting = true,
+        initialAiOpen = true,
+        draftStatus = "Generating locally on this device…",
+        darkTheme = darkTheme,
+    )
+}
+
+@Composable
+fun MiniThreadManualPreview(darkTheme: Boolean = isSystemInDarkTheme()) {
+    MiniThreadScreenPreview(
+        draftText = "I have drafted this response manually.",
+        draftStatus = null,
+        hasProvenance = false,
+        darkTheme = darkTheme,
+    )
+}
+
 @Preview(showBackground = true, name = "Why this draft light")
 @Preview(showBackground = true, name = "Why this draft dark", uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Preview(showBackground = true, name = "Why this draft large text", fontScale = 1.3f)
 @Composable
-fun MiniWhyThisDraftPreview() {
+fun MiniWhyThisDraftPreview(darkTheme: Boolean = isSystemInDarkTheme()) {
     val summary = previewThreadSummary()
     val provenance = previewDraftProvenance()
     val store = previewAccounts()
     val account = store.get(summary.accountId)
-    MiniTheme {
+    MiniTheme(darkTheme = darkTheme) {
         Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
             Column(
                 modifier = Modifier
@@ -439,6 +482,32 @@ fun MiniWhyThisDraftPreview() {
             ) {
                 WhyThisDraftView(
                     provenance = provenance,
+                    selected = summary,
+                    account = account,
+                    onBack = {},
+                    onOpenMessage = {},
+                )
+            }
+        }
+    }
+}
+
+@Preview(showBackground = true, name = "Why this draft unavailable")
+@Composable
+fun MiniWhyThisDraftUnavailablePreview(darkTheme: Boolean = isSystemInDarkTheme()) {
+    val summary = previewThreadSummary()
+    val store = previewAccounts()
+    val account = store.get(summary.accountId)
+    MiniTheme(darkTheme = darkTheme) {
+        Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(padding),
+            ) {
+                WhyThisDraftView(
+                    provenance = null,
                     selected = summary,
                     account = account,
                     onBack = {},

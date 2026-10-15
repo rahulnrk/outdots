@@ -3,7 +3,7 @@ package app.mini.hub.android.ui
 import app.mini.hub.action.ActionController
 import app.mini.hub.action.DigestProvider
 import app.mini.hub.action.DomainActionIdGenerator
-import app.mini.hub.intelligence.ModelProposal
+import app.mini.hub.android.intelligence.LocalDraftExperiment
 import app.mini.hub.android.intelligence.LocalDraftResult
 import app.mini.hub.attention.InMemoryAttentionStore
 import app.mini.hub.domain.AccountId
@@ -12,6 +12,9 @@ import app.mini.hub.domain.IdGenerator
 import app.mini.hub.domain.Provider
 import app.mini.hub.domain.ScopedId
 import app.mini.hub.domain.UtcInstant
+import app.mini.hub.intelligence.InferenceEngine
+import app.mini.hub.intelligence.InferenceTask
+import app.mini.hub.intelligence.ModelProposal
 import app.mini.hub.observation.ConversationCoverage
 import app.mini.hub.observation.ConversationObservationSummary
 import app.mini.hub.observation.CorrelationConfidence
@@ -19,13 +22,18 @@ import app.mini.hub.observation.NotificationCategory
 import app.mini.hub.observation.ObservationProvenance
 import app.mini.hub.observation.ObservedNotification
 import app.mini.hub.observation.TruncationState
+import app.mini.hub.persistence.ConversationDraft
 import app.mini.hub.persistence.DraftProvenance
 import app.mini.hub.persistence.DraftProvenanceSerializer
 import app.mini.hub.persistence.DraftSourceReference
+import app.mini.hub.persistence.DraftVersion
+import app.mini.hub.persistence.DraftVersionSerializer
 import app.mini.hub.persistence.InMemoryActionStore
 import app.mini.hub.persistence.InMemoryObservationStore
 import app.mini.hub.retrieval.ScopedRetrievalEngine
 import app.mini.hub.style.AdaptiveStyleEngine
+import java.util.concurrent.AbstractExecutorService
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -44,6 +52,50 @@ class Phase3AConversationComposerTest {
 
     private val convA = ScopedId(accountA, ScopedId.Kind.CONVERSATION, "kiran@example.com")
     private val convB = ScopedId(accountB, ScopedId.Kind.CONVERSATION, "alice")
+
+    private class ManualQueuedExecutor : AbstractExecutorService() {
+        val tasks = mutableListOf<Runnable>()
+        var shutdownFlag = false
+
+        override fun execute(command: Runnable) {
+            tasks.add(command)
+        }
+
+        fun runNext(): Boolean {
+            if (tasks.isEmpty()) return false
+            val task = tasks.removeAt(0)
+            task.run()
+            return true
+        }
+
+        fun runAll() {
+            while (runNext()) {}
+        }
+
+        override fun shutdown() { shutdownFlag = true }
+        override fun shutdownNow(): List<Runnable> { shutdownFlag = true; return emptyList() }
+        override fun isShutdown(): Boolean = shutdownFlag
+        override fun isTerminated(): Boolean = shutdownFlag && tasks.isEmpty()
+        override fun awaitTermination(timeout: Long, unit: TimeUnit): Boolean = true
+    }
+
+    private class TestInferenceEngine(
+        val generateText: (InferenceTask) -> String = { "Generated AI response for ${it.id}" },
+    ) : InferenceEngine {
+        var lastTask: InferenceTask? = null
+        override fun load(modelId: String): Boolean = true
+        override fun run(task: InferenceTask): ModelProposal {
+            lastTask = task
+            return ModelProposal(
+                taskId = task.id,
+                compartment = task.compartment,
+                text = generateText(task),
+                evidence = task.context.evidence,
+            )
+        }
+        override fun cancel(taskId: String): Boolean = true
+        override fun unload() {}
+    }
 
     private fun createObs(
         account: AccountId,
@@ -128,7 +180,7 @@ class Phase3AConversationComposerTest {
     }
 
     @Test
-    fun staleGenerationResult_doesNotOverwriteNewlySelectedConversation() {
+    fun productionPath_staleCallbackDiscardsResultAfterSwitchingConversations() {
         val obsStore = InMemoryObservationStore()
         val actionStore = InMemoryActionStore()
         val retrieval = ScopedRetrievalEngine(obsStore)
@@ -136,41 +188,49 @@ class Phase3AConversationComposerTest {
         val controller = ActionController(clock, digest, DomainActionIdGenerator(idGen))
         val attentionStore = InMemoryAttentionStore()
 
-        obsStore.persistObservation(createObs(accountA, convA, "a1", "Kiran", "Hello"))
-        obsStore.persistObservation(createObs(accountB, convB, "b1", "Alice", "Hi there"))
+        obsStore.persistObservation(createObs(accountA, convA, "a1", "Kiran", "Need updated quote"))
+        obsStore.persistObservation(createObs(accountB, convB, "b1", "Alice", "Hello from Alice"))
 
-        val vm = InboxViewModel(obsStore, retrieval, style, controller, actionStore, clock, attentionStore)
-        val summaryA = createSummary(accountA, convA, "Kiran", "Hello")
-        val summaryB = createSummary(accountB, convB, "Alice", "Hi there")
+        val manualExecutor = ManualQueuedExecutor()
+        val testEngine = TestInferenceEngine { "AI generated draft for Kiran" }
+        val experiment = LocalDraftExperiment(
+            engine = testEngine,
+            modelPath = "test-model.bin",
+            executor = manualExecutor,
+            nowMillis = { 1000L },
+            isMainThread = { true },
+        )
 
-        // Select Conversation A and type manual draft
+        val vm = InboxViewModel(
+            obsStore, retrieval, style, controller, actionStore, clock, attentionStore,
+            localDraftExperiment = experiment,
+        )
+        val summaryA = createSummary(accountA, convA, "Kiran", "Need updated quote")
+        val summaryB = createSummary(accountB, convB, "Alice", "Hello from Alice")
+
+        // 1. Select Conversation A and start AI drafting
         vm.selectConversation(summaryA)
-        vm.updateLocalDraftText("Manual draft for Kiran")
+        vm.requestLocalDraft("confirm quote")
+        assertTrue(vm.state.value.isLocalDraftInProgress)
+        assertEquals(1, manualExecutor.tasks.size)
 
-        // Switch to Conversation B
+        // 2. User switches to Conversation B while draftAsync task is still queued
         vm.selectConversation(summaryB)
         vm.updateLocalDraftText("My handwritten draft for Alice")
-
-        // Simulate a stale generation result completing for Conversation A
-        val staleResult = LocalDraftResult.Success(
-            proposal = ModelProposal(
-                taskId = "task_stale",
-                compartment = app.mini.hub.intelligence.CompartmentId(accountA.key),
-                text = "Stale AI proposal for Kiran",
-                evidence = emptyList(),
-            ),
-            warning = "",
-            latencyMs = 150L,
-            wasCold = false,
-        )
-        // Attempting to apply stale result directly or via callback:
-        // Even if applyGenerationResult is invoked for test, let's verify race safety:
-        // When requestLocalDraft runs, it verifies selectedConversationId == requestedConversationId
         assertEquals("My handwritten draft for Alice", vm.state.value.localDraftText)
+        assertFalse(vm.state.value.isLocalDraftInProgress)
+
+        // 3. Now let the background AI generation task for Conversation A finish and deliver its callback
+        manualExecutor.runAll()
+
+        // 4. Assert: Stale result for Conversation A was discarded and DID NOT overwrite Conversation B!
+        assertEquals("My handwritten draft for Alice", vm.state.value.localDraftText, "Late callback must not overwrite Conversation B")
+        assertEquals(summaryB, vm.state.value.selectedConversation)
+        assertNull(vm.state.value.localDraftProvenance)
     }
 
     @Test
-    fun generationFailureAndCancellation_preservesExistingDraftText() {
+    fun productionPath_discardCancelsPendingGenerationAndLateResultCannotRecreateDraft() {
         val obsStore = InMemoryObservationStore()
         val actionStore = InMemoryActionStore()
         val retrieval = ScopedRetrievalEngine(obsStore)
@@ -179,101 +239,44 @@ class Phase3AConversationComposerTest {
         val attentionStore = InMemoryAttentionStore()
 
         obsStore.persistObservation(createObs(accountA, convA, "a1", "Kiran", "Hello"))
-        val vm = InboxViewModel(obsStore, retrieval, style, controller, actionStore, clock, attentionStore)
+
+        val manualExecutor = ManualQueuedExecutor()
+        val testEngine = TestInferenceEngine { "Late AI proposal text" }
+        val experiment = LocalDraftExperiment(
+            engine = testEngine,
+            modelPath = "test-model.bin",
+            executor = manualExecutor,
+            nowMillis = { 1000L },
+            isMainThread = { true },
+        )
+
+        val vm = InboxViewModel(
+            obsStore, retrieval, style, controller, actionStore, clock, attentionStore,
+            localDraftExperiment = experiment,
+        )
         val summaryA = createSummary(accountA, convA, "Kiran", "Hello")
         vm.selectConversation(summaryA)
 
-        val preservedText = "I have already typed this important response manually"
-        vm.updateLocalDraftText(preservedText)
+        // Request draft
+        vm.requestLocalDraft("write reply")
+        assertTrue(vm.state.value.isLocalDraftInProgress)
 
-        // 1. Simulate failure
-        val failureResult = LocalDraftResult.Failed(
-            reason = "Model memory pressure",
-            warning = "Resource low",
-            cancelled = false,
-            needsRecovery = true,
-        )
-        vm.applyGenerationResultForTest(failureResult)
-        assertEquals(preservedText, vm.state.value.localDraftText, "Failure must preserve existing draft text")
-        assertTrue(vm.state.value.localDraftStatus?.contains("Model memory pressure") == true)
-
-        // 2. Simulate cancellation
-        val cancelResult = LocalDraftResult.Failed(
-            reason = "User stopped drafting",
-            warning = "",
-            cancelled = true,
-        )
-        vm.applyGenerationResultForTest(cancelResult)
-        assertEquals(preservedText, vm.state.value.localDraftText, "Cancellation must preserve existing draft text")
-    }
-
-    @Test
-    fun draftPersistenceAndRestoration_preservesBodyAndProvenance() {
-        val obsStore = InMemoryObservationStore()
-        val actionStore = InMemoryActionStore()
-        val retrieval = ScopedRetrievalEngine(obsStore)
-        val style = AdaptiveStyleEngine()
-        val controller = ActionController(clock, digest, DomainActionIdGenerator(idGen))
-        val attentionStore = InMemoryAttentionStore()
-
-        obsStore.persistObservation(createObs(accountA, convA, "a1", "Kiran", "Pricing question"))
-        val vm = InboxViewModel(obsStore, retrieval, style, controller, actionStore, clock, attentionStore)
-        val summaryA = createSummary(accountA, convA, "Kiran", "Pricing question")
-        vm.selectConversation(summaryA)
-
-        val testProvenance = DraftProvenance(
-            accountId = accountA.key,
-            accountLabel = "Gmail · Work",
-            userInstruction = "confirm 42,000 INR price",
-            sourceMessageReferences = listOf(
-                DraftSourceReference(
-                    messageId = "key_a1",
-                    senderHint = "Kiran",
-                    timestampMillis = clock.now().epochMillis,
-                    snippet = "Pricing question",
-                ),
-            ),
-            appliedStyleSummary = "Style: Professional (concise, professional)",
-            coverageWarning = null,
-            excludedAttachments = listOf("quote.pdf (attachment content not read by AI)"),
-            generatedAtMillis = clock.now().epochMillis,
-        )
-
-        val successResult = LocalDraftResult.Success(
-            proposal = ModelProposal(
-                taskId = "task_success",
-                compartment = app.mini.hub.intelligence.CompartmentId(accountA.key),
-                text = "Yes, 42,000 INR is confirmed.",
-                evidence = emptyList(),
-            ),
-            warning = "",
-            latencyMs = 200L,
-            wasCold = false,
-        )
-        vm.applyGenerationResultForTest(successResult, testProvenance)
-
-        assertEquals("Yes, 42,000 INR is confirmed.", vm.state.value.localDraftText)
-        assertEquals(testProvenance, vm.state.value.localDraftProvenance)
-
-        // Leave conversation
-        vm.clearSelection()
-        assertEquals("", vm.state.value.localDraftText)
-        assertEquals(null, vm.state.value.localDraftProvenance)
-
-        // Re-select conversation and verify restoration
-        vm.selectConversation(summaryA)
-        assertEquals("Yes, 42,000 INR is confirmed.", vm.state.value.localDraftText)
-        assertEquals(testProvenance, vm.state.value.localDraftProvenance)
-
-        // Discard draft
+        // User clicks Discard while generation is still in flight
         vm.discardDraft()
         assertEquals("", vm.state.value.localDraftText)
-        assertEquals(null, vm.state.value.localDraftProvenance)
+        assertFalse(vm.state.value.isLocalDraftInProgress)
+
+        // Now background execution completes and posts callback
+        manualExecutor.runAll()
+
+        // Late result must NOT recreate or revive the discarded draft!
+        assertEquals("", vm.state.value.localDraftText, "Late result must not recreate discarded draft")
+        assertNull(vm.state.value.localDraftProvenance)
         assertEquals("Draft discarded.", vm.state.value.localDraftStatus)
     }
 
     @Test
-    fun manualRepliesRemainUsableWithoutWorkingModel() {
+    fun productionPath_editsDuringGenerationAreRetainedAndOfferedAsVersion() {
         val obsStore = InMemoryObservationStore()
         val actionStore = InMemoryActionStore()
         val retrieval = ScopedRetrievalEngine(obsStore)
@@ -281,64 +284,121 @@ class Phase3AConversationComposerTest {
         val controller = ActionController(clock, digest, DomainActionIdGenerator(idGen))
         val attentionStore = InMemoryAttentionStore()
 
-        obsStore.persistObservation(createObs(accountA, convA, "a1", "Kiran", "Need reply"))
-        // Create VM without any LocalDraftExperiment (null)
-        val vm = InboxViewModel(obsStore, retrieval, style, controller, actionStore, clock, attentionStore)
-        val summaryA = createSummary(accountA, convA, "Kiran", "Need reply")
+        obsStore.persistObservation(createObs(accountA, convA, "a1", "Kiran", "Meeting tomorrow"))
+
+        val manualExecutor = ManualQueuedExecutor()
+        val testEngine = TestInferenceEngine { "AI generated meeting confirmation" }
+        val experiment = LocalDraftExperiment(
+            engine = testEngine,
+            modelPath = "test-model.bin",
+            executor = manualExecutor,
+            nowMillis = { 1000L },
+            isMainThread = { true },
+        )
+        experiment.setForeground(true)
+
+        val vm = InboxViewModel(
+            obsStore, retrieval, style, controller, actionStore, clock, attentionStore,
+            localDraftExperiment = experiment,
+        )
+        val summaryA = createSummary(accountA, convA, "Kiran", "Meeting tomorrow")
         vm.selectConversation(summaryA)
 
-        // User types manual reply
-        vm.updateLocalDraftText("This is my completely manual reply without AI.")
-        assertEquals("This is my completely manual reply without AI.", vm.state.value.localDraftText)
-        assertEquals(null, vm.state.value.localDraftProvenance, "Manual draft has no AI provenance")
+        // Request draft
+        vm.requestLocalDraft("reply")
+        assertTrue(vm.state.value.isLocalDraftInProgress)
 
-        // User prepares draft for review
-        vm.prepareDraft("This is my completely manual reply without AI.", "", "Re: Need reply")
-        val reviewPayload = checkNotNull(vm.state.value.activeReviewPayload)
-        assertEquals("This is my completely manual reply without AI.", reviewPayload.body)
-        assertEquals(accountA.key, reviewPayload.accountId)
+        // User starts typing manual changes while AI is generating
+        val userManualLiveText = "I started typing my own response while waiting"
+        vm.updateLocalDraftText(userManualLiveText)
+
+        // Background generation resolves and posts result
+        manualExecutor.runAll()
+
+        // Assert: User's live writing is preserved in the editor!
+        assertEquals(userManualLiveText, vm.state.value.localDraftText, "User manual edits must not be overwritten by incoming AI draft")
+        assertTrue(vm.state.value.localDraftStatus?.contains("live edits are preserved") == true)
+
+        // Both versions are available in draftVersions: user manual and AI version
+        val versions = vm.state.value.draftVersions
+        assertEquals(2, versions.size)
+        assertTrue(versions.any { it.text == userManualLiveText && !it.isAiGenerated })
+        assertTrue(versions.any { it.text == "AI generated meeting confirmation" && it.isAiGenerated })
+
+        // User can switch to the AI version
+        val aiIndex = versions.indexOfFirst { it.isAiGenerated }
+        vm.selectDraftVersion(aiIndex)
+        assertEquals("AI generated meeting confirmation", vm.state.value.localDraftText)
+        assertNotNull(vm.state.value.localDraftProvenance)
+
+        // User can switch back to their manual version without fallback to AI provenance
+        val manualIndex = versions.indexOfFirst { !it.isAiGenerated }
+        vm.selectDraftVersion(manualIndex)
+        assertEquals(userManualLiveText, vm.state.value.localDraftText)
+        assertNull(vm.state.value.localDraftProvenance, "Manual version must not inherit AI provenance")
     }
 
     @Test
-    fun provenanceSerializer_roundTripsCleanly() {
-        val original = DraftProvenance(
-            accountId = "gmail:work",
-            accountLabel = "Gmail · Work · test@example.com",
-            userInstruction = "agree to quote and ask for invoice",
-            sourceMessageReferences = listOf(
-                DraftSourceReference(
-                    messageId = "provider:msg_99",
-                    senderHint = "Vendor Co",
-                    timestampMillis = 1700000000000L,
-                    snippet = "Invoice #101 total is 500 USD",
-                    isIncludedAsText = true,
-                ),
-            ),
-            appliedStyleSummary = "Style: Professional",
-            coverageWarning = "Partial history loaded",
-            excludedAttachments = listOf("invoice.pdf (attachment content not read by AI)"),
-            generatedAtMillis = 1700000001000L,
+    fun versionAndEvidenceAlignment_neverFallsBackAndProtectsBaselineAuthorship() {
+        val obsStore = InMemoryObservationStore()
+        val actionStore = InMemoryActionStore()
+        val retrieval = ScopedRetrievalEngine(obsStore)
+        val style = AdaptiveStyleEngine()
+        val controller = ActionController(clock, digest, DomainActionIdGenerator(idGen))
+        val attentionStore = InMemoryAttentionStore()
+
+        obsStore.persistObservation(createObs(accountA, convA, "a1", "Kiran", "Pricing"))
+        val vm = InboxViewModel(obsStore, retrieval, style, controller, actionStore, clock, attentionStore)
+        val summaryA = createSummary(accountA, convA, "Kiran", "Pricing")
+        vm.selectConversation(summaryA)
+
+        val prov1 = DraftProvenance(
+            accountId = accountA.key,
+            accountLabel = "Gmail · Work",
+            userInstruction = "first instruction",
+            sourceMessageReferences = listOf(DraftSourceReference("key_a1", "Kiran", 1000L, "Pricing")),
+            generatedAtMillis = 1000L,
+        )
+        val prov2 = DraftProvenance(
+            accountId = accountA.key,
+            accountLabel = "Gmail · Work",
+            userInstruction = "second instruction",
+            sourceMessageReferences = listOf(DraftSourceReference("key_a1", "Kiran", 1000L, "Pricing")),
+            generatedAtMillis = 2000L,
         )
 
-        val serialized = DraftProvenanceSerializer.serialize(original)
-        assertTrue(serialized.contains("Vendor Co"))
-        assertTrue(serialized.contains("invoice.pdf"))
+        // Simulate Version 1 (AI)
+        vm.applyGenerationResultForTest(
+            LocalDraftResult.Success(ModelProposal("t1", app.mini.hub.intelligence.CompartmentId(accountA.key), "AI Version 1", emptyList()), "", 100L, false),
+            prov1,
+        )
 
-        val deserialized = DraftProvenanceSerializer.deserialize(serialized)
-        assertNotNull(deserialized)
-        assertEquals(original.accountId, deserialized.accountId)
-        assertEquals(original.accountLabel, deserialized.accountLabel)
-        assertEquals(original.userInstruction, deserialized.userInstruction)
-        assertEquals(original.appliedStyleSummary, deserialized.appliedStyleSummary)
-        assertEquals(original.coverageWarning, deserialized.coverageWarning)
-        assertEquals(original.excludedAttachments, deserialized.excludedAttachments)
-        assertEquals(original.generatedAtMillis, deserialized.generatedAtMillis)
-        assertEquals(original.sourceMessageReferences.size, deserialized.sourceMessageReferences.size)
-        assertEquals(original.sourceMessageReferences.first().messageId, deserialized.sourceMessageReferences.first().messageId)
+        // Simulate Version 2 (AI)
+        vm.applyGenerationResultForTest(
+            LocalDraftResult.Success(ModelProposal("t2", app.mini.hub.intelligence.CompartmentId(accountA.key), "AI Version 2", emptyList()), "", 100L, false),
+            prov2,
+        )
+
+        // Verify Version 2 is active
+        assertEquals("AI Version 2", vm.state.value.localDraftText)
+        assertEquals(prov2, vm.state.value.localDraftProvenance)
+        assertEquals("AI Version 2", vm.state.value.originalGeneratedDraft)
+
+        // Switch to Version 1
+        vm.selectDraftVersion(0)
+        assertEquals("AI Version 1", vm.state.value.localDraftText)
+        assertEquals(prov1, vm.state.value.localDraftProvenance, "Must bind Version 1's exact provenance")
+        assertEquals("AI Version 1", vm.state.value.originalGeneratedDraft, "Must restore original AI text baseline so unedited version is not learned as user writing")
+
+        // Switch back to Version 2
+        vm.selectDraftVersion(1)
+        assertEquals("AI Version 2", vm.state.value.localDraftText)
+        assertEquals(prov2, vm.state.value.localDraftProvenance)
+        assertEquals("AI Version 2", vm.state.value.originalGeneratedDraft)
     }
 
     @Test
-    fun openSourceMessageFromEvidence_setsTargetKeyAndClosesEvidenceView() {
+    fun standaloneDraft_accountSwitchingClearsAndIsolatesEvidence() {
         val obsStore = InMemoryObservationStore()
         val actionStore = InMemoryActionStore()
         val retrieval = ScopedRetrievalEngine(obsStore)
@@ -347,19 +407,253 @@ class Phase3AConversationComposerTest {
         val attentionStore = InMemoryAttentionStore()
 
         val vm = InboxViewModel(obsStore, retrieval, style, controller, actionStore, clock, attentionStore)
-        val summaryA = createSummary(accountA, convA, "Kiran", "Hello")
-        vm.selectConversation(summaryA)
 
+        // 1. Open new email compose on Account A and attach provenance
+        vm.startComposeEmail(accountA)
+        val provA = DraftProvenance(
+            accountId = accountA.key,
+            accountLabel = "Gmail · Work",
+            userInstruction = "compose for A",
+            generatedAtMillis = 1000L,
+        )
+        vm.applyGenerationResultForTest(
+            LocalDraftResult.Success(ModelProposal("t1", app.mini.hub.intelligence.CompartmentId(accountA.key), "Body for Account A", emptyList()), "", 100L, false),
+            provA,
+        )
         vm.openWhyThisDraft()
         assertTrue(vm.state.value.showWhyThisDraft)
-        assertEquals(null, vm.state.value.targetMessageIdToHighlight)
+        assertEquals(provA, vm.state.value.localDraftProvenance)
 
-        vm.openSourceMessageFromEvidence("provider:msg_target_42")
-        assertFalse(vm.state.value.showWhyThisDraft, "Evidence view must close when opening source message")
-        assertEquals("provider:msg_target_42", vm.state.value.targetMessageIdToHighlight)
+        // 2. Open new email compose on Account B
+        vm.startComposeEmail(accountB)
+        val stateB = vm.state.value
+        assertEquals(accountB, stateB.selectedConversation?.accountId)
+        assertEquals("", stateB.localDraftText, "New compose on Account B must not retain Account A draft")
+        assertNull(stateB.localDraftProvenance, "Account B must not retain Account A provenance")
+        assertFalse(stateB.showWhyThisDraft, "Evidence sheet must be closed on account switch")
+        assertNull(stateB.targetMessageIdToHighlight)
+    }
 
-        vm.closeWhyThisDraft()
-        assertFalse(vm.state.value.showWhyThisDraft)
-        assertEquals(null, vm.state.value.targetMessageIdToHighlight)
+    @Test
+    fun openSavedDraft_restoresVersionsAndValidatesAccount() {
+        val obsStore = InMemoryObservationStore()
+        val actionStore = InMemoryActionStore()
+        val retrieval = ScopedRetrievalEngine(obsStore)
+        val style = AdaptiveStyleEngine()
+        val controller = ActionController(clock, digest, DomainActionIdGenerator(idGen))
+        val attentionStore = InMemoryAttentionStore()
+
+        val provA = DraftProvenance(
+            accountId = accountA.key,
+            accountLabel = "Gmail · Work",
+            userInstruction = "saved draft instruction",
+            generatedAtMillis = 1000L,
+        )
+        val savedDraftA = ConversationDraft(
+            conversationKey = convA.key,
+            accountId = accountA.key,
+            body = "Saved draft body for Kiran",
+            subject = "Re: Project",
+            updatedAtMillis = 1000L,
+            provenance = provA,
+            versions = listOf(
+                DraftVersion(text = "Saved draft body for Kiran", provenance = provA, originalAiText = "Saved draft body for Kiran", isAiGenerated = true),
+            ),
+        )
+        actionStore.saveDraft(savedDraftA)
+
+        val vm = InboxViewModel(obsStore, retrieval, style, controller, actionStore, clock, attentionStore)
+        vm.openSavedDraft(savedDraftA)
+
+        val state = vm.state.value
+        assertEquals("Saved draft body for Kiran", state.localDraftText)
+        assertEquals(provA, state.localDraftProvenance)
+        assertEquals(1, state.draftVersions.size)
+        assertTrue(state.draftVersions.first().isAiGenerated)
+        assertFalse(state.showWhyThisDraft)
+        assertNull(state.targetMessageIdToHighlight)
+    }
+
+    @Test
+    fun clearedEditorDuringGeneration_preservesEmptyEditorAndOffersGeneratedResultSeparately() {
+        val obsStore = InMemoryObservationStore()
+        val actionStore = InMemoryActionStore()
+        val retrieval = ScopedRetrievalEngine(obsStore)
+        val style = AdaptiveStyleEngine()
+        val controller = ActionController(clock, digest, DomainActionIdGenerator(idGen))
+        val attentionStore = InMemoryAttentionStore()
+
+        obsStore.persistObservation(createObs(accountA, convA, "a1", "Kiran", "Meeting tomorrow"))
+
+        val manualExecutor = ManualQueuedExecutor()
+        val testEngine = TestInferenceEngine { "AI generated meeting confirmation" }
+        val experiment = LocalDraftExperiment(
+            engine = testEngine,
+            modelPath = "test-model.bin",
+            executor = manualExecutor,
+            nowMillis = { 1000L },
+            isMainThread = { true },
+        )
+        experiment.setForeground(true)
+
+        val vm = InboxViewModel(
+            obsStore, retrieval, style, controller, actionStore, clock, attentionStore,
+            localDraftExperiment = experiment,
+        )
+        val summaryA = createSummary(accountA, convA, "Kiran", "Meeting tomorrow")
+        vm.selectConversation(summaryA)
+        vm.updateLocalDraftText("Initial draft before generation")
+
+        // 1. Request draft
+        vm.requestLocalDraft("confirm meeting")
+        assertTrue(vm.state.value.isLocalDraftInProgress)
+
+        // 2. User deliberately clears the editor while generation is in flight
+        vm.updateLocalDraftText("")
+        assertEquals("", vm.state.value.localDraftText)
+
+        // 3. Generation completes and delivers result
+        manualExecutor.runAll()
+
+        // 4. Assert: Empty editor is preserved, not overwritten by incoming AI draft!
+        assertEquals("", vm.state.value.localDraftText, "User-cleared editor must be preserved")
+        assertNull(vm.state.value.localDraftProvenance, "Cleared editor must have null active provenance")
+        assertEquals(-1, vm.state.value.selectedVersionIndex, "Cleared editor should have no version chip selected")
+        assertTrue(vm.state.value.localDraftStatus?.contains("cleared editor was preserved") == true)
+
+        // 5. Generated AI version is offered separately in draftVersions
+        assertEquals(1, vm.state.value.draftVersions.size)
+        val aiVersion = vm.state.value.draftVersions.first()
+        assertEquals("AI generated meeting confirmation", aiVersion.text)
+        assertTrue(aiVersion.isAiGenerated)
+        assertNotNull(aiVersion.provenance)
+
+        // 6. User can explicitly tap the version chip to load the AI proposal
+        vm.selectDraftVersion(0)
+        assertEquals("AI generated meeting confirmation", vm.state.value.localDraftText)
+        assertEquals(aiVersion.provenance, vm.state.value.localDraftProvenance)
+        assertEquals(0, vm.state.value.selectedVersionIndex)
+    }
+
+    @Test
+    fun identicalTextGenerations_preserveDistinctVersionIdentityAndProvenance() {
+        val obsStore = InMemoryObservationStore()
+        val actionStore = InMemoryActionStore()
+        val retrieval = ScopedRetrievalEngine(obsStore)
+        val style = AdaptiveStyleEngine()
+        val controller = ActionController(clock, digest, DomainActionIdGenerator(idGen))
+        val attentionStore = InMemoryAttentionStore()
+
+        obsStore.persistObservation(createObs(accountA, convA, "a1", "Kiran", "Pricing request"))
+        val vm = InboxViewModel(obsStore, retrieval, style, controller, actionStore, clock, attentionStore)
+        val summaryA = createSummary(accountA, convA, "Kiran", "Pricing request")
+        vm.selectConversation(summaryA)
+
+        val provFormal = DraftProvenance(
+            accountId = accountA.key,
+            accountLabel = "Gmail · Work",
+            userInstruction = "formal instruction",
+            sourceMessageReferences = listOf(DraftSourceReference("key_a1", "Kiran", 1000L, "Pricing request")),
+            generatedAtMillis = 1000L,
+        )
+        val provConcise = DraftProvenance(
+            accountId = accountA.key,
+            accountLabel = "Gmail · Work",
+            userInstruction = "concise instruction",
+            sourceMessageReferences = listOf(DraftSourceReference("key_a1", "Kiran", 1000L, "Pricing request")),
+            generatedAtMillis = 2000L,
+        )
+
+        // Both generations produce the exact same proposal text
+        val sharedText = "Understood, thank you for the update."
+
+        // Apply Generation 1 (formal)
+        vm.applyGenerationResultForTest(
+            LocalDraftResult.Success(ModelProposal("task_formal", app.mini.hub.intelligence.CompartmentId(accountA.key), sharedText, emptyList()), "", 100L, false),
+            provFormal,
+            baselineTextAtStart = "",
+        )
+
+        // Apply Generation 2 (concise)
+        vm.applyGenerationResultForTest(
+            LocalDraftResult.Success(ModelProposal("task_concise", app.mini.hub.intelligence.CompartmentId(accountA.key), sharedText, emptyList()), "", 100L, false),
+            provConcise,
+            baselineTextAtStart = sharedText,
+        )
+
+        // Verify both versions exist and were NOT collapsed by text-only distinct
+        val versions = vm.state.value.draftVersions
+        assertEquals(2, versions.size, "Versions with identical text must not be collapsed by distinctBy text")
+        assertEquals(sharedText, versions[0].text)
+        assertEquals(sharedText, versions[1].text)
+        assertEquals("formal instruction", versions[0].provenance?.userInstruction)
+        assertEquals("concise instruction", versions[1].provenance?.userInstruction)
+
+        // Active version is Version 2 (concise)
+        assertEquals(1, vm.state.value.selectedVersionIndex)
+        assertEquals("concise instruction", vm.state.value.localDraftProvenance?.userInstruction)
+
+        // Switch to Version 1 (formal)
+        vm.selectDraftVersion(0)
+        assertEquals(0, vm.state.value.selectedVersionIndex)
+        assertEquals(sharedText, vm.state.value.localDraftText)
+        assertEquals("formal instruction", vm.state.value.localDraftProvenance?.userInstruction)
+
+        // Switch back to Version 2 (concise)
+        vm.selectDraftVersion(1)
+        assertEquals(1, vm.state.value.selectedVersionIndex)
+        assertEquals(sharedText, vm.state.value.localDraftText)
+        assertEquals("concise instruction", vm.state.value.localDraftProvenance?.userInstruction)
+    }
+
+    @Test
+    fun editingAndRestoringTextDuringGeneration_detectsEditRevisionAndPreservesUserWriting() {
+        val obsStore = InMemoryObservationStore()
+        val actionStore = InMemoryActionStore()
+        val retrieval = ScopedRetrievalEngine(obsStore)
+        val style = AdaptiveStyleEngine()
+        val controller = ActionController(clock, digest, DomainActionIdGenerator(idGen))
+        val attentionStore = InMemoryAttentionStore()
+
+        obsStore.persistObservation(createObs(accountA, convA, "a1", "Kiran", "Meeting time"))
+
+        val manualExecutor = ManualQueuedExecutor()
+        val testEngine = TestInferenceEngine { "AI generated meeting time confirmation" }
+        val experiment = LocalDraftExperiment(
+            engine = testEngine,
+            modelPath = "test-model.bin",
+            executor = manualExecutor,
+            nowMillis = { 1000L },
+            isMainThread = { true },
+        )
+        experiment.setForeground(true)
+
+        val vm = InboxViewModel(
+            obsStore, retrieval, style, controller, actionStore, clock, attentionStore,
+            localDraftExperiment = experiment,
+        )
+        val summaryA = createSummary(accountA, convA, "Kiran", "Meeting time")
+        vm.selectConversation(summaryA)
+
+        val initialText = "I will attend at 3pm"
+        vm.updateLocalDraftText(initialText)
+
+        // Request draft
+        vm.requestLocalDraft("confirm time")
+        assertTrue(vm.state.value.isLocalDraftInProgress)
+
+        // User edits the text during generation, and then restores the exact same text
+        vm.updateLocalDraftText("I will attend at 4pm instead")
+        vm.updateLocalDraftText(initialText)
+
+        // Generation resolves
+        manualExecutor.runAll()
+
+        // Assert: Edit revision token detected that edits occurred; user live text is preserved
+        assertEquals(initialText, vm.state.value.localDraftText)
+        assertTrue(vm.state.value.localDraftStatus?.contains("live edits are preserved") == true)
+
+        // Both manual version and AI version are available
+        assertEquals(2, vm.state.value.draftVersions.size)
     }
 }

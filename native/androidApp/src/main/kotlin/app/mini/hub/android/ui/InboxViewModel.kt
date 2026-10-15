@@ -97,6 +97,7 @@ class InboxViewModel(
     // Monotonic token so a late callback from a cancelled or superseded request cannot overwrite
     // the cancellation state or a newer draft.
     private var localDraftGeneration = 0L
+    private var localDraftEditRevision = 0L
     private val _state = mutableStateOf(InboxViewState())
     val state: State<InboxViewState> get() = _state
     private val draftStore: app.mini.hub.persistence.ConversationDraftStore? =
@@ -385,6 +386,21 @@ class InboxViewModel(
             publishDrafts()
             return
         }
+
+        val effectiveVersions = if (s.draftVersions.isNotEmpty()) {
+            s.draftVersions
+        } else if (s.localDraftText.isNotBlank()) {
+            listOf(
+                app.mini.hub.persistence.DraftVersion(
+                    text = s.localDraftText,
+                    provenance = s.localDraftProvenance,
+                    originalAiText = s.originalGeneratedDraft,
+                ),
+            )
+        } else {
+            emptyList()
+        }
+
         store.saveDraft(
             app.mini.hub.persistence.ConversationDraft(
                 conversationKey = selected.conversationId.key,
@@ -398,10 +414,48 @@ class InboxViewModel(
                 originalGeneratedDraft = s.originalGeneratedDraft,
                 updatedAtMillis = clock.now().epochMillis,
                 provenance = s.localDraftProvenance,
+                versions = effectiveVersions,
             ),
         )
         publishDrafts()
     }
+
+    private fun restoreDraftState(
+        draft: app.mini.hub.persistence.ConversationDraft?,
+        accountId: app.mini.hub.domain.AccountId,
+    ): RestoredDraftState {
+        val validProvenance = draft?.provenance?.takeIf { it.accountId == accountId.key }
+        val restoredVersions = draft?.versions?.filter { v ->
+            val prov = v.provenance
+            prov == null || prov.accountId == accountId.key
+        } ?: emptyList()
+        val effectiveVersions = if (restoredVersions.isNotEmpty()) {
+            restoredVersions
+        } else if (!draft?.body.isNullOrBlank()) {
+            listOf(app.mini.hub.persistence.DraftVersion(text = draft!!.body, provenance = validProvenance, originalAiText = draft.originalGeneratedDraft))
+        } else {
+            emptyList()
+        }
+        val selectedIdx = if (effectiveVersions.isNotEmpty()) {
+            effectiveVersions.indexOfFirst { it.text == draft?.body }.coerceAtLeast(0)
+        } else 0
+
+        return RestoredDraftState(
+            body = draft?.body.orEmpty(),
+            originalGeneratedDraft = draft?.originalGeneratedDraft,
+            provenance = validProvenance,
+            versions = effectiveVersions,
+            selectedIndex = selectedIdx,
+        )
+    }
+
+    private data class RestoredDraftState(
+        val body: String,
+        val originalGeneratedDraft: String?,
+        val provenance: app.mini.hub.persistence.DraftProvenance?,
+        val versions: List<app.mini.hub.persistence.DraftVersion>,
+        val selectedIndex: Int,
+    )
 
     private fun publishDrafts() {
         _state.value = _state.value.copy(savedDrafts = draftStore?.listDrafts().orEmpty())
@@ -445,6 +499,7 @@ class InboxViewModel(
         persistCurrentDraft()
         abandonLocalDraft()
         val draft = loadedDraft(summary.conversationId.key)
+        val restored = restoreDraftState(draft, accountId)
         _state.value = _state.value.copy(
             selectedConversation = summary,
             selectedTimeline = emptyList(),
@@ -452,11 +507,11 @@ class InboxViewModel(
                 ScopedRetrievalQuery(conversationId = summary.conversationId, compartment = CompartmentId(accountId.key), tokenBudget = 650),
             ),
             activeReviewPayload = null,
-            localDraftText = draft?.body.orEmpty(),
-            originalGeneratedDraft = draft?.originalGeneratedDraft,
-            localDraftProvenance = draft?.provenance,
-            draftVersions = if (draft?.body.isNullOrBlank()) emptyList() else listOf(draft!!.body),
-            draftVersionProvenances = if (draft?.provenance != null) listOf(draft.provenance!!) else emptyList(),
+            localDraftText = restored.body,
+            originalGeneratedDraft = restored.originalGeneratedDraft,
+            localDraftProvenance = restored.provenance,
+            draftVersions = restored.versions,
+            selectedVersionIndex = restored.selectedIndex,
             showWhyThisDraft = false,
             targetMessageIdToHighlight = null,
             localDraftStatus = null,
@@ -488,6 +543,7 @@ class InboxViewModel(
         persistCurrentDraft()
         abandonLocalDraft()
         val draft = loadedDraft(summary.conversationId.key)
+        val restored = restoreDraftState(draft, accountId)
         _state.value = _state.value.copy(
             selectedConversation = summary,
             selectedTimeline = emptyList(),
@@ -495,9 +551,13 @@ class InboxViewModel(
                 ScopedRetrievalQuery(conversationId = summary.conversationId, compartment = CompartmentId(accountId.key), tokenBudget = 650),
             ),
             activeReviewPayload = null,
-            localDraftText = draft?.body.orEmpty(),
-            originalGeneratedDraft = draft?.originalGeneratedDraft,
-            draftVersions = emptyList(),
+            localDraftText = restored.body,
+            originalGeneratedDraft = restored.originalGeneratedDraft,
+            localDraftProvenance = restored.provenance,
+            draftVersions = restored.versions,
+            selectedVersionIndex = restored.selectedIndex,
+            showWhyThisDraft = false,
+            targetMessageIdToHighlight = null,
             localDraftStatus = null,
             conversationLoadStatus = null,
             composeNewTo = draft?.to ?: "",
@@ -537,6 +597,7 @@ class InboxViewModel(
         clearSearch()
         persistCurrentDraft()
         abandonLocalDraft()
+        val restored = restoreDraftState(draft, accountId)
         _state.value = _state.value.copy(
             selectedConversation = summary,
             selectedTimeline = emptyList(),
@@ -544,9 +605,13 @@ class InboxViewModel(
                 ScopedRetrievalQuery(conversationId = summary.conversationId, compartment = CompartmentId(accountId.key), tokenBudget = 650),
             ),
             activeReviewPayload = null,
-            localDraftText = draft.body,
-            originalGeneratedDraft = draft.originalGeneratedDraft,
-            draftVersions = emptyList(),
+            localDraftText = restored.body,
+            originalGeneratedDraft = restored.originalGeneratedDraft,
+            localDraftProvenance = restored.provenance,
+            draftVersions = restored.versions,
+            selectedVersionIndex = restored.selectedIndex,
+            showWhyThisDraft = false,
+            targetMessageIdToHighlight = null,
             localDraftStatus = "Saved draft restored.",
             conversationLoadStatus = null,
             composeNewTo = if (draft.isNewEmail) draft.to else null,
@@ -588,6 +653,7 @@ class InboxViewModel(
         abandonLocalDraft()
         markConversationSeen(summary.conversationId.key, summary.latestEventAt.epochMillis)
         val draft = loadedDraft(summary.conversationId.key)
+        val restored = restoreDraftState(draft, summary.accountId)
         _state.value = _state.value.copy(
             selectedConversation = summary,
             selectedTimeline = observations,
@@ -595,11 +661,11 @@ class InboxViewModel(
             activeStyleProfile = style,
             activeReviewPayload = null,
             outboxStatusMessage = null,
-            localDraftText = draft?.body.orEmpty(),
-            originalGeneratedDraft = draft?.originalGeneratedDraft,
-            localDraftProvenance = draft?.provenance,
-            draftVersions = if (draft?.body.isNullOrBlank()) emptyList() else listOf(draft!!.body),
-            draftVersionProvenances = if (draft?.provenance != null) listOf(draft.provenance!!) else emptyList(),
+            localDraftText = restored.body,
+            originalGeneratedDraft = restored.originalGeneratedDraft,
+            localDraftProvenance = restored.provenance,
+            draftVersions = restored.versions,
+            selectedVersionIndex = restored.selectedIndex,
             showWhyThisDraft = false,
             targetMessageIdToHighlight = null,
             composeNewTo = if (draft?.isNewEmail == true) draft.to else null,
@@ -671,7 +737,7 @@ class InboxViewModel(
             localDraftText = "",
             originalGeneratedDraft = null,
             draftVersions = emptyList(),
-            draftVersionProvenances = emptyList(),
+            selectedVersionIndex = 0,
             localDraftProvenance = null,
             showWhyThisDraft = false,
             targetMessageIdToHighlight = null,
@@ -700,7 +766,9 @@ class InboxViewModel(
         }
         persistCurrentDraft()
         val generation = ++localDraftGeneration
-        val retained = _state.value.localDraftText
+        val baselineEditRevisionAtStart = localDraftEditRevision
+        val baselineTextAtStart = _state.value.localDraftText
+        val retained = baselineTextAtStart
         _state.value = _state.value.copy(
             localDraftStatus = if (revise || retained.isNotBlank()) "Rewriting on this device…" else "Generating locally on this device…",
             localDraftText = retained,
@@ -747,6 +815,8 @@ class InboxViewModel(
             },
             coverageWarning = retrieved.coverageWarning.ifBlank { null },
             excludedAttachments = allMediaAttachments,
+            previousDraft = retained.takeIf { it.isNotBlank() },
+            understandingNote = _state.value.understanding[selected.conversationId.key]?.explanation,
             generatedAtMillis = clock.now().epochMillis,
         )
 
@@ -771,7 +841,7 @@ class InboxViewModel(
                 ) {
                     return@postToMain
                 }
-                applyGenerationResult(result, provenance)
+                applyGenerationResult(result, provenance, baselineTextAtStart, baselineEditRevisionAtStart)
             }
         }
     }
@@ -779,25 +849,73 @@ class InboxViewModel(
     private fun applyGenerationResult(
         result: LocalDraftResult,
         provenance: app.mini.hub.persistence.DraftProvenance? = null,
+        baselineTextAtStart: String = "",
+        baselineEditRevisionAtStart: Long = -1L,
     ) {
         when (result) {
             is LocalDraftResult.Success -> {
-                val updatedVersions = (_state.value.draftVersions + result.proposal.text).takeLast(5)
-                val updatedProvenances = if (provenance != null) {
-                    (_state.value.draftVersionProvenances + provenance).takeLast(5)
-                } else {
-                    _state.value.draftVersionProvenances
-                }
-                _state.value = _state.value.copy(
-                    localDraftText = result.proposal.text,
-                    originalGeneratedDraft = result.proposal.text,
-                    draftVersions = updatedVersions,
-                    draftVersionProvenances = updatedProvenances,
-                    localDraftProvenance = provenance,
-                    localDraftWarning = result.warning.ifBlank { null },
-                    localDraftStatus = "Local draft ready (${result.latencyMs} ms). Review it before use.",
-                    isLocalDraftInProgress = false,
+                val newAiVersion = app.mini.hub.persistence.DraftVersion(
+                    id = "ai-${clock.now().epochMillis}-${result.proposal.taskId.takeLast(6)}",
+                    text = result.proposal.text,
+                    provenance = provenance,
+                    originalAiText = result.proposal.text,
+                    isAiGenerated = true,
                 )
+                val currentLiveText = _state.value.localDraftText
+                val userEditedWhileGenerating = if (baselineEditRevisionAtStart >= 0L) {
+                    (localDraftEditRevision != baselineEditRevisionAtStart) || (currentLiveText != baselineTextAtStart)
+                } else {
+                    currentLiveText != baselineTextAtStart
+                }
+
+                if (userEditedWhileGenerating) {
+                    if (currentLiveText.isNotBlank()) {
+                        val userManualVersion = app.mini.hub.persistence.DraftVersion(
+                            id = "manual-${clock.now().epochMillis}",
+                            text = currentLiveText,
+                            provenance = null,
+                            originalAiText = null,
+                            isAiGenerated = false,
+                        )
+                        val updatedVersions = (_state.value.draftVersions + userManualVersion + newAiVersion).takeLast(5)
+                        val userIndex = updatedVersions.indexOfLast { it.id == userManualVersion.id }.coerceAtLeast(0)
+                        _state.value = _state.value.copy(
+                            localDraftText = currentLiveText,
+                            draftVersions = updatedVersions,
+                            selectedVersionIndex = userIndex,
+                            localDraftWarning = result.warning.ifBlank { null },
+                            localDraftStatus = "New AI version generated (${result.latencyMs} ms). Your live edits are preserved.",
+                            isLocalDraftInProgress = false,
+                        )
+                    } else {
+                        // User cleared / deleted the draft while generation was running.
+                        // Preserve the empty editor and offer the generated result separately in draftVersions.
+                        val updatedVersions = (_state.value.draftVersions + newAiVersion).takeLast(5)
+                        _state.value = _state.value.copy(
+                            localDraftText = "",
+                            draftVersions = updatedVersions,
+                            selectedVersionIndex = -1,
+                            localDraftProvenance = null,
+                            originalGeneratedDraft = null,
+                            localDraftWarning = result.warning.ifBlank { null },
+                            localDraftStatus = "New AI version generated (${result.latencyMs} ms). Your cleared editor was preserved; tap a version above to view it.",
+                            isLocalDraftInProgress = false,
+                        )
+                    }
+                } else {
+                    val updatedVersions = (_state.value.draftVersions + newAiVersion).takeLast(5)
+                    val newIndex = updatedVersions.lastIndex.coerceAtLeast(0)
+                    _state.value = _state.value.copy(
+                        localDraftText = result.proposal.text,
+                        originalGeneratedDraft = result.proposal.text,
+                        draftVersions = updatedVersions,
+                        selectedVersionIndex = newIndex,
+                        localDraftProvenance = provenance,
+                        localDraftWarning = result.warning.ifBlank { null },
+                        localDraftStatus = "Local draft ready (${result.latencyMs} ms). Review it before use.",
+                        isLocalDraftInProgress = false,
+                    )
+                }
             }
             is LocalDraftResult.Refused -> _state.value = _state.value.copy(
                 localDraftWarning = result.warning.ifBlank { null },
@@ -821,29 +939,36 @@ class InboxViewModel(
     internal fun applyGenerationResultForTest(
         result: LocalDraftResult,
         provenance: app.mini.hub.persistence.DraftProvenance? = null,
-    ) = applyGenerationResult(result, provenance)
+        baselineTextAtStart: String = _state.value.localDraftText,
+        baselineEditRevisionAtStart: Long = localDraftEditRevision,
+    ) = applyGenerationResult(result, provenance, baselineTextAtStart, baselineEditRevisionAtStart)
 
     fun selectDraftVersion(index: Int) {
         val s = _state.value
         val version = s.draftVersions.getOrNull(index) ?: return
-        val prov = s.draftVersionProvenances.getOrNull(index)
         _state.value = s.copy(
-            localDraftText = version,
-            localDraftProvenance = prov ?: s.localDraftProvenance,
+            selectedVersionIndex = index,
+            localDraftText = version.text,
+            originalGeneratedDraft = version.originalAiText,
+            localDraftProvenance = version.provenance?.takeIf { it.accountId == s.selectedConversation?.accountId?.key },
         )
         persistCurrentDraft()
     }
 
     fun discardDraft() {
         val selected = _state.value.selectedConversation ?: return
+        abandonLocalDraft()
         draftStore?.deleteDraft(selected.conversationId.key)
         _state.value = _state.value.copy(
             localDraftText = "",
             originalGeneratedDraft = null,
             draftVersions = emptyList(),
-            draftVersionProvenances = emptyList(),
+            selectedVersionIndex = 0,
             localDraftProvenance = null,
+            showWhyThisDraft = false,
+            targetMessageIdToHighlight = null,
             localDraftStatus = "Draft discarded.",
+            isLocalDraftInProgress = false,
         )
         publishDrafts()
     }
@@ -898,6 +1023,7 @@ class InboxViewModel(
     }
 
     fun updateLocalDraftText(text: String) {
+        localDraftEditRevision++
         _state.value = _state.value.copy(localDraftText = text)
         persistCurrentDraft()
     }

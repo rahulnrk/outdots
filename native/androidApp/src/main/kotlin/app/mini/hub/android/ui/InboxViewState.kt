@@ -31,9 +31,9 @@ data class InboxViewState(
     val isLoading: Boolean = false,
     val localDraftText: String = "",
     val originalGeneratedDraft: String? = null,
-    /** Recent AI versions for this conversation, newest last. */
-    val draftVersions: List<String> = emptyList(),
-    val draftVersionProvenances: List<app.mini.hub.persistence.DraftProvenance> = emptyList(),
+    /** Coupled draft versions (text + provenance + baseline AI text), newest last. */
+    val draftVersions: List<app.mini.hub.persistence.DraftVersion> = emptyList(),
+    val selectedVersionIndex: Int = 0,
     val localDraftProvenance: app.mini.hub.persistence.DraftProvenance? = null,
     val showWhyThisDraft: Boolean = false,
     val targetMessageIdToHighlight: String? = null,

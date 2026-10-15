@@ -269,10 +269,11 @@ fun ThreadView(
     targetMessageKey: String? = null,
     draftText: String,
     draftStatus: String?,
-    draftVersions: List<String> = emptyList(),
+    draftVersions: List<app.mini.hub.persistence.DraftVersion> = emptyList(),
     selectedVersionIndex: Int = 0,
     onSelectVersion: (Int) -> Unit = {},
     isDrafting: Boolean,
+    initialAiOpen: Boolean = false,
     hasProvenance: Boolean = false,
     onWhyThisDraft: () -> Unit = {},
     onDiscardDraft: () -> Unit = {},
@@ -297,6 +298,10 @@ fun ThreadView(
         summary.accountId.provider == app.mini.hub.domain.Provider.OUTLOOK
     val listState = rememberLazyListState()
 
+    val targetMessageFound = remember(messages, targetMessageKey) {
+        targetMessageKey == null || messages.any { it.notificationKey == targetMessageKey || it.id.key == targetMessageKey }
+    }
+
     LaunchedEffect(messages.size, targetMessageKey) {
         if (targetMessageKey != null) {
             val idx = messages.indexOfFirst { it.notificationKey == targetMessageKey || it.id.key == targetMessageKey }
@@ -319,7 +324,7 @@ fun ThreadView(
                 Text(summary.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
                 val appName = SourceAppNames.forPackage(summary.packageId)
                 val accountSubtitle = if (!accountLabel.isNullOrBlank()) "$appName · $accountLabel" else appName
-                Text(accountSubtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                Text(accountSubtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             OutlinedButton(onClick = { showLabels = true }) { Text(label ?: "Category") }
             Box {
@@ -344,6 +349,21 @@ fun ThreadView(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
             )
+        }
+
+        if (!targetMessageFound && targetMessageKey != null) {
+            Card(
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    "Original source message is not in the currently loaded conversation history.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                )
+            }
         }
 
         // Coverage status banner
@@ -451,7 +471,7 @@ fun ThreadView(
             Text(
                 "Reply to ${displaySender(to)} · Re: $subject",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 4.dp),
@@ -464,6 +484,7 @@ fun ThreadView(
             selectedVersionIndex = selectedVersionIndex,
             onSelectVersion = onSelectVersion,
             isDrafting = isDrafting,
+            initialAiOpen = initialAiOpen,
             hasProvenance = hasProvenance,
             onWhyThisDraft = onWhyThisDraft,
             onDiscardDraft = onDiscardDraft,
@@ -482,6 +503,7 @@ private fun EmailCard(
     isHighlighted: Boolean = false,
 ) {
     var expanded by rememberSaveable(obs.id.key) { mutableStateOf(expandedByDefault) }
+    LaunchedEffect(isHighlighted) { if (isHighlighted) expanded = true }
     val mine = obs.direction == MessageDirection.Outbound
     val joined = obs.textFragments.joinToString("\n")
     val attachments = allMedia(joined)
@@ -507,10 +529,10 @@ private fun EmailCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(if (mine) "You" else displaySender(obs.senderHint), fontWeight = FontWeight.SemiBold, maxLines = 1)
                     if (!expanded) {
-                        Text(previewText(joined), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.outline)
+                        Text(previewText(joined), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                Text(fullTime(obs.postTime.epochMillis), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                Text(fullTime(obs.postTime.epochMillis), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (expanded) {
                 Spacer(modifier = Modifier.height(6.dp))
@@ -532,7 +554,7 @@ private fun EmailCard(
 @Composable
 private fun EmailField(label: String, value: String) {
     Row {
-        Text("$label: ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+        Text("$label: ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
@@ -573,7 +595,7 @@ private fun MessageBubble(
                 Text(
                     timeLabel(obs.postTime.epochMillis),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.align(Alignment.End),
                 )
                 if (obs.truncationState == app.mini.hub.observation.TruncationState.Truncated) {
@@ -728,10 +750,11 @@ private fun MediaView(ref: MediaRef, accountId: app.mini.hub.domain.AccountId) {
 private fun Composer(
     draftText: String,
     draftStatus: String?,
-    draftVersions: List<String> = emptyList(),
+    draftVersions: List<app.mini.hub.persistence.DraftVersion> = emptyList(),
     selectedVersionIndex: Int = 0,
     onSelectVersion: (Int) -> Unit = {},
     isDrafting: Boolean,
+    initialAiOpen: Boolean = false,
     hasProvenance: Boolean = false,
     onWhyThisDraft: () -> Unit = {},
     onDiscardDraft: () -> Unit = {},
@@ -740,8 +763,10 @@ private fun Composer(
     onDraftChanged: (String) -> Unit,
     onApprove: (String) -> Unit,
 ) {
-    var instruction by rememberSaveable { mutableStateOf("") }
-    var aiOpen by rememberSaveable { mutableStateOf(false) }
+    var instruction by rememberSaveable { mutableStateOf(if (isDrafting) "agree to 42k and confirm Friday delivery" else "") }
+    var aiOpen by rememberSaveable(isDrafting, initialAiOpen) { mutableStateOf(isDrafting || initialAiOpen) }
+    val fontScale = androidx.compose.ui.platform.LocalConfiguration.current.fontScale
+
     Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
         if (aiOpen) {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
@@ -783,8 +808,9 @@ private fun Composer(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             draftVersions.forEachIndexed { i, v ->
+                                val isSelected = i == selectedVersionIndex
                                 FilterChip(
-                                    selected = v == draftText,
+                                    selected = isSelected,
                                     onClick = { onSelectVersion(i) },
                                     label = { Text("Version ${i + 1}") },
                                 )
@@ -794,6 +820,14 @@ private fun Composer(
                     draftStatus?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
                 }
             }
+        }
+        if (!aiOpen && draftStatus != null) {
+            Text(
+                draftStatus,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+            )
         }
         Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
             TextButton(onClick = { aiOpen = !aiOpen }) { Text(if (aiOpen) "✕ AI" else "✨ AI") }
@@ -805,34 +839,66 @@ private fun Composer(
                 maxLines = 5,
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (draftText.isNotBlank() || hasProvenance) {
-                    TextButton(onClick = onWhyThisDraft) {
-                        Text("🔒 Why this draft?", style = MaterialTheme.typography.labelSmall)
-                    }
+
+        if (fontScale > 1.4f) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Button(
+                    onClick = { onApprove(draftText) },
+                    enabled = draftText.isNotBlank() && !isDrafting,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) {
+                    Text("Review reply")
                 }
-                if (draftText.isNotBlank()) {
-                    TextButton(onClick = onDiscardDraft) {
-                        Text("Discard", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (draftText.isNotBlank() || hasProvenance) {
+                        TextButton(onClick = onWhyThisDraft) {
+                            Text("🔒 Why this draft?", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    if (draftText.isNotBlank()) {
+                        TextButton(onClick = onDiscardDraft) {
+                            Text("Discard", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+                        }
                     }
                 }
             }
-            Button(
-                onClick = { onApprove(draftText) },
-                enabled = draftText.isNotBlank() && !isDrafting,
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Review reply")
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (draftText.isNotBlank() || hasProvenance) {
+                        TextButton(onClick = onWhyThisDraft) {
+                            Text("🔒 Why this draft?", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    if (draftText.isNotBlank()) {
+                        TextButton(onClick = onDiscardDraft) {
+                            Text("Discard", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                Button(
+                    onClick = { onApprove(draftText) },
+                    enabled = draftText.isNotBlank() && !isDrafting,
+                ) {
+                    Text("Review reply")
+                }
             }
         }
         Text(
             "Review reply shows the exact message for your approval first.",
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
