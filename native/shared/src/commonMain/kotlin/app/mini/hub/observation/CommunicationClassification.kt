@@ -135,13 +135,17 @@ fun categoryForStoredObservation(obs: ObservedNotification): NotificationCategor
                         NotificationCategory.SystemStatus
                     else -> NotificationCategory.GeneralNotification
                 }
-                else -> NotificationCategory.DirectMessage
+                else -> NotificationCategory.GeneralNotification
             }
         }
     }
 }
 
 fun isConversationSummary(summary: ConversationObservationSummary): Boolean {
+    if (summary.category == NotificationCategory.GeneralNotification ||
+        summary.category == NotificationCategory.OngoingService ||
+        summary.category == NotificationCategory.SystemStatus
+    ) return false
     if (summary.coverage != ConversationCoverage.NotificationOnly) return true
     if (summary.packageId.startsWith(CommunicationSource.API_PACKAGE_PREFIX)) return true
     if (summary.category == NotificationCategory.OngoingService ||
