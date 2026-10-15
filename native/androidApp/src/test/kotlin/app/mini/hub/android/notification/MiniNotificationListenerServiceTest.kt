@@ -39,10 +39,24 @@ class MiniNotificationListenerServiceTest {
     }
 
     private val testScheduler = TestScheduler()
+    private var rebindCallCount: Int = 0
+    private var isPermissionGranted: Boolean = true
+    private var currentTimeElapsed: Long = 0L
 
     @BeforeTest
     fun setUp() {
+        rebindCallCount = 0
+        isPermissionGranted = true
+        currentTimeElapsed = 0L
+        MiniNotificationListenerService.resetTestingOverrides()
         MiniNotificationListenerService.scheduler = testScheduler
+        MiniNotificationListenerService.elapsedRealtimeClock = { currentTimeElapsed }
+        MiniNotificationListenerService.permissionChecker = { isPermissionGranted }
+        MiniNotificationListenerService.rebindAction = {
+            rebindCallCount++
+            true
+        }
+        MiniNotificationListenerService.isConnected = false
         MiniNotificationListenerService.lastTransitionElapsedRealtime = 0L
         MiniNotificationListenerService.lastRebindAttemptElapsedRealtime = 0L
     }
@@ -50,6 +64,7 @@ class MiniNotificationListenerServiceTest {
     @AfterTest
     fun tearDown() {
         testScheduler.cancel()
+        MiniNotificationListenerService.resetTestingOverrides()
     }
 
     @Test
@@ -116,75 +131,93 @@ class MiniNotificationListenerServiceTest {
     }
 
     @Test
-    fun deferredRecovery_schedulesSingleAttempt_whenWithinCooldown() {
+    fun deferredRecovery_schedulesSingleAttemptForRemainingInterval_whenInCooldown() {
         MiniNotificationListenerService.lastTransitionElapsedRealtime = 10_000L
-        MiniNotificationListenerService.lastRebindAttemptElapsedRealtime = 0L
+        currentTimeElapsed = 12_000L // 2s elapsed, 13s remaining
 
-        // Call at 12s (2s after transition -> 13s cooldown remaining out of 15s)
-        val now = 12_000L
-        val allowImmediate = MiniNotificationListenerService.shouldAttemptRebind(
-            isPermissionGranted = true,
-            isConnected = false,
-            lastTransitionElapsedRealtime = 10_000L,
-            lastRebindAttemptElapsedRealtime = 0L,
-            nowElapsedRealtime = now,
-        )
-        assertFalse(allowImmediate)
-
-        // Simulate scheduling via scheduler
-        val remaining = 15_000L - (now - 10_000L)
-        testScheduler.postDelayed(remaining) {}
-        assertTrue(testScheduler.isScheduled())
-        assertEquals(13_000L, testScheduler.scheduledDelay)
+        val immediate = MiniNotificationListenerService.rebindIfNeeded(null)
+        assertFalse(immediate, "Immediate rebind must be rejected during cooldown")
+        assertTrue(testScheduler.isScheduled(), "Deferred recovery attempt must be scheduled")
+        assertEquals(13_000L, testScheduler.scheduledDelay, "Scheduled delay must match exact remaining cooldown")
+        assertEquals(0, rebindCallCount, "No rebind must be executed immediately")
     }
 
     @Test
-    fun deferredRecovery_suppressesDuplicateScheduling() {
-        testScheduler.postDelayed(10_000L) {}
-        val firstScheduleCount = testScheduler.scheduleCallCount
-        assertEquals(1, firstScheduleCount)
-
-        // When scheduler.isScheduled() is true, another trigger should not post again
-        assertTrue(testScheduler.isScheduled())
-        if (!testScheduler.isScheduled()) {
-            testScheduler.postDelayed(5_000L) {}
-        }
-        assertEquals(1, testScheduler.scheduleCallCount, "Duplicate attempt must be suppressed while one is scheduled")
-    }
-
-    @Test
-    fun deferredRecovery_cancelsOnConnection() {
-        testScheduler.postDelayed(10_000L) {}
-        assertTrue(testScheduler.isScheduled())
-
-        // When listener connects, pending recovery is cancelled
-        MiniNotificationListenerService.cancelPendingRecovery()
-        assertFalse(testScheduler.isScheduled())
-        assertNull(testScheduler.pendingAction)
-    }
-
-    @Test
-    fun deferredRecovery_cancelsOnPermissionLoss() {
-        testScheduler.postDelayed(10_000L) {}
-        assertTrue(testScheduler.isScheduled())
-
-        // When permission is revoked, pending recovery is cancelled
-        MiniNotificationListenerService.cancelPendingRecovery()
-        assertFalse(testScheduler.isScheduled())
-        assertNull(testScheduler.pendingAction)
-    }
-
-    @Test
-    fun deferredRecovery_executesOnceWithoutLooping() {
-        var executionCount = 0
-        testScheduler.postDelayed(100L) {
-            executionCount++
-            // Single execution: does not reschedule itself
-        }
-
+    fun deferredRecovery_suppressesDuplicateSchedulingOnRepeatedCalls() {
+        MiniNotificationListenerService.lastTransitionElapsedRealtime = 10_000L
+        currentTimeElapsed = 12_000L
+        MiniNotificationListenerService.rebindIfNeeded(null)
         assertEquals(1, testScheduler.scheduleCallCount)
+
+        currentTimeElapsed = 13_000L
+        MiniNotificationListenerService.rebindIfNeeded(null)
+
+        currentTimeElapsed = 14_000L
+        MiniNotificationListenerService.rebindIfNeeded(null)
+
+        assertEquals(1, testScheduler.scheduleCallCount, "Repeated calls during cooldown must suppress duplicate scheduling")
+        assertEquals(0, rebindCallCount, "No rebind calls during cooldown")
+    }
+
+    @Test
+    fun deferredRecovery_executesProductionCallbackOnceWithoutLooping() {
+        MiniNotificationListenerService.lastTransitionElapsedRealtime = 10_000L
+        currentTimeElapsed = 12_000L
+        MiniNotificationListenerService.rebindIfNeeded(null)
+
+        // Advance monotonic clock past cooldown and trigger the captured production callback
+        currentTimeElapsed = 26_000L
         testScheduler.trigger()
-        assertEquals(1, executionCount)
-        assertFalse(testScheduler.isScheduled(), "Deferred recovery must not reschedule automatically into a loop")
+
+        assertEquals(1, rebindCallCount, "Production callback must request rebind once")
+        assertFalse(testScheduler.isScheduled(), "Callback must not reschedule itself in a loop")
+        assertEquals(26_000L, MiniNotificationListenerService.lastRebindAttemptElapsedRealtime)
+    }
+
+    @Test
+    fun deferredRecovery_cancelsPendingAttemptOnConnection() {
+        MiniNotificationListenerService.lastTransitionElapsedRealtime = 10_000L
+        currentTimeElapsed = 12_000L
+        MiniNotificationListenerService.rebindIfNeeded(null)
+        assertTrue(testScheduler.isScheduled())
+
+        // Connect listener: rebindIfNeeded or cancelPendingRecovery cancels scheduled work
+        MiniNotificationListenerService.isConnected = true
+        MiniNotificationListenerService.rebindIfNeeded(null)
+
+        assertFalse(testScheduler.isScheduled(), "Pending recovery must be cancelled when listener connects")
+        assertNull(testScheduler.pendingAction)
+    }
+
+    @Test
+    fun deferredRecovery_permissionLossPreventsRebindOnCallback() {
+        MiniNotificationListenerService.lastTransitionElapsedRealtime = 10_000L
+        currentTimeElapsed = 12_000L
+        MiniNotificationListenerService.rebindIfNeeded(null)
+        assertTrue(testScheduler.isScheduled())
+
+        // Revoke permission before callback fires
+        isPermissionGranted = false
+        currentTimeElapsed = 26_000L
+        testScheduler.trigger()
+
+        assertEquals(0, rebindCallCount, "Permission loss must prevent deferred rebind request")
+        assertFalse(testScheduler.isScheduled())
+    }
+
+    @Test
+    fun immediatePermittedRequest_cancelsPendingDeferredAttempt() {
+        MiniNotificationListenerService.lastTransitionElapsedRealtime = 10_000L
+        currentTimeElapsed = 12_000L
+        MiniNotificationListenerService.rebindIfNeeded(null)
+        assertTrue(testScheduler.isScheduled())
+
+        // Advance past cooldown and call rebindIfNeeded: immediately permitted
+        currentTimeElapsed = 26_000L
+        val immediate = MiniNotificationListenerService.rebindIfNeeded(null)
+
+        assertTrue(immediate, "Rebind should succeed immediately once cooldown expires")
+        assertEquals(1, rebindCallCount, "Immediate rebind must be executed")
+        assertFalse(testScheduler.isScheduled(), "Pending deferred attempt must be cancelled on immediate success")
     }
 }

@@ -33,18 +33,21 @@
 
 File: `native/androidApp/src/test/kotlin/app/mini/hub/android/notification/MiniNotificationListenerServiceTest.kt`
 
+Tests exercise production recovery orchestration using injectable permission/connection state, monotonic clock, rebind scheduler, and rebind action hooks (with all globals reset after each test):
+
 - `shouldAttemptRebind_returnsFalse_whenAlreadyConnected`: Verified rebind is suppressed when listener is already bound.
 - `shouldAttemptRebind_returnsFalse_whenPermissionNotGranted`: Verified rebind is suppressed when notification access is missing.
 - `shouldAttemptRebind_returnsFalse_whenWithinTransitionCooldown`: Verified rebind is suppressed within 15 s of a disconnect transition.
 - `shouldAttemptRebind_returnsFalse_whenWithinAttemptCooldown`: Verified rebind is suppressed within 15 s of a previous attempt.
 - `shouldAttemptRebind_returnsTrue_whenDisconnectedPastCooldownWithPermission`: Verified rebind is allowed when disconnected past 15 s with permission.
-- `deferredRecovery_schedulesSingleAttempt_whenWithinCooldown`: Verified deferred attempt is scheduled for remaining cooldown duration.
-- `deferredRecovery_suppressesDuplicateScheduling`: Verified repeated triggers during cooldown do not schedule duplicate attempts.
-- `deferredRecovery_cancelsOnConnection`: Verified pending recovery is cancelled immediately when listener connects.
-- `deferredRecovery_cancelsOnPermissionLoss`: Verified pending recovery is cancelled when permission is revoked.
-- `deferredRecovery_executesOnceWithoutLooping`: Verified deferred attempt executes once and does not loop.
+- `deferredRecovery_schedulesSingleAttemptForRemainingInterval_whenInCooldown`: Calling `rebindIfNeeded` during cooldown schedules exactly one attempt for the remaining cooldown duration.
+- `deferredRecovery_suppressesDuplicateSchedulingOnRepeatedCalls`: Repeated `rebindIfNeeded` calls during cooldown do not create duplicate scheduled attempts.
+- `deferredRecovery_executesProductionCallbackOnceWithoutLooping`: Executing the scheduled production callback requests rebind once, updates rebind timestamps, and does not loop.
+- `deferredRecovery_cancelsPendingAttemptOnConnection`: Listener connection cancels pending recovery.
+- `deferredRecovery_permissionLossPreventsRebindOnCallback`: Permission loss prevents the pending callback from requesting rebind.
+- `immediatePermittedRequest_cancelsPendingDeferredAttempt`: An immediately permitted rebind request cancels any pending deferred attempt.
 
-All 43 Gradle tasks across `:androidApp:testDebugUnitTest` and `:shared:jvmTest` passed.
+All 11 tests passed in `MiniNotificationListenerServiceTest` (43 total Gradle test tasks across `:androidApp:testDebugUnitTest` and `:shared:jvmTest` passed).
 
 ---
 

@@ -68,7 +68,7 @@ class MiniNotificationListenerService : NotificationListenerService() {
     companion object {
         @Volatile
         var isConnected: Boolean = false
-            private set
+            internal set
 
         @Volatile
         var activeInstance: MiniNotificationListenerService? = null
@@ -94,6 +94,14 @@ class MiniNotificationListenerService : NotificationListenerService() {
 
         @Volatile
         var scheduler: RebindScheduler = HandlerRebindScheduler()
+            internal set
+
+        @Volatile
+        var permissionChecker: (Context?) -> Boolean = { ctx -> ctx?.let { isPermissionGranted(it) } ?: false }
+            internal set
+
+        @Volatile
+        var rebindAction: (Context?) -> Boolean = { ctx -> ctx?.let { performRequestRebind(it) } ?: false }
             internal set
 
         /**
@@ -145,10 +153,10 @@ class MiniNotificationListenerService : NotificationListenerService() {
          * cancelled on reconnect or permission loss.
          */
         fun rebindIfNeeded(
-            context: Context,
+            context: Context?,
             nowElapsedRealtime: Long = elapsedRealtimeClock(),
         ): Boolean {
-            if (!isPermissionGranted(context)) {
+            if (!permissionChecker(context)) {
                 cancelPendingRecovery()
                 return false
             }
@@ -167,7 +175,7 @@ class MiniNotificationListenerService : NotificationListenerService() {
             ) {
                 cancelPendingRecovery()
                 lastRebindAttemptElapsedRealtime = nowElapsedRealtime
-                return performRequestRebind(context)
+                return rebindAction(context)
             }
 
             // Cooldown active. Schedule a single bounded deferred attempt if not already scheduled.
@@ -179,7 +187,7 @@ class MiniNotificationListenerService : NotificationListenerService() {
                     REBIND_COOLDOWN_MILLIS - timeSinceAttempt,
                     1L,
                 )
-                val appContext = context.applicationContext ?: context
+                val appContext = context?.applicationContext ?: context
                 scheduler.postDelayed(remainingCooldown) {
                     executeDeferredRecovery(appContext)
                 }
@@ -188,10 +196,10 @@ class MiniNotificationListenerService : NotificationListenerService() {
         }
 
         fun executeDeferredRecovery(
-            context: Context,
+            context: Context?,
             nowElapsedRealtime: Long = elapsedRealtimeClock(),
         ): Boolean {
-            if (!isPermissionGranted(context) || isConnected) {
+            if (!permissionChecker(context) || isConnected) {
                 cancelPendingRecovery()
                 return false
             }
@@ -206,11 +214,23 @@ class MiniNotificationListenerService : NotificationListenerService() {
                 return false
             }
             lastRebindAttemptElapsedRealtime = nowElapsedRealtime
-            return performRequestRebind(context)
+            return rebindAction(context)
         }
 
         fun cancelPendingRecovery() {
             scheduler.cancel()
+        }
+
+        fun resetTestingOverrides() {
+            isConnected = false
+            activeInstance = null
+            lastTransitionElapsedRealtime = 0L
+            lastTransitionAtMillis = 0L
+            lastRebindAttemptElapsedRealtime = 0L
+            elapsedRealtimeClock = { SystemClock.elapsedRealtime() }
+            scheduler = HandlerRebindScheduler()
+            permissionChecker = { ctx -> ctx?.let { isPermissionGranted(it) } ?: false }
+            rebindAction = { ctx -> ctx?.let { performRequestRebind(it) } ?: false }
         }
 
         fun performRequestRebind(context: Context): Boolean {
