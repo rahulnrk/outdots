@@ -656,4 +656,77 @@ class Phase3AConversationComposerTest {
         // Both manual version and AI version are available
         assertEquals(2, vm.state.value.draftVersions.size)
     }
+
+    @Test
+    fun reopenedDraft_restoresActiveVersionByStableIdEvenWhenTextsMatch() {
+        val obsStore = InMemoryObservationStore()
+        val actionStore = InMemoryActionStore()
+        obsStore.persistObservation(createObs(accountA, convA, "a1", "Kiran", "Pricing"))
+        val summaryA = createSummary(accountA, convA, "Kiran", "Pricing")
+        fun newVm() = InboxViewModel(
+            obsStore, ScopedRetrievalEngine(obsStore), AdaptiveStyleEngine(),
+            ActionController(clock, digest, DomainActionIdGenerator(idGen)), actionStore, clock, InMemoryAttentionStore(),
+        )
+        val shared = "Same text from both generations."
+        val provFirst = DraftProvenance(accountA.key, "Gmail", "first instruction", generatedAtMillis = 1L)
+        val provSecond = DraftProvenance(accountA.key, "Gmail", "second instruction", generatedAtMillis = 2L)
+
+        val vm1 = newVm()
+        vm1.selectConversation(summaryA)
+        vm1.applyGenerationResultForTest(
+            LocalDraftResult.Success(ModelProposal("t_first", app.mini.hub.intelligence.CompartmentId(accountA.key), shared, emptyList()), "", 1L, false),
+            provFirst, baselineTextAtStart = "",
+        )
+        vm1.applyGenerationResultForTest(
+            LocalDraftResult.Success(ModelProposal("t_second", app.mini.hub.intelligence.CompartmentId(accountA.key), shared, emptyList()), "", 1L, false),
+            provSecond, baselineTextAtStart = shared,
+        )
+        vm1.selectDraftVersion(1)
+        val savedIds = vm1.state.value.draftVersions.map { it.id }
+        assertEquals(savedIds[1], actionStore.loadDraft(convA.key)?.activeVersionId)
+
+        // Fresh view model (same store) restores the second version, not the first text match.
+        val vm2 = newVm()
+        vm2.selectConversation(summaryA)
+        val restored = vm2.state.value
+        assertEquals(savedIds, restored.draftVersions.map { it.id })
+        assertEquals(1, restored.selectedVersionIndex)
+        assertEquals("second instruction", restored.localDraftProvenance?.userInstruction)
+    }
+
+    @Test
+    fun editsDuringGenerationOnRestoredAiDraft_clearStaleProvenanceForManualVersion() {
+        val obsStore = InMemoryObservationStore()
+        val actionStore = InMemoryActionStore()
+        obsStore.persistObservation(createObs(accountA, convA, "a1", "Kiran", "Pricing"))
+        val prov = DraftProvenance(accountA.key, "Gmail", "earlier instruction", generatedAtMillis = 1L)
+        actionStore.saveDraft(
+            ConversationDraft(
+                conversationKey = convA.key, accountId = accountA.key, body = "Earlier AI text",
+                originalGeneratedDraft = "Earlier AI text", updatedAtMillis = 1L, provenance = prov,
+                versions = listOf(DraftVersion(id = "ai-old", text = "Earlier AI text", provenance = prov, originalAiText = "Earlier AI text", isAiGenerated = true)),
+                activeVersionId = "ai-old",
+            ),
+        )
+        val executor = ManualQueuedExecutor()
+        val experiment = LocalDraftExperiment(TestInferenceEngine { "New AI text" }, "test-model.bin", executor, { 1000L }, { true })
+        experiment.setForeground(true)
+        val vm = InboxViewModel(
+            obsStore, ScopedRetrievalEngine(obsStore), AdaptiveStyleEngine(),
+            ActionController(clock, digest, DomainActionIdGenerator(idGen)), actionStore, clock, InMemoryAttentionStore(),
+            localDraftExperiment = experiment,
+        )
+        vm.selectConversation(createSummary(accountA, convA, "Kiran", "Pricing"))
+        assertEquals(prov, vm.state.value.localDraftProvenance)
+
+        vm.requestLocalDraft("shorter")
+        vm.updateLocalDraftText("My own rewrite")
+        executor.runAll()
+
+        val s = vm.state.value
+        assertEquals("My own rewrite", s.localDraftText)
+        assertFalse(s.draftVersions[s.selectedVersionIndex].isAiGenerated)
+        assertNull(s.localDraftProvenance, "Manual active version must not carry an older AI version's evidence")
+        assertNull(s.originalGeneratedDraft)
+    }
 }

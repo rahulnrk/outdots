@@ -56,6 +56,7 @@ class SqlCipherActionStore(
         runCatching { db.execSQL("ALTER TABLE conversation_drafts ADD COLUMN original_generated_draft TEXT") }
         runCatching { db.execSQL("ALTER TABLE conversation_drafts ADD COLUMN provenance_json TEXT") }
         runCatching { db.execSQL("ALTER TABLE conversation_drafts ADD COLUMN versions_json TEXT") }
+        runCatching { db.execSQL("ALTER TABLE conversation_drafts ADD COLUMN active_version_id TEXT") }
         db
     }
 
@@ -234,6 +235,7 @@ class SqlCipherActionStore(
                 put("original_generated_draft", draft.originalGeneratedDraft)
                 put("provenance_json", draft.provenance?.let { DraftProvenanceSerializer.serialize(it) })
                 put("versions_json", draft.versions.takeIf { it.isNotEmpty() }?.let { DraftVersionSerializer.serializeList(it) })
+                put("active_version_id", draft.activeVersionId)
             },
             SQLiteDatabase.CONFLICT_REPLACE,
         )
@@ -299,6 +301,7 @@ class SqlCipherActionStore(
             updatedAtMillis = long("updated_at"),
             provenance = prov,
             versions = effectiveVersions,
+            activeVersionId = optionalText("active_version_id"),
         )
     }
 
@@ -360,7 +363,8 @@ class SqlCipherActionStore(
                 updated_at INTEGER NOT NULL,
                 original_generated_draft TEXT,
                 provenance_json TEXT,
-                versions_json TEXT
+                versions_json TEXT,
+                active_version_id TEXT
             )
         """
         val SNAPSHOT_COLUMNS = arrayOf(
@@ -370,6 +374,7 @@ class SqlCipherActionStore(
         val DRAFT_COLUMNS = arrayOf(
             "conversation_key", "account_id", "body", "compose_to", "compose_cc", "compose_bcc",
             "compose_subject", "is_new_email", "updated_at", "original_generated_draft", "provenance_json", "versions_json",
+            "active_version_id",
         )
     }
 }

@@ -9,6 +9,15 @@
             android:launchMode="singleTop"
             android:taskAffinity=""
             android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <!-- Debug-only Phase 3A workflow harness: isolated SQLCipher file, fake inference, no send path. -->
+        <activity
+            android:name=".ui.Phase3AWorkflowHarnessActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <receiver
             android:name=".notification.SyntheticNotificationReceiver"
             android:exported="true">

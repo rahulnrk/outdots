@@ -764,7 +764,10 @@ private fun Composer(
     onApprove: (String) -> Unit,
 ) {
     var instruction by rememberSaveable { mutableStateOf(if (isDrafting) "agree to 42k and confirm Friday delivery" else "") }
-    var aiOpen by rememberSaveable(isDrafting, initialAiOpen) { mutableStateOf(isDrafting || initialAiOpen) }
+    var aiOpen by rememberSaveable(initialAiOpen) { mutableStateOf(isDrafting || initialAiOpen) }
+    // Open the panel when generation starts, but never collapse it when generation finishes:
+    // the result may only be reachable through its version chip.
+    androidx.compose.runtime.LaunchedEffect(isDrafting) { if (isDrafting) aiOpen = true }
     val fontScale = androidx.compose.ui.platform.LocalConfiguration.current.fontScale
 
     Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
@@ -802,7 +805,9 @@ private fun Composer(
                             }
                         }
                     }
-                    if (draftVersions.size > 1) {
+                    // Show chips whenever there is a choice to make, including a single offered version
+                    // that is not in the editor (for example after the user cleared it during generation).
+                    if (draftVersions.size > 1 || (draftVersions.isNotEmpty() && selectedVersionIndex !in draftVersions.indices)) {
                         Row(
                             modifier = Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),

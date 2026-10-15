@@ -69,6 +69,8 @@ data class ConversationDraft(
     val updatedAtMillis: Long,
     val provenance: DraftProvenance? = null,
     val versions: List<DraftVersion> = emptyList(),
+    /** Stable ID of the selected version; null when the editor is not showing a stored version. */
+    val activeVersionId: String? = null,
 )
 
 object DraftProvenanceSerializer {

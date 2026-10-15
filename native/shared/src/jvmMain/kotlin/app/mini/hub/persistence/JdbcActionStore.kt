@@ -87,13 +87,15 @@ class JdbcActionStore(path: String) : ActionStore, ConversationDraftStore, AutoC
                     updated_at INTEGER NOT NULL,
                     original_generated_draft TEXT,
                     provenance_json TEXT,
-                    versions_json TEXT
+                    versions_json TEXT,
+                    active_version_id TEXT
                 )
                 """,
             )
             runCatching { s.execute("ALTER TABLE conversation_drafts ADD COLUMN original_generated_draft TEXT") }
             runCatching { s.execute("ALTER TABLE conversation_drafts ADD COLUMN provenance_json TEXT") }
             runCatching { s.execute("ALTER TABLE conversation_drafts ADD COLUMN versions_json TEXT") }
+            runCatching { s.execute("ALTER TABLE conversation_drafts ADD COLUMN active_version_id TEXT") }
         }
     }
 
@@ -117,8 +119,9 @@ class JdbcActionStore(path: String) : ActionStore, ConversationDraftStore, AutoC
         val sql = """
             INSERT OR REPLACE INTO conversation_drafts (
                 conversation_key, account_id, body, compose_to, compose_cc, compose_bcc,
-                compose_subject, is_new_email, updated_at, original_generated_draft, provenance_json, versions_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                compose_subject, is_new_email, updated_at, original_generated_draft, provenance_json, versions_json,
+                active_version_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         connection.prepareStatement(sql).use { s ->
             s.setString(1, draft.conversationKey)
@@ -133,6 +136,7 @@ class JdbcActionStore(path: String) : ActionStore, ConversationDraftStore, AutoC
             s.setString(10, draft.originalGeneratedDraft)
             s.setString(11, draft.provenance?.let { DraftProvenanceSerializer.serialize(it) })
             s.setString(12, draft.versions.takeIf { it.isNotEmpty() }?.let { DraftVersionSerializer.serializeList(it) })
+            s.setString(13, draft.activeVersionId)
             s.executeUpdate()
         }
     }
@@ -191,6 +195,7 @@ class JdbcActionStore(path: String) : ActionStore, ConversationDraftStore, AutoC
             updatedAtMillis = getLong("updated_at"),
             provenance = prov,
             versions = effectiveVersions,
+            activeVersionId = getString("active_version_id"),
         )
     }
 }

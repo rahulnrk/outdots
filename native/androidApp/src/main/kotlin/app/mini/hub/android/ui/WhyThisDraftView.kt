@@ -3,6 +3,7 @@ package app.mini.hub.android.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -163,22 +164,23 @@ fun WhyThisDraftView(
                                 fontWeight = FontWeight.Medium,
                             )
                             Spacer(modifier = Modifier.height(4.dp))
-                            Row(
+                            // Metadata and action stack as full-width rows so neither is squeezed at large text.
+                            Text(
+                                text = "${ref.senderHint} · ${SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()).format(Date(ref.timestampMillis))}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
+                            )
+                            TextButton(
+                                onClick = { onOpenMessage(ref.messageId) },
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 0.dp, vertical = 2.dp),
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                             ) {
                                 Text(
-                                    text = "${ref.senderHint} · ${SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()).format(Date(ref.timestampMillis))}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    "Open original message ↗",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    modifier = Modifier.fillMaxWidth(),
                                 )
-                                TextButton(
-                                    onClick = { onOpenMessage(ref.messageId) },
-                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                ) {
-                                    Text("Open original message ↗", style = MaterialTheme.typography.labelSmall)
-                                }
                             }
                         }
                     }

@@ -415,6 +415,7 @@ class InboxViewModel(
                 updatedAtMillis = clock.now().epochMillis,
                 provenance = s.localDraftProvenance,
                 versions = effectiveVersions,
+                activeVersionId = effectiveVersions.getOrNull(s.selectedVersionIndex)?.id?.ifEmpty { null },
             ),
         )
         publishDrafts()
@@ -437,7 +438,13 @@ class InboxViewModel(
             emptyList()
         }
         val selectedIdx = if (effectiveVersions.isNotEmpty()) {
-            effectiveVersions.indexOfFirst { it.text == draft?.body }.coerceAtLeast(0)
+            // Prefer the persisted stable ID; fall back to body match only for legacy rows without one.
+            val byId = draft?.activeVersionId?.let { id -> effectiveVersions.indexOfFirst { it.id.isNotEmpty() && it.id == id } } ?: -1
+            when {
+                byId >= 0 -> byId
+                draft?.activeVersionId == null && draft?.body?.isEmpty() == true && draft.versions.isNotEmpty() -> -1
+                else -> effectiveVersions.indexOfFirst { it.text == draft?.body }.coerceAtLeast(0)
+            }
         } else 0
 
         return RestoredDraftState(
@@ -883,6 +890,9 @@ class InboxViewModel(
                             localDraftText = currentLiveText,
                             draftVersions = updatedVersions,
                             selectedVersionIndex = userIndex,
+                            // The active version is the user's manual text: never show an older AI version's evidence for it.
+                            localDraftProvenance = null,
+                            originalGeneratedDraft = null,
                             localDraftWarning = result.warning.ifBlank { null },
                             localDraftStatus = "New AI version generated (${result.latencyMs} ms). Your live edits are preserved.",
                             isLocalDraftInProgress = false,
