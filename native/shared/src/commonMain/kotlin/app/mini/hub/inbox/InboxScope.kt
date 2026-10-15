@@ -3,6 +3,7 @@ package app.mini.hub.inbox
 import app.mini.hub.attention.ConversationAttention
 import app.mini.hub.attention.isHandledDone
 import app.mini.hub.observation.ConversationObservationSummary
+import app.mini.hub.observation.NotificationCategory
 import app.mini.hub.persistence.ConversationDraft
 import app.mini.hub.search.SearchResult
 

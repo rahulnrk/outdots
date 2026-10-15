@@ -1,8 +1,11 @@
 package app.mini.hub.observation
 
 import app.mini.hub.action.DigestProvider
+import app.mini.hub.domain.AccountId
 import app.mini.hub.domain.Clock
 import app.mini.hub.domain.IdGenerator
+import app.mini.hub.domain.Provider
+import app.mini.hub.domain.ScopedId
 import app.mini.hub.domain.UtcInstant
 import app.mini.hub.persistence.InMemoryObservationStore
 import kotlin.test.Test
@@ -259,5 +262,105 @@ class CommunicationSourcesTest {
         )
         assertTrue(isConversationSummary(messageSummary))
         assertFalse(isConversationSummary(activitySummary))
+    }
+
+    @Test
+    fun regression_legacyNullCategoryFallbackAndGeneralNotificationExcluded() {
+        val legacyObs = ObservedNotification(
+            id = ScopedId(AccountId(Provider.WHATSAPP, "local"), ScopedId.Kind.OBSERVATION, "obs1"),
+            accountId = AccountId(Provider.WHATSAPP, "local"),
+            conversationId = ScopedId(AccountId(Provider.WHATSAPP, "local"), ScopedId.Kind.CONVERSATION, "alert_conv"),
+            packageId = "com.example.alert",
+            notificationKey = "key1",
+            notificationId = 1,
+            tag = null,
+            senderHint = "System",
+            title = "Alert",
+            textFragments = listOf("Service status update"),
+            rawTextDigest = "digest",
+            observedAt = clock.now(),
+            postTime = clock.now(),
+            revision = 1L,
+            isRemoved = false,
+            isGroupSummary = false,
+            isOngoing = false,
+            truncationState = TruncationState.Complete,
+            correlationConfidence = CorrelationConfidence.High,
+            provenance = ObservationProvenance.AndroidNotificationListener,
+            notificationCategory = null, // legacy null category
+        )
+        val derivedCat = categoryForStoredObservation(legacyObs)
+        assertEquals(NotificationCategory.GeneralNotification, derivedCat)
+
+        val summary = ConversationObservationSummary(
+            conversationId = legacyObs.conversationId,
+            accountId = legacyObs.accountId,
+            title = "Alert",
+            appName = "Alert",
+            senderHint = "System",
+            packageId = legacyObs.packageId,
+            latestSnippet = "Service status update",
+            category = derivedCat,
+            coverage = ConversationCoverage.NotificationOnly,
+            coverageExplanation = "notification",
+            latestEventAt = clock.now(),
+            observationCount = 1,
+            unreadCount = 1,
+            isRemoved = false,
+        )
+        assertFalse(isConversationSummary(summary))
+    }
+
+    @Test
+    fun regression_promotionalEmailsAndGenuineMessagesPreserved() {
+        val promoEmail = ObservedNotification(
+            id = ScopedId(AccountId(Provider.GMAIL, "local"), ScopedId.Kind.OBSERVATION, "obs2"),
+            accountId = AccountId(Provider.GMAIL, "local"),
+            conversationId = ScopedId(AccountId(Provider.GMAIL, "local"), ScopedId.Kind.CONVERSATION, "promo_conv"),
+            packageId = "com.google.android.gm",
+            notificationKey = "key2",
+            notificationId = 2,
+            tag = null,
+            senderHint = "Store <store@example.com>",
+            title = "Special Offer",
+            textFragments = listOf("Check out our job openings and post offers this week!"),
+            rawTextDigest = "digest2",
+            observedAt = clock.now(),
+            postTime = clock.now(),
+            revision = 1L,
+            isRemoved = false,
+            isGroupSummary = false,
+            isOngoing = false,
+            truncationState = TruncationState.Complete,
+            correlationConfidence = CorrelationConfidence.High,
+            provenance = ObservationProvenance.OfficialProviderApi,
+            notificationCategory = NotificationCategory.DirectMessage,
+        )
+        val summary = ConversationObservationSummary(
+            conversationId = promoEmail.conversationId,
+            accountId = promoEmail.accountId,
+            title = "Special Offer",
+            appName = "Gmail",
+            senderHint = promoEmail.senderHint,
+            packageId = promoEmail.packageId,
+            latestSnippet = promoEmail.textFragments.first(),
+            category = promoEmail.notificationCategory!!,
+            coverage = ConversationCoverage.PartialApiSync,
+            coverageExplanation = "email",
+            latestEventAt = clock.now(),
+            observationCount = 1,
+            unreadCount = 1,
+            isRemoved = false,
+        )
+        assertTrue(isConversationSummary(summary))
+        assertEquals(CommunicationKind.ConversationMessage, classifyCommunication(NotificationRawPayload(
+            key = "key2",
+            packageId = promoEmail.packageId,
+            notificationId = 2,
+            postTimeMillis = clock.now().epochMillis,
+            senderHint = promoEmail.senderHint,
+            title = promoEmail.title,
+            text = promoEmail.textFragments.first(),
+        )))
     }
 }
