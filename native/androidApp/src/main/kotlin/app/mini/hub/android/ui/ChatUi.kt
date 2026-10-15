@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -262,10 +263,19 @@ fun ThreadView(
     timeline: List<ObservedNotification>,
     label: String?,
     onLabel: (String?) -> Unit,
+    accountLabel: String? = null,
+    loadStatus: String? = null,
+    onRetryLoad: (() -> Unit)? = null,
+    targetMessageKey: String? = null,
     draftText: String,
     draftStatus: String?,
-    draftVersions: List<String>,
+    draftVersions: List<String> = emptyList(),
+    selectedVersionIndex: Int = 0,
+    onSelectVersion: (Int) -> Unit = {},
     isDrafting: Boolean,
+    hasProvenance: Boolean = false,
+    onWhyThisDraft: () -> Unit = {},
+    onDiscardDraft: () -> Unit = {},
     onBack: () -> Unit,
     onDraft: (instruction: String, revise: Boolean) -> Unit,
     onCancelDraft: () -> Unit,
@@ -286,16 +296,30 @@ fun ThreadView(
     val isEmail = summary.accountId.provider == app.mini.hub.domain.Provider.GMAIL ||
         summary.accountId.provider == app.mini.hub.domain.Provider.OUTLOOK
     val listState = rememberLazyListState()
-    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.scrollToItem(messages.size - 1) }
+
+    LaunchedEffect(messages.size, targetMessageKey) {
+        if (targetMessageKey != null) {
+            val idx = messages.indexOfFirst { it.notificationKey == targetMessageKey || it.id.key == targetMessageKey }
+            if (idx >= 0) listState.animateScrollToItem(idx)
+        } else if (messages.isNotEmpty()) {
+            listState.scrollToItem(messages.size - 1)
+        }
+    }
+
     var showLabels by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    val participants = remember(messages) {
+        messages.map { displaySender(it.senderHint) }.filter { it.isNotBlank() && it != "You" }.distinct()
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             TextButton(onClick = onBack) { Text("←") }
             Column(modifier = Modifier.weight(1f)) {
                 Text(summary.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
-                Text(SourceAppNames.forPackage(summary.packageId), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                val appName = SourceAppNames.forPackage(summary.packageId)
+                val accountSubtitle = if (!accountLabel.isNullOrBlank()) "$appName · $accountLabel" else appName
+                Text(accountSubtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
             }
             OutlinedButton(onClick = { showLabels = true }) { Text(label ?: "Category") }
             Box {
@@ -310,14 +334,77 @@ fun ThreadView(
                 }
             }
         }
-        if (summary.coverage == app.mini.hub.observation.ConversationCoverage.NotificationOnly) {
+
+        if (participants.isNotEmpty()) {
             Text(
-                summary.coverageExplanation,
+                text = "Participants: ${participants.joinToString(", ")}",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.tertiary,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
             )
         }
+
+        // Coverage status banner
+        if (summary.coverage == app.mini.hub.observation.ConversationCoverage.NotificationOnly) {
+            Card(
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    "Observed from notifications only. Earlier history not available until account is connected.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                )
+            }
+        } else if (summary.coverage == app.mini.hub.observation.ConversationCoverage.PartialApiSync) {
+            Card(
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    "Partial history synced. Recent messages loaded from provider.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                )
+            }
+        }
+
+        // Load status / failure recovery banner
+        loadStatus?.let { status ->
+            val isFailure = status.contains("unavailable", ignoreCase = true) || status.contains("failed", ignoreCase = true)
+            Card(
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isFailure) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
+                ),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isFailure) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (isFailure && onRetryLoad != null) {
+                        TextButton(onClick = onRetryLoad) {
+                            Text("Retry", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+        }
+
         if (showLabels) {
             AlertDialog(
                 onDismissRequest = { showLabels = false },
@@ -341,9 +428,21 @@ fun ThreadView(
         ) {
             if (messages.isEmpty()) item { Text("No messages yet.", color = MaterialTheme.colorScheme.outline) }
             if (isEmail) {
-                items(messages, key = { it.id.key }) { obs -> EmailCard(obs, expandedByDefault = obs == messages.last()) }
+                items(messages, key = { it.id.key }) { obs ->
+                    EmailCard(
+                        obs = obs,
+                        expandedByDefault = obs == messages.last(),
+                        isHighlighted = obs.notificationKey == targetMessageKey || obs.id.key == targetMessageKey,
+                    )
+                }
             } else {
-                items(messages, key = { it.id.key }) { obs -> MessageBubble(obs, isGroupish = summary.title != obs.senderHint) }
+                items(messages, key = { it.id.key }) { obs ->
+                    MessageBubble(
+                        obs = obs,
+                        isGroupish = summary.title != obs.senderHint,
+                        isHighlighted = obs.notificationKey == targetMessageKey || obs.id.key == targetMessageKey,
+                    )
+                }
             }
         }
         if (isEmail) {
@@ -362,7 +461,12 @@ fun ThreadView(
             draftText = draftText,
             draftStatus = draftStatus,
             draftVersions = draftVersions,
+            selectedVersionIndex = selectedVersionIndex,
+            onSelectVersion = onSelectVersion,
             isDrafting = isDrafting,
+            hasProvenance = hasProvenance,
+            onWhyThisDraft = onWhyThisDraft,
+            onDiscardDraft = onDiscardDraft,
             onDraft = onDraft,
             onCancelDraft = onCancelDraft,
             onDraftChanged = onDraftChanged,
@@ -372,14 +476,21 @@ fun ThreadView(
 }
 
 @Composable
-private fun EmailCard(obs: ObservedNotification, expandedByDefault: Boolean) {
+private fun EmailCard(
+    obs: ObservedNotification,
+    expandedByDefault: Boolean,
+    isHighlighted: Boolean = false,
+) {
     var expanded by rememberSaveable(obs.id.key) { mutableStateOf(expandedByDefault) }
     val mine = obs.direction == MessageDirection.Outbound
     val joined = obs.textFragments.joinToString("\n")
     val attachments = allMedia(joined)
     val body = splitMedia(joined).second
+    val borderModifier = if (isHighlighted) {
+        Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
+    } else Modifier
     Card(
-        modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
+        modifier = Modifier.fillMaxWidth().then(borderModifier).clickable { expanded = !expanded },
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
@@ -433,14 +544,21 @@ private fun fullTime(millis: Long): String =
     SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()).format(Date(millis))
 
 @Composable
-private fun MessageBubble(obs: ObservedNotification, isGroupish: Boolean) {
+private fun MessageBubble(
+    obs: ObservedNotification,
+    isGroupish: Boolean,
+    isHighlighted: Boolean = false,
+) {
     val mine = obs.direction == MessageDirection.Outbound
     val joined = obs.textFragments.joinToString("\n")
     val medias = allMedia(joined)
     val text = splitMedia(joined).second
+    val borderModifier = if (isHighlighted) {
+        Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp))
+    } else Modifier
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Card(
-            modifier = Modifier.fillMaxWidth(0.82f),
+            modifier = Modifier.fillMaxWidth(0.82f).then(borderModifier),
             shape = RoundedCornerShape(14.dp),
             colors = CardDefaults.cardColors(
                 containerColor = if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
@@ -610,8 +728,13 @@ private fun MediaView(ref: MediaRef, accountId: app.mini.hub.domain.AccountId) {
 private fun Composer(
     draftText: String,
     draftStatus: String?,
-    draftVersions: List<String>,
+    draftVersions: List<String> = emptyList(),
+    selectedVersionIndex: Int = 0,
+    onSelectVersion: (Int) -> Unit = {},
     isDrafting: Boolean,
+    hasProvenance: Boolean = false,
+    onWhyThisDraft: () -> Unit = {},
+    onDiscardDraft: () -> Unit = {},
     onDraft: (String, Boolean) -> Unit,
     onCancelDraft: () -> Unit,
     onDraftChanged: (String) -> Unit,
@@ -635,7 +758,7 @@ private fun Composer(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        listOf("Shorter", "More polite", "More casual", "Say no politely", "Ask a question").forEach { quick ->
+                        listOf("Shorter", "Warmer", "More polite", "More casual", "Say no politely", "Ask a question", "Try again").forEach { quick ->
                             FilterChip(selected = false, onClick = { instruction = quick }, label = { Text(quick) })
                         }
                     }
@@ -656,11 +779,15 @@ private fun Composer(
                     }
                     if (draftVersions.size > 1) {
                         Row(
-                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            modifier = Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             draftVersions.forEachIndexed { i, v ->
-                                FilterChip(selected = v == draftText, onClick = { onDraftChanged(v) }, label = { Text("Version ${i + 1}") })
+                                FilterChip(
+                                    selected = v == draftText,
+                                    onClick = { onSelectVersion(i) },
+                                    label = { Text("Version ${i + 1}") },
+                                )
                             }
                         }
                     }
@@ -677,8 +804,30 @@ private fun Composer(
                 modifier = Modifier.weight(1f),
                 maxLines = 5,
             )
-            Spacer(modifier = Modifier.width(6.dp))
-            Button(onClick = { onApprove(draftText) }, enabled = draftText.isNotBlank() && !isDrafting) { Text("Review reply") }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (draftText.isNotBlank() || hasProvenance) {
+                    TextButton(onClick = onWhyThisDraft) {
+                        Text("🔒 Why this draft?", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                if (draftText.isNotBlank()) {
+                    TextButton(onClick = onDiscardDraft) {
+                        Text("Discard", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    }
+                }
+            }
+            Button(
+                onClick = { onApprove(draftText) },
+                enabled = draftText.isNotBlank() && !isDrafting,
+            ) {
+                Text("Review reply")
+            }
         }
         Text(
             "Review reply shows the exact message for your approval first.",

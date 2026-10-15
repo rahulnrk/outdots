@@ -54,6 +54,7 @@ class SqlCipherActionStore(
         db.execSQL(SCHEMA_SNAPSHOTS)
         db.execSQL(SCHEMA_DRAFTS)
         runCatching { db.execSQL("ALTER TABLE conversation_drafts ADD COLUMN original_generated_draft TEXT") }
+        runCatching { db.execSQL("ALTER TABLE conversation_drafts ADD COLUMN provenance_json TEXT") }
         db
     }
 
@@ -230,6 +231,7 @@ class SqlCipherActionStore(
                 put("is_new_email", if (draft.isNewEmail) 1 else 0)
                 put("updated_at", draft.updatedAtMillis)
                 put("original_generated_draft", draft.originalGeneratedDraft)
+                put("provenance_json", draft.provenance?.let { DraftProvenanceSerializer.serialize(it) })
             },
             SQLiteDatabase.CONFLICT_REPLACE,
         )
@@ -284,6 +286,7 @@ class SqlCipherActionStore(
         isNewEmail = int("is_new_email") != 0,
         originalGeneratedDraft = optionalText("original_generated_draft"),
         updatedAtMillis = long("updated_at"),
+        provenance = optionalText("provenance_json")?.let { DraftProvenanceSerializer.deserialize(it) },
     )
 
     private companion object {
@@ -342,7 +345,8 @@ class SqlCipherActionStore(
                 compose_subject TEXT NOT NULL,
                 is_new_email INTEGER NOT NULL CHECK (is_new_email IN (0, 1)),
                 updated_at INTEGER NOT NULL,
-                original_generated_draft TEXT
+                original_generated_draft TEXT,
+                provenance_json TEXT
             )
         """
         val SNAPSHOT_COLUMNS = arrayOf(
@@ -351,7 +355,7 @@ class SqlCipherActionStore(
         )
         val DRAFT_COLUMNS = arrayOf(
             "conversation_key", "account_id", "body", "compose_to", "compose_cc", "compose_bcc",
-            "compose_subject", "is_new_email", "updated_at", "original_generated_draft",
+            "compose_subject", "is_new_email", "updated_at", "original_generated_draft", "provenance_json",
         )
     }
 }

@@ -16,6 +16,15 @@ import androidx.compose.ui.unit.Density
 class PreviewExportActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        }
+        @Suppress("DEPRECATION")
+        window.addFlags(
+            android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+        )
         val night = intent.getBooleanExtra(EXTRA_NIGHT, false)
         val font = intent.getFloatExtra(EXTRA_FONT, 1f).coerceIn(0.85f, 2f)
         val surface = intent.getStringExtra(EXTRA_SURFACE).orEmpty()
@@ -35,10 +44,18 @@ class PreviewExportActivity : ComponentActivity() {
                     "focus" -> MiniProductionPreview(MiniTab.Focus)
                     "console" -> MiniProductionPreview(MiniTab.Console)
                     "activity" -> MiniActivityScreenPreview()
+                    "thread" -> MiniThreadScreenPreview()
+                    "context", "evidence" -> MiniWhyThisDraftPreview()
                     else -> MiniProductionPreview(MiniTab.Inbox)
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        recreate()
     }
 
     companion object {

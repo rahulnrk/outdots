@@ -297,3 +297,154 @@ fun MiniActivityScreenPreview() {
         }
     }
 }
+
+private fun previewThreadSummary(): ConversationObservationSummary = previewConv(
+    account = previewGmail,
+    name = "Kiran Shah",
+    snippet = "The revised total is ₹42,000. Could you review it and let me know what you think?",
+    pkg = "com.google.android.gm",
+    coverage = ConversationCoverage.FullProviderSync,
+)
+
+private fun previewObs(
+    account: AccountId,
+    convId: ScopedId,
+    key: String,
+    sender: String,
+    title: String,
+    text: String,
+    direction: app.mini.hub.connector.MessageDirection = app.mini.hub.connector.MessageDirection.Inbound,
+    time: UtcInstant = previewNow,
+): app.mini.hub.observation.ObservedNotification = app.mini.hub.observation.ObservedNotification(
+    id = ScopedId(account, ScopedId.Kind.OBSERVATION, key),
+    accountId = account,
+    conversationId = convId,
+    packageId = "com.google.android.gm",
+    notificationKey = key,
+    notificationId = 1,
+    tag = null,
+    senderHint = sender,
+    title = title,
+    textFragments = listOf(text),
+    rawTextDigest = "digest_$key",
+    observedAt = time,
+    postTime = time,
+    revision = 1L,
+    isRemoved = false,
+    isGroupSummary = false,
+    truncationState = app.mini.hub.observation.TruncationState.Complete,
+    correlationConfidence = app.mini.hub.observation.CorrelationConfidence.High,
+    provenance = app.mini.hub.observation.ObservationProvenance.OfficialProviderApi,
+    direction = direction,
+    recipients = listOf("rahul@studio.example"),
+)
+
+private fun previewThreadMessages(summary: ConversationObservationSummary): List<app.mini.hub.observation.ObservedNotification> = listOf(
+    previewObs(
+        account = summary.accountId,
+        convId = summary.conversationId,
+        key = "provider:msg_1",
+        sender = "Kiran Shah <kiran@example.com>",
+        title = "Revised quote for project",
+        text = "Hi Rahul,\n\nFollowing up on our call yesterday, please find the revised scope and quote attached.\n\n📎 [document: quote_v2.pdf: 142000: https://example.com/quote.pdf]",
+        direction = app.mini.hub.connector.MessageDirection.Inbound,
+        time = previewNow,
+    ),
+    previewObs(
+        account = summary.accountId,
+        convId = summary.conversationId,
+        key = "provider:msg_2",
+        sender = "Kiran Shah <kiran@example.com>",
+        title = "Revised quote for project",
+        text = "The revised total is ₹42,000. Could you review it and let me know what you think?",
+        direction = app.mini.hub.connector.MessageDirection.Inbound,
+        time = UtcInstant(previewNow.epochMillis + 60_000L),
+    ),
+)
+
+private fun previewDraftProvenance(): app.mini.hub.persistence.DraftProvenance = app.mini.hub.persistence.DraftProvenance(
+    accountId = "gmail:work",
+    accountLabel = "Gmail · Work · rahul@studio.example",
+    userInstruction = "agree to 42k and confirm Friday delivery",
+    sourceMessageReferences = listOf(
+        app.mini.hub.persistence.DraftSourceReference(
+            messageId = "provider:msg_2",
+            senderHint = "Kiran Shah",
+            timestampMillis = previewNow.epochMillis + 60_000L,
+            snippet = "The revised total is ₹42,000. Could you review it and let me know what you think?",
+            isIncludedAsText = true,
+        ),
+    ),
+    appliedStyleSummary = "Professional, direct",
+    coverageWarning = null,
+    excludedAttachments = listOf("quote_v2.pdf (attachment content not read by AI)"),
+    generatedAtMillis = previewNow.epochMillis + 120_000L,
+)
+
+@Preview(showBackground = true, name = "Thread light")
+@Preview(showBackground = true, name = "Thread dark", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Preview(showBackground = true, name = "Thread large text", fontScale = 1.3f)
+@Composable
+fun MiniThreadScreenPreview() {
+    val summary = previewThreadSummary()
+    val messages = previewThreadMessages(summary)
+    MiniTheme {
+        Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(padding),
+            ) {
+                ThreadView(
+                    summary = summary,
+                    timeline = messages,
+                    label = "Work",
+                    onLabel = {},
+                    accountLabel = "Gmail · Work",
+                    loadStatus = "Full conversation loaded (2 messages).",
+                    draftText = "Thanks Kiran. The ₹42,000 works for us. Please confirm delivery by Friday.",
+                    draftStatus = "Local draft ready (210 ms). Review it before use.",
+                    draftVersions = listOf("Thanks Kiran. The ₹42,000 works for us. Please confirm delivery by Friday."),
+                    selectedVersionIndex = 0,
+                    isDrafting = false,
+                    hasProvenance = true,
+                    onBack = {},
+                    onDraft = { _, _ -> },
+                    onCancelDraft = {},
+                    onDraftChanged = {},
+                    onApprove = {},
+                )
+            }
+        }
+    }
+}
+
+@Preview(showBackground = true, name = "Why this draft light")
+@Preview(showBackground = true, name = "Why this draft dark", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Preview(showBackground = true, name = "Why this draft large text", fontScale = 1.3f)
+@Composable
+fun MiniWhyThisDraftPreview() {
+    val summary = previewThreadSummary()
+    val provenance = previewDraftProvenance()
+    val store = previewAccounts()
+    val account = store.get(summary.accountId)
+    MiniTheme {
+        Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(padding),
+            ) {
+                WhyThisDraftView(
+                    provenance = provenance,
+                    selected = summary,
+                    account = account,
+                    onBack = {},
+                    onOpenMessage = {},
+                )
+            }
+        }
+    }
+}

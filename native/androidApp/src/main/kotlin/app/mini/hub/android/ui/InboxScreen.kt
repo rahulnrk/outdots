@@ -274,44 +274,69 @@ fun InboxScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                ThreadView(
-                    summary = state.selectedConversation!!,
-                    timeline = state.selectedTimeline,
-                    label = labels[selectedKey],
-                    onLabel = { l ->
-                        conversationLabels.set(selectedKey, l)
-                        labels = conversationLabels.all()
-                        if (l == "Priority") {
-                            viewModel.applyAttentionAction(
-                                state.selectedConversation!!.conversationId,
-                                app.mini.hub.attention.AttentionAction.SetPriority(
-                                    app.mini.hub.attention.ConversationPriority.Important,
-                                ),
-                            )
-                        }
-                    },
-                    draftText = state.localDraftText,
-                    draftStatus = state.localDraftStatus,
-                    draftVersions = state.draftVersions,
-                    isDrafting = state.isLocalDraftInProgress,
-                    onBack = { viewModel.clearSelection() },
-                    onDraft = { instruction, revise -> viewModel.requestLocalDraft(instruction, revise) },
-                    onCancelDraft = { viewModel.cancelLocalDraft() },
-                    onDraftChanged = { text -> viewModel.updateLocalDraftText(text) },
-                    onApprove = { body ->
-                        if (state.composeNewTo != null) {
-                            viewModel.prepareComposeEmail(
-                                state.selectedConversation!!.accountId,
-                                listOf(state.composeNewTo!!),
-                                listOf(state.composeCc),
-                                listOf(state.composeBcc),
-                                state.composeSubject,
-                                body,
-                            )
-                        } else viewModel.prepareDraft(body, "", state.composeSubject)
-                    },
-                    onAttention = { a -> viewModel.applyAttentionAction(state.selectedConversation!!.conversationId, a) },
-                )
+                if (state.showWhyThisDraft) {
+                    val account = accountStore.get(state.selectedConversation!!.accountId)
+                    WhyThisDraftView(
+                        provenance = state.localDraftProvenance,
+                        selected = state.selectedConversation!!,
+                        account = account,
+                        onBack = { viewModel.closeWhyThisDraft() },
+                        onOpenMessage = { msgId -> viewModel.openSourceMessageFromEvidence(msgId) },
+                    )
+                } else {
+                    val fromAccount = state.selectedConversation!!.accountId
+                    val fromLabel = accountStore.get(fromAccount)?.let {
+                        it.displayName?.ifBlank { null } ?: it.providerAccountId.ifBlank { null }
+                    } ?: fromAccount.localId
+
+                    ThreadView(
+                        summary = state.selectedConversation!!,
+                        timeline = state.selectedTimeline,
+                        label = labels[selectedKey],
+                        onLabel = { l ->
+                            conversationLabels.set(selectedKey, l)
+                            labels = conversationLabels.all()
+                            if (l == "Priority") {
+                                viewModel.applyAttentionAction(
+                                    state.selectedConversation!!.conversationId,
+                                    app.mini.hub.attention.AttentionAction.SetPriority(
+                                        app.mini.hub.attention.ConversationPriority.Important,
+                                    ),
+                                )
+                            }
+                        },
+                        accountLabel = fromLabel,
+                        loadStatus = state.conversationLoadStatus,
+                        onRetryLoad = { viewModel.selectConversation(state.selectedConversation!!) },
+                        targetMessageKey = state.targetMessageIdToHighlight,
+                        draftText = state.localDraftText,
+                        draftStatus = state.localDraftStatus,
+                        draftVersions = state.draftVersions,
+                        selectedVersionIndex = state.draftVersions.indexOf(state.localDraftText).coerceAtLeast(0),
+                        onSelectVersion = { idx -> viewModel.selectDraftVersion(idx) },
+                        isDrafting = state.isLocalDraftInProgress,
+                        hasProvenance = state.localDraftProvenance != null,
+                        onWhyThisDraft = { viewModel.openWhyThisDraft() },
+                        onDiscardDraft = { viewModel.discardDraft() },
+                        onBack = { viewModel.clearSelection() },
+                        onDraft = { instruction, revise -> viewModel.requestLocalDraft(instruction, revise) },
+                        onCancelDraft = { viewModel.cancelLocalDraft() },
+                        onDraftChanged = { text -> viewModel.updateLocalDraftText(text) },
+                        onApprove = { body ->
+                            if (state.composeNewTo != null) {
+                                viewModel.prepareComposeEmail(
+                                    state.selectedConversation!!.accountId,
+                                    listOf(state.composeNewTo!!),
+                                    listOf(state.composeCc),
+                                    listOf(state.composeBcc),
+                                    state.composeSubject,
+                                    body,
+                                )
+                            } else viewModel.prepareDraft(body, "", state.composeSubject)
+                        },
+                        onAttention = { a -> viewModel.applyAttentionAction(state.selectedConversation!!.conversationId, a) },
+                    )
+                }
                 if (false) ConversationDetailView(
                     summary = state.selectedConversation!!,
                     understanding = state.understanding[state.selectedConversation!!.conversationId.key],

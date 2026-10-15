@@ -397,6 +397,7 @@ class InboxViewModel(
                 isNewEmail = s.composeNewTo != null,
                 originalGeneratedDraft = s.originalGeneratedDraft,
                 updatedAtMillis = clock.now().epochMillis,
+                provenance = s.localDraftProvenance,
             ),
         )
         publishDrafts()
@@ -453,7 +454,11 @@ class InboxViewModel(
             activeReviewPayload = null,
             localDraftText = draft?.body.orEmpty(),
             originalGeneratedDraft = draft?.originalGeneratedDraft,
-            draftVersions = emptyList(),
+            localDraftProvenance = draft?.provenance,
+            draftVersions = if (draft?.body.isNullOrBlank()) emptyList() else listOf(draft!!.body),
+            draftVersionProvenances = if (draft?.provenance != null) listOf(draft.provenance!!) else emptyList(),
+            showWhyThisDraft = false,
+            targetMessageIdToHighlight = null,
             localDraftStatus = null,
             conversationLoadStatus = null,
             composeNewTo = if (isEmail) draft?.to?.ifBlank { address } ?: address else null,
@@ -592,7 +597,11 @@ class InboxViewModel(
             outboxStatusMessage = null,
             localDraftText = draft?.body.orEmpty(),
             originalGeneratedDraft = draft?.originalGeneratedDraft,
-            draftVersions = emptyList(),
+            localDraftProvenance = draft?.provenance,
+            draftVersions = if (draft?.body.isNullOrBlank()) emptyList() else listOf(draft!!.body),
+            draftVersionProvenances = if (draft?.provenance != null) listOf(draft.provenance!!) else emptyList(),
+            showWhyThisDraft = false,
+            targetMessageIdToHighlight = null,
             composeNewTo = if (draft?.isNewEmail == true) draft.to else null,
             composeCc = draft?.cc.orEmpty(),
             composeBcc = draft?.bcc.orEmpty(),
@@ -662,6 +671,10 @@ class InboxViewModel(
             localDraftText = "",
             originalGeneratedDraft = null,
             draftVersions = emptyList(),
+            draftVersionProvenances = emptyList(),
+            localDraftProvenance = null,
+            showWhyThisDraft = false,
+            targetMessageIdToHighlight = null,
             composeNewTo = null,
             composeCc = "",
             composeBcc = "",
@@ -675,6 +688,8 @@ class InboxViewModel(
 
     fun requestLocalDraft(userIntent: String, revise: Boolean = false) {
         val selected = _state.value.selectedConversation ?: return
+        val requestedConversationId = selected.conversationId
+        val requestedAccountId = selected.accountId
         val retrieved = _state.value.retrievedContext ?: return
         val experiment = localDraftExperiment ?: run {
             _state.value = _state.value.copy(
@@ -696,6 +711,45 @@ class InboxViewModel(
             // A new draft reloads the model, so an earlier "released" line would be stale.
             localAiReleaseStatus = null,
         )
+
+        val account = accountStore?.get(selected.accountId)
+        val accountLabel = account?.displayName?.ifBlank { null }
+            ?: account?.providerAccountId?.ifBlank { null }
+            ?: selected.accountId.localId
+
+        val sourceReferences = retrieved.retrievedObservations.map { obs ->
+            app.mini.hub.persistence.DraftSourceReference(
+                messageId = obs.notificationKey,
+                senderHint = obs.senderHint,
+                timestampMillis = obs.postTime.epochMillis,
+                snippet = obs.textFragments.joinToString(" ").take(160),
+                isIncludedAsText = true,
+            )
+        }
+
+        val allMediaAttachments = retrieved.retrievedObservations
+            .flatMap { obs ->
+                obs.textFragments.flatMap { frag ->
+                    allMedia(frag).map { it.fileName.ifBlank { "Attachment (${it.kind})" } }
+                }
+            }
+            .distinct()
+
+        val provenance = app.mini.hub.persistence.DraftProvenance(
+            accountId = selected.accountId.key,
+            accountLabel = accountLabel,
+            userInstruction = userIntent.ifBlank { "write a short, natural reply" },
+            sourceMessageReferences = sourceReferences,
+            appliedStyleSummary = _state.value.activeStyleProfile?.let {
+                val formality = if (it.traits.formality > 0.6) "formal" else if (it.traits.formality < 0.4) "casual" else "balanced"
+                val brevity = if (it.traits.brevity > 0.6) "concise" else if (it.traits.brevity < 0.4) "detailed" else "moderate"
+                "Style: ${it.category.name} ($brevity, $formality)"
+            },
+            coverageWarning = retrieved.coverageWarning.ifBlank { null },
+            excludedAttachments = allMediaAttachments,
+            generatedAtMillis = clock.now().epochMillis,
+        )
+
         experiment.draftAsync(
             LocalDraftRequest(
                 conversationLabel = selected.title,
@@ -712,21 +766,39 @@ class InboxViewModel(
         ) { result ->
             postToMain("draft-result") {
                 if (generation != localDraftGeneration) return@postToMain
-                applyGenerationResult(result)
+                if (_state.value.selectedConversation?.conversationId != requestedConversationId ||
+                    _state.value.selectedConversation?.accountId != requestedAccountId
+                ) {
+                    return@postToMain
+                }
+                applyGenerationResult(result, provenance)
             }
         }
     }
 
-    private fun applyGenerationResult(result: LocalDraftResult) {
+    private fun applyGenerationResult(
+        result: LocalDraftResult,
+        provenance: app.mini.hub.persistence.DraftProvenance? = null,
+    ) {
         when (result) {
-            is LocalDraftResult.Success -> _state.value = _state.value.copy(
-                localDraftText = result.proposal.text,
-                originalGeneratedDraft = result.proposal.text,
-                draftVersions = (_state.value.draftVersions + result.proposal.text).takeLast(5),
-                localDraftWarning = result.warning.ifBlank { null },
-                localDraftStatus = "Local draft ready (${result.latencyMs} ms). Review it before use.",
-                isLocalDraftInProgress = false,
-            )
+            is LocalDraftResult.Success -> {
+                val updatedVersions = (_state.value.draftVersions + result.proposal.text).takeLast(5)
+                val updatedProvenances = if (provenance != null) {
+                    (_state.value.draftVersionProvenances + provenance).takeLast(5)
+                } else {
+                    _state.value.draftVersionProvenances
+                }
+                _state.value = _state.value.copy(
+                    localDraftText = result.proposal.text,
+                    originalGeneratedDraft = result.proposal.text,
+                    draftVersions = updatedVersions,
+                    draftVersionProvenances = updatedProvenances,
+                    localDraftProvenance = provenance,
+                    localDraftWarning = result.warning.ifBlank { null },
+                    localDraftStatus = "Local draft ready (${result.latencyMs} ms). Review it before use.",
+                    isLocalDraftInProgress = false,
+                )
+            }
             is LocalDraftResult.Refused -> _state.value = _state.value.copy(
                 localDraftWarning = result.warning.ifBlank { null },
                 localDraftStatus = result.reason,
@@ -746,7 +818,50 @@ class InboxViewModel(
         persistCurrentDraft()
     }
 
-    internal fun applyGenerationResultForTest(result: LocalDraftResult) = applyGenerationResult(result)
+    internal fun applyGenerationResultForTest(
+        result: LocalDraftResult,
+        provenance: app.mini.hub.persistence.DraftProvenance? = null,
+    ) = applyGenerationResult(result, provenance)
+
+    fun selectDraftVersion(index: Int) {
+        val s = _state.value
+        val version = s.draftVersions.getOrNull(index) ?: return
+        val prov = s.draftVersionProvenances.getOrNull(index)
+        _state.value = s.copy(
+            localDraftText = version,
+            localDraftProvenance = prov ?: s.localDraftProvenance,
+        )
+        persistCurrentDraft()
+    }
+
+    fun discardDraft() {
+        val selected = _state.value.selectedConversation ?: return
+        draftStore?.deleteDraft(selected.conversationId.key)
+        _state.value = _state.value.copy(
+            localDraftText = "",
+            originalGeneratedDraft = null,
+            draftVersions = emptyList(),
+            draftVersionProvenances = emptyList(),
+            localDraftProvenance = null,
+            localDraftStatus = "Draft discarded.",
+        )
+        publishDrafts()
+    }
+
+    fun openWhyThisDraft() {
+        _state.value = _state.value.copy(showWhyThisDraft = true)
+    }
+
+    fun closeWhyThisDraft() {
+        _state.value = _state.value.copy(showWhyThisDraft = false, targetMessageIdToHighlight = null)
+    }
+
+    fun openSourceMessageFromEvidence(messageId: String) {
+        _state.value = _state.value.copy(
+            showWhyThisDraft = false,
+            targetMessageIdToHighlight = messageId,
+        )
+    }
 
     // Drops any in-flight draft so its result cannot appear in a different conversation.
     private fun abandonLocalDraft() {
