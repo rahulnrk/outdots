@@ -31,7 +31,13 @@ class MiniNotificationListenerService : NotificationListenerService() {
 
         @Volatile
         var lastTransitionAtMillis: Long = 0L
-            private set
+            internal set
+
+        @Volatile
+        var lastRebindAttemptAtMillis: Long = 0L
+            internal set
+
+        const val REBIND_COOLDOWN_MILLIS: Long = 15_000L
 
         /**
          * Checks if the user has explicitly granted notification listener access to this app.
@@ -56,17 +62,48 @@ class MiniNotificationListenerService : NotificationListenerService() {
         }
 
         /**
-         * Requests the system to rebind this service if permission is granted but currently disconnected.
+         * Pure gate for controlled rebind requests.
+         * Enforces cooldown to prevent uncontrolled rebind loops against Android's ManagedServices.
          */
-        fun rebindIfNeeded(context: Context) {
-            if (isPermissionGranted(context) && !isConnected) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    try {
-                        requestRebind(ComponentName(context, MiniNotificationListenerService::class.java))
-                    } catch (_: Throwable) {
-                    }
+        fun shouldAttemptRebind(
+            isPermissionGranted: Boolean,
+            isConnected: Boolean,
+            lastTransitionAtMillis: Long,
+            lastRebindAttemptAtMillis: Long,
+            nowMillis: Long,
+            cooldownMillis: Long = REBIND_COOLDOWN_MILLIS,
+        ): Boolean {
+            if (!isPermissionGranted || isConnected) return false
+            if (nowMillis - lastTransitionAtMillis < cooldownMillis) return false
+            if (nowMillis - lastRebindAttemptAtMillis < cooldownMillis) return false
+            return true
+        }
+
+        /**
+         * Requests the system to rebind this service if permission is granted, currently disconnected,
+         * and the cooldown period has elapsed since the last transition or attempt.
+         * Controlled recovery: does NOT hammer the OS binder in a tight loop.
+         */
+        fun rebindIfNeeded(context: Context, nowMillis: Long = System.currentTimeMillis()): Boolean {
+            if (!isPermissionGranted(context)) return false
+            if (!shouldAttemptRebind(
+                    isPermissionGranted = true,
+                    isConnected = isConnected,
+                    lastTransitionAtMillis = lastTransitionAtMillis,
+                    lastRebindAttemptAtMillis = lastRebindAttemptAtMillis,
+                    nowMillis = nowMillis,
+                )
+            ) return false
+
+            lastRebindAttemptAtMillis = nowMillis
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                try {
+                    requestRebind(ComponentName(context, MiniNotificationListenerService::class.java))
+                    return true
+                } catch (_: Throwable) {
                 }
             }
+            return false
         }
     }
 
@@ -91,8 +128,11 @@ class MiniNotificationListenerService : NotificationListenerService() {
         super.onListenerDisconnected()
         isConnected = false
         lastTransitionAtMillis = System.currentTimeMillis()
-        android.util.Log.i("MiniListener", "listener disconnected; requesting rebind")
-        rebindIfNeeded(applicationContext)
+        android.util.Log.i("MiniListener", "listener disconnected")
+        // Do NOT call rebindIfNeeded here. Android's ManagedServices framework
+        // handles reconnection automatically. Calling requestRebind immediately
+        // on disconnect creates a race condition with the OS teardown and triggers
+        // uncontrolled rebind churn.
         MiniHubRuntime.notifyInboxChanged()
     }
 
