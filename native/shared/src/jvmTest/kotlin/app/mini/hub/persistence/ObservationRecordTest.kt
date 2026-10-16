@@ -168,6 +168,109 @@ class ObservationRecordTest {
         assertTrue(isConversationSummary(summary))
     }
 
+    @Test(timeout = 30_000)
+    fun jdbcReopenReconcilesStoredMisclassifiedDirectMessageRecommendation() {
+        val file = File.createTempFile("mini-reconcile", ".db").apply { delete(); deleteOnExit() }
+        val fb = AccountId(Provider.FACEBOOK, "local")
+        val fbConv = ScopedId(fb, ScopedId.Kind.CONVERSATION, "rec_conv")
+        val misclassified = ObservedNotification(
+            id = ScopedId(fb, ScopedId.Kind.OBSERVATION, "obs-rec"),
+            accountId = fb,
+            conversationId = fbConv,
+            packageId = "com.facebook.katana",
+            notificationKey = "k-rec",
+            notificationId = 88,
+            tag = null,
+            senderHint = "Example Person",
+            title = "Example Person",
+            textFragments = listOf("You might like Example Person."),
+            rawTextDigest = "dg-rec",
+            observedAt = UtcInstant(30),
+            postTime = UtcInstant(30),
+            revision = 1,
+            isRemoved = false,
+            isGroupSummary = false,
+            truncationState = TruncationState.Complete,
+            correlationConfidence = CorrelationConfidence.High,
+            provenance = ObservationProvenance.AndroidNotificationListener,
+            notificationCategory = NotificationCategory.DirectMessage, // Stored incorrectly as DirectMessage
+        )
+        val store = JdbcObservationStore(file.path)
+        store.persistObservation(misclassified)
+
+        // Close and reopen database
+        val reopened = JdbcObservationStore(file.path)
+        val storedObs = reopened.getObservationsForConversation(fbConv).single()
+        // Original observation record is preserved
+        assertEquals("You might like Example Person.", storedObs.textFragments.single())
+
+        // But summary projection / conversation eligibility reconciles it out of conversation summaries
+        val summaries = reopened.getConversationSummaries(fb)
+        val conversationSummaries = summaries.filter { isConversationSummary(it) }
+        assertTrue(conversationSummaries.isEmpty(), "Misclassified recommendation must be excluded from conversation projections after reopen")
+    }
+
+    @Test(timeout = 30_000)
+    fun jdbcSearchExcludesGeneralNotificationAndPreservesGenuineMessage() {
+        val file = File.createTempFile("mini-search", ".db").apply { delete(); deleteOnExit() }
+        val acct = AccountId(Provider.WHATSAPP, "local")
+        val alertConv = ScopedId(acct, ScopedId.Kind.CONVERSATION, "alert_conv")
+        val msgConv = ScopedId(acct, ScopedId.Kind.CONVERSATION, "msg_conv")
+
+        val generalAlert = ObservedNotification(
+            id = ScopedId(acct, ScopedId.Kind.OBSERVATION, "obs-alert"),
+            accountId = acct,
+            conversationId = alertConv,
+            packageId = "com.example.alert",
+            notificationKey = "k-alert",
+            notificationId = 10,
+            tag = null,
+            senderHint = "System",
+            title = "Status update",
+            textFragments = listOf("Service status operational"),
+            rawTextDigest = "dg-alert",
+            observedAt = UtcInstant(40),
+            postTime = UtcInstant(40),
+            revision = 1,
+            isRemoved = false,
+            isGroupSummary = false,
+            truncationState = TruncationState.Complete,
+            correlationConfidence = CorrelationConfidence.High,
+            provenance = ObservationProvenance.AndroidNotificationListener,
+            notificationCategory = NotificationCategory.GeneralNotification,
+        )
+
+        val genuineMsg = ObservedNotification(
+            id = ScopedId(acct, ScopedId.Kind.OBSERVATION, "obs-msg"),
+            accountId = acct,
+            conversationId = msgConv,
+            packageId = "com.whatsapp",
+            notificationKey = "k-msg",
+            notificationId = 11,
+            tag = null,
+            senderHint = "Alice",
+            title = "Alice",
+            textFragments = listOf("Service status operational discussion"),
+            rawTextDigest = "dg-msg",
+            observedAt = UtcInstant(50),
+            postTime = UtcInstant(50),
+            revision = 1,
+            isRemoved = false,
+            isGroupSummary = false,
+            truncationState = TruncationState.Complete,
+            correlationConfidence = CorrelationConfidence.High,
+            provenance = ObservationProvenance.AndroidNotificationListener,
+            notificationCategory = NotificationCategory.DirectMessage,
+        )
+
+        val store = JdbcObservationStore(file.path)
+        store.persistBatch(listOf(generalAlert, genuineMsg))
+
+        val results = store.search(app.mini.hub.search.SearchQuery(queryText = "operational"))
+        assertEquals(1, results.size)
+        assertEquals(msgConv, results.single().conversationId)
+    }
+
     private fun notification(key: String, post: Long, observed: Long) = ObservedNotification(
         id = ScopedId(account, ScopedId.Kind.OBSERVATION, "obs-$key"), accountId = account, conversationId = conv,
         packageId = "com.google.android.gm", notificationKey = "k-$key", notificationId = 1, tag = null,

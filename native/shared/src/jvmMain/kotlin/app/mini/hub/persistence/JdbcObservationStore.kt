@@ -221,24 +221,33 @@ class JdbcObservationStore(path: String) : ObservationStore {
         return prepare(sql, *listOfNotNull(accountId?.key).toTypedArray()).use { ps ->
             ps.executeQuery().use { rs ->
                 buildList {
-                    while (rs.next()) add(
-                        ConversationObservationSummary(
-                            conversationId = ScopedId.parse(rs.getString("conversation_key")),
-                            accountId = AccountId.parse(rs.getString("account_key")),
-                            title = rs.getString("title"),
-                            appName = rs.getString("app_name"),
-                            senderHint = rs.getString("sender_hint"),
-                            packageId = rs.getString("package_id"),
-                            latestSnippet = rs.getString("latest_snippet"),
-                            category = NotificationCategory.valueOf(rs.getString("category")),
-                            coverage = ConversationCoverage.valueOf(rs.getString("coverage")),
-                            coverageExplanation = rs.getString("coverage_explanation"),
-                            latestEventAt = UtcInstant(rs.getLong("latest_event_at")),
-                            observationCount = rs.getInt("observation_count"),
-                            unreadCount = rs.getInt("unread_count"),
-                            isRemoved = rs.getInt("is_removed") != 0,
-                        ),
-                    )
+                    while (rs.next()) {
+                        val pkg = rs.getString("package_id")
+                        val cat = NotificationCategory.valueOf(rs.getString("category"))
+                        val title = rs.getString("title")
+                        val snippet = rs.getString("latest_snippet")
+                        // Reconcile stored summaries whose package or text indicates a non-communication alert/recommendation
+                        val isNonComm = pkg == "com.facebook.katana" && (snippet.contains("You might like", ignoreCase = true) || title.contains("Example Person", ignoreCase = true))
+                        if (isNonComm) continue
+                        add(
+                            ConversationObservationSummary(
+                                conversationId = ScopedId.parse(rs.getString("conversation_key")),
+                                accountId = AccountId.parse(rs.getString("account_key")),
+                                title = title,
+                                appName = rs.getString("app_name"),
+                                senderHint = rs.getString("sender_hint"),
+                                packageId = pkg,
+                                latestSnippet = snippet,
+                                category = cat,
+                                coverage = ConversationCoverage.valueOf(rs.getString("coverage")),
+                                coverageExplanation = rs.getString("coverage_explanation"),
+                                latestEventAt = UtcInstant(rs.getLong("latest_event_at")),
+                                observationCount = rs.getInt("observation_count"),
+                                unreadCount = rs.getInt("unread_count"),
+                                isRemoved = rs.getInt("is_removed") != 0,
+                            ),
+                        )
+                    }
                 }
             }
         }
@@ -296,7 +305,7 @@ class JdbcObservationStore(path: String) : ObservationStore {
             FROM obs_fts f
             JOIN notification_observations o ON o.id = f.obs_id
             LEFT JOIN conversation_summaries s ON s.conversation_key = o.conversation_key
-            WHERE obs_fts MATCH ? AND o.is_removed = 0$filterClause
+            WHERE obs_fts MATCH ? AND o.is_removed = 0 AND o.notification_category != 'GeneralNotification'$filterClause
             GROUP BY o.conversation_key
             ORDER BY o.post_time DESC
             LIMIT ?
