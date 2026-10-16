@@ -380,4 +380,21 @@ class CommunicationSourcesTest {
         )
         assertEquals(CommunicationKind.ConversationMessage, classifyCommunication(genuineMessage))
     }
+
+    @Test
+    fun wp01_facebookKatanaRecommendationFilteredOut() {
+        val fbRecommendation = payload("com.facebook.katana").copy(
+            title = "Example Person",
+            text = "You might like Example Person.",
+        )
+        assertEquals(CommunicationKind.NotCommunication, classifyCommunication(fbRecommendation))
+
+        val fbMessage = payload("com.facebook.katana").copy(
+            title = "Example Person",
+            text = "Hey, can you send me that document?",
+            hasMessagingStyle = true,
+            category = "msg",
+        )
+        assertEquals(CommunicationKind.ConversationMessage, classifyCommunication(fbMessage))
+    }
 }

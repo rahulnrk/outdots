@@ -65,6 +65,7 @@ fun classifyCommunication(payload: NotificationRawPayload): CommunicationKind {
         }
         CommunicationSource.Instagram, CommunicationSource.FacebookMessenger, CommunicationSource.X -> when {
             messagingEvidence -> CommunicationKind.ConversationMessage
+            payload.packageId == "com.facebook.katana" && !messagingEvidence -> CommunicationKind.NotCommunication
             looksLikeSocialActivity(payload.title, payload.text, payload.subText) -> CommunicationKind.NotCommunication
             hasPersonAndBody(payload) -> CommunicationKind.ConversationMessage
             else -> CommunicationKind.NotCommunication
