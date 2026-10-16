@@ -282,6 +282,11 @@ private fun looksLikeSocialActivity(title: String?, text: String, subText: Strin
             "new reply",
             "replied to your",
             "replied to you",
+            "people you may know",
+            "suggested for you",
+            "might know",
+            "connection suggestion",
+            "recommendation",
         ),
     )
 }

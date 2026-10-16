@@ -363,4 +363,21 @@ class CommunicationSourcesTest {
             text = promoEmail.textFragments.first(),
         )))
     }
+
+    @Test
+    fun wp01_socialRecommendationFilteredOutAndGenuineMessagesMentioningJobPostLikePreserved() {
+        val recommendation = payload("com.instagram.android").copy(
+            title = "Instagram",
+            text = "People you may know: John Doe is suggested for you.",
+        )
+        assertEquals(CommunicationKind.NotCommunication, classifyCommunication(recommendation))
+
+        val genuineMessage = payload("com.whatsapp").copy(
+            title = "John",
+            text = "Hey, did you see that job post I liked earlier? Let's discuss.",
+            hasMessagingStyle = true,
+            category = "msg",
+        )
+        assertEquals(CommunicationKind.ConversationMessage, classifyCommunication(genuineMessage))
+    }
 }
