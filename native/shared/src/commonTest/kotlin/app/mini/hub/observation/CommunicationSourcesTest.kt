@@ -397,4 +397,33 @@ class CommunicationSourcesTest {
         )
         assertEquals(CommunicationKind.ConversationMessage, classifyCommunication(fbMessage))
     }
+
+    @Test
+    fun wp01_storedMisclassifiedDirectMessageReconciledAndExcluded() {
+        val misclassifiedObs = ObservedNotification(
+            id = ScopedId(AccountId(Provider.FACEBOOK, "local"), ScopedId.Kind.OBSERVATION, "obs_mis"),
+            accountId = AccountId(Provider.FACEBOOK, "local"),
+            conversationId = ScopedId(AccountId(Provider.FACEBOOK, "local"), ScopedId.Kind.CONVERSATION, "rec_conv"),
+            packageId = "com.facebook.katana",
+            notificationKey = "rec_key",
+            notificationId = 99,
+            tag = null,
+            senderHint = "Example Person",
+            title = "Example Person",
+            textFragments = listOf("You might like Example Person."),
+            rawTextDigest = "digest_mis",
+            observedAt = clock.now(),
+            postTime = clock.now(),
+            revision = 1L,
+            isRemoved = false,
+            isGroupSummary = false,
+            isOngoing = false,
+            truncationState = TruncationState.Complete,
+            correlationConfidence = CorrelationConfidence.High,
+            provenance = ObservationProvenance.AndroidNotificationListener,
+            notificationCategory = null, // unclassified legacy row falling back to inference
+        )
+        val reconciledCat = categoryForStoredObservation(misclassifiedObs)
+        assertEquals(NotificationCategory.GeneralNotification, reconciledCat)
+    }
 }

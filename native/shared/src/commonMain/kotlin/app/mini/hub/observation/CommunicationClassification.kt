@@ -100,7 +100,9 @@ fun linkedInActivityConversationValue(title: String?, text: String): String {
 
 fun categoryForStoredObservation(obs: ObservedNotification): NotificationCategory {
     if (obs.isOngoing) return NotificationCategory.OngoingService
-    obs.notificationCategory?.let { return it }
+    obs.notificationCategory?.let { category ->
+        return category
+    }
     if (obs.provenance == ObservationProvenance.OfficialProviderApi ||
         obs.provenance == ObservationProvenance.ThirdPartyBridge ||
         obs.provenance == ObservationProvenance.UserImport ||
