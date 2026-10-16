@@ -399,31 +399,71 @@ class CommunicationSourcesTest {
     }
 
     @Test
-    fun wp01_storedMisclassifiedDirectMessageReconciledAndExcluded() {
-        val misclassifiedObs = ObservedNotification(
-            id = ScopedId(AccountId(Provider.FACEBOOK, "local"), ScopedId.Kind.OBSERVATION, "obs_mis"),
-            accountId = AccountId(Provider.FACEBOOK, "local"),
-            conversationId = ScopedId(AccountId(Provider.FACEBOOK, "local"), ScopedId.Kind.CONVERSATION, "rec_conv"),
+    fun wp01_comprehensivePreservationSuite() {
+        val fb = AccountId(Provider.FACEBOOK, "local")
+
+        // 1. Genuine Facebook conversation named "Example Person"
+        val genConvId = ScopedId(fb, ScopedId.Kind.CONVERSATION, "gen_conv")
+        val genPayload = NotificationRawPayload(
+            key = "k-gen",
             packageId = "com.facebook.katana",
-            notificationKey = "rec_key",
-            notificationId = 99,
-            tag = null,
+            notificationId = 1,
+            postTimeMillis = clock.now().epochMillis,
             senderHint = "Example Person",
             title = "Example Person",
-            textFragments = listOf("You might like Example Person."),
-            rawTextDigest = "digest_mis",
-            observedAt = clock.now(),
-            postTime = clock.now(),
-            revision = 1L,
-            isRemoved = false,
-            isGroupSummary = false,
-            isOngoing = false,
-            truncationState = TruncationState.Complete,
-            correlationConfidence = CorrelationConfidence.High,
-            provenance = ObservationProvenance.AndroidNotificationListener,
-            notificationCategory = null, // unclassified legacy row falling back to inference
+            text = "Hey, let's meet tomorrow.",
+            hasMessagingStyle = true,
+            category = "msg",
         )
-        val reconciledCat = categoryForStoredObservation(misclassifiedObs)
-        assertEquals(NotificationCategory.GeneralNotification, reconciledCat)
+        assertEquals(CommunicationKind.ConversationMessage, classifyCommunication(genPayload))
+
+        // 2. The same genuine conversation under unrelated sender names
+        val altPayload = genPayload.copy(
+            key = "k-alt",
+            senderHint = "Unrelated Name",
+            title = "Unrelated Name",
+        )
+        assertEquals(CommunicationKind.ConversationMessage, classifyCommunication(altPayload))
+
+        // 3. Legitimate legacy message with notification_category = NULL and messaging style
+        val legacyPayload = genPayload.copy(
+            key = "k-legacy",
+            senderHint = "Legacy User",
+            title = "Legacy User",
+            text = "Hello from the past, can we talk?",
+            hasMessagingStyle = true,
+            category = "msg",
+        )
+        assertEquals(CommunicationKind.ConversationMessage, classifyCommunication(legacyPayload))
+
+        // 4. Recommendation hidden from conversation summaries that must remain absent from search
+        val recPayload = NotificationRawPayload(
+            key = "k-rec",
+            packageId = "com.facebook.katana",
+            notificationId = 2,
+            postTimeMillis = clock.now().epochMillis,
+            senderHint = "Suggested",
+            title = "Suggested",
+            text = "You might like Example Person to connect.",
+        )
+        assertEquals(CommunicationKind.NotCommunication, classifyCommunication(recPayload))
+
+        val recSummary = ConversationObservationSummary(
+            conversationId = ScopedId(fb, ScopedId.Kind.CONVERSATION, "rec_conv"),
+            accountId = fb,
+            title = "Suggested",
+            appName = "Facebook",
+            senderHint = "Suggested",
+            packageId = "com.facebook.katana",
+            latestSnippet = "You might like Example Person to connect.",
+            category = NotificationCategory.GeneralNotification,
+            coverage = ConversationCoverage.NotificationOnly,
+            coverageExplanation = "notification",
+            latestEventAt = clock.now(),
+            observationCount = 1,
+            unreadCount = 1,
+            isRemoved = false,
+        )
+        assertFalse(isConversationSummary(recSummary))
     }
 }
