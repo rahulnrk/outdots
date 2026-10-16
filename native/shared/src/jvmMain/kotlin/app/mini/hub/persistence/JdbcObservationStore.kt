@@ -59,12 +59,14 @@ class JdbcObservationStore(path: String) : ObservationStore {
             ensureVersion3Columns()
             ensureVersion4Columns()
             ensureVersion5Columns()
+            ensureVersion6Columns()
             return
         }
         transaction {
             if (current < 3) ensureVersion3Columns()
             if (current < 4) ensureVersion4Columns()
             if (current < 5) ensureVersion5Columns()
+            if (current < 6) ensureVersion6Columns()
             connection.createStatement().use { it.execute("PRAGMA user_version = ${ObservationSchema.VERSION}") }
         }
     }
@@ -76,6 +78,14 @@ class JdbcObservationStore(path: String) : ObservationStore {
             s.execute(ObservationSchema.CREATE_FTS_OBSERVATIONS)
             s.execute(ObservationSchema.POPULATE_FTS_FROM_EXISTING)
         }
+    }
+
+    private fun ensureVersion6Columns() {
+        val columns = mutableSetOf<String>()
+        connection.createStatement().use { s ->
+            s.executeQuery("PRAGMA table_info(ingest_cursors)").use { while (it.next()) columns += it.getString("name") }
+        }
+        connection.createStatement().use { s -> ObservationSchema.version6CursorStatements(columns).forEach { s.execute(it) } }
     }
 
     private fun observationColumns(): Set<String> {
@@ -281,6 +291,8 @@ class JdbcObservationStore(path: String) : ObservationStore {
                     lastProcessedKey = rs.getString("last_processed_key"),
                     processedCount = rs.getLong("processed_count"),
                     gapCount = rs.getLong("gap_count"),
+                    nextAllowedAtMillis = rs.getLong("next_allowed_at_millis"),
+                    retryAttempt = rs.getInt("retry_attempt"),
                 )
             }
         }
@@ -491,8 +503,9 @@ class JdbcObservationStore(path: String) : ObservationStore {
 
     private fun writeCursor(cursor: IngestCursor) {
         prepare(
-            "INSERT OR REPLACE INTO ingest_cursors (source, last_processed_time_millis, last_processed_key, processed_count, gap_count) VALUES (?,?,?,?,?)",
+            "INSERT OR REPLACE INTO ingest_cursors (source, last_processed_time_millis, last_processed_key, processed_count, gap_count, next_allowed_at_millis, retry_attempt) VALUES (?,?,?,?,?,?,?)",
             cursor.source, cursor.lastProcessedTimeMillis, cursor.lastProcessedKey, cursor.processedCount, cursor.gapCount,
+            cursor.nextAllowedAtMillis, cursor.retryAttempt,
         ).use { it.executeUpdate() }
     }
 

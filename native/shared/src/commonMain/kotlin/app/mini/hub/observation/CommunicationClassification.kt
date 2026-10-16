@@ -156,9 +156,18 @@ fun isConversationSummary(summary: ConversationObservationSummary): Boolean {
     // Non-message categories are never in the Inbox.
     if (summary.category == NotificationCategory.GeneralNotification ||
         summary.category == NotificationCategory.OngoingService ||
-        summary.category == NotificationCategory.SystemStatus ||
-        summary.category == NotificationCategory.SocialUpdate
+        summary.category == NotificationCategory.SystemStatus
     ) return false
+
+    if (summary.category == NotificationCategory.SocialUpdate) {
+        return when (CommunicationSource.forExactPackage(summary.packageId)) {
+            CommunicationSource.Instagram,
+            CommunicationSource.FacebookMessenger,
+            CommunicationSource.X,
+            -> classifyCommunication(summaryAsPayload(summary)) == CommunicationKind.ConversationMessage
+            else -> false
+        }
+    }
 
     // API-sourced items are always genuine messages.
     if (summary.coverage != ConversationCoverage.NotificationOnly) return true
@@ -174,8 +183,8 @@ fun isConversationSummary(summary: ConversationObservationSummary): Boolean {
         if (source == CommunicationSource.Instagram || source == CommunicationSource.X ||
             source == CommunicationSource.FacebookMessenger
         ) {
-            if (looksLikeNonMessageActivity(summary)) return false
-            return classifyCommunication(summaryAsPayload(summary)) == CommunicationKind.ConversationMessage
+            if (looksLikeRecommendation(summary)) return false
+            return true
         }
         if (source == CommunicationSource.LinkedIn) return isLinkedInMessageSummary(summary)
         return true
@@ -208,6 +217,20 @@ private fun looksLikeNonMessageActivity(summary: ConversationObservationSummary)
         return looksLikeSocialActivity(summary.title, summary.latestSnippet, null)
     }
     return false
+}
+
+private fun looksLikeRecommendation(summary: ConversationObservationSummary): Boolean {
+    val hay = "${summary.title} ${summary.latestSnippet}".lowercase()
+    return listOf(
+        "you might like",
+        "you may like",
+        "people you might like",
+        "suggested friend",
+        "friend suggestion",
+        "connection suggestion",
+        "people you may know",
+        "recommendation",
+    ).any { it in hay }
 }
 
     private fun classifyLinkedInKind(payload: NotificationRawPayload, messagingEvidence: Boolean): CommunicationKind {

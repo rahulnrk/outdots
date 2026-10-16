@@ -53,6 +53,8 @@ class ConnectorSyncEngine(
     private val expirySkewMillis: Long = 60_000L,
     private val onMessagesFetched: (ConnectedAccount, List<ProviderMessage>) -> Unit = { _, _ -> },
 ) {
+    private val inFlightAccounts = mutableSetOf<String>()
+
     fun syncAll(nowMillis: Long): List<AccountSyncReport> =
         accounts.list().filter { it.id.provider in connectors }.map { account ->
             try {
@@ -63,6 +65,18 @@ class ConnectorSyncEngine(
         }
 
     fun syncAccount(account: ConnectedAccount, nowMillis: Long): AccountSyncReport {
+        val key = account.id.key
+        synchronized(inFlightAccounts) {
+            if (!inFlightAccounts.add(key)) return skip(account, "coalesced")
+        }
+        return try {
+            syncAccountInternal(account, nowMillis)
+        } finally {
+            synchronized(inFlightAccounts) { inFlightAccounts.remove(key) }
+        }
+    }
+
+    private fun syncAccountInternal(account: ConnectedAccount, nowMillis: Long): AccountSyncReport {
         val connector = connectors[account.id.provider] ?: error("No connector for ${account.id.provider}")
         val current = accounts.get(account.id) ?: error("Account is not registered")
         val key = current.id.key
@@ -79,6 +93,9 @@ class ConnectorSyncEngine(
         }
         val source = cursorSource(current)
         val previous = store.getCursor(source)
+        if (previous != null && previous.nextAllowedAtMillis > nowMillis) {
+            return skip(current, "backoff_active")
+        }
         val checkpoint = SyncCheckpoint(previous?.lastProcessedKey, previous?.processedCount ?: 0, previous?.gapCount ?: 0)
         val result = try {
             connector.sync(current, token, checkpoint, transport, pageSize)
@@ -87,9 +104,11 @@ class ConnectorSyncEngine(
                 val retry = refresh(current, token, nowMillis) ?: return skip(accounts.get(current.id) ?: current, "refresh_failed_after_401")
                 refreshed = true
                 try { connector.sync(current, retry, checkpoint, transport, pageSize) } catch (again: ConnectorHttpException) {
+                    persistRetryAdmission(source, previous, nowMillis, again)
                     classify(current, again); throw again
                 }
             } else {
+                persistRetryAdmission(source, previous, nowMillis, e)
                 classify(current, e); throw e
             }
         }
@@ -174,6 +193,30 @@ class ConnectorSyncEngine(
         mark(account, state, action)
     }
 
+    private fun persistRetryAdmission(source: String, previous: IngestCursor?, nowMillis: Long, error: ConnectorHttpException) {
+        if (error.kind != ProviderErrorKind.RateLimited && error.kind != ProviderErrorKind.Transient) return
+        val attempt = (previous?.retryAttempt ?: 0) + 1
+        val exponential = (1_000L shl (attempt - 1).coerceAtMost(13)).coerceAtMost(MAX_BACKOFF_MILLIS)
+        val requested = error.retryAfterSeconds?.coerceAtLeast(1L)?.times(1_000L)
+        val base = (requested ?: exponential).coerceIn(1_000L, MAX_BACKOFF_MILLIS)
+        val jitterBound = minOf(base / 4, MAX_JITTER_MILLIS)
+        val jitter = if (jitterBound == 0L) 0L else
+            (source.hashCode().toLong().and(Long.MAX_VALUE) % (jitterBound + 1L))
+        runCatching {
+            store.checkpointCursor(
+                IngestCursor(
+                    source = source,
+                    lastProcessedTimeMillis = nowMillis,
+                    lastProcessedKey = previous?.lastProcessedKey,
+                    processedCount = previous?.processedCount ?: 0L,
+                    gapCount = previous?.gapCount ?: 0L,
+                    nextAllowedAtMillis = nowMillis + base + jitter,
+                    retryAttempt = attempt,
+                ),
+            )
+        }
+    }
+
     private fun skip(account: ConnectedAccount, reason: String) =
         AccountSyncReport(account.id.key, 0, 0, 0, account.state, false, skippedReason = reason)
 
@@ -187,6 +230,8 @@ class ConnectorSyncEngine(
         private val TERMINAL_WITHOUT_CREDENTIAL = setOf(ConnectionState.Revoked, ConnectionState.Expired)
         const val RETRY_NOTICE = "The provider is temporarily unavailable; MINI will retry."
         const val GAP_NOTICE = "Sync restarted after the provider cursor expired. Some changes from before this point may be missing."
+        private const val MAX_BACKOFF_MILLIS = 15 * 60_000L
+        private const val MAX_JITTER_MILLIS = 30_000L
 
         fun cursorSource(account: ConnectedAccount) = "${account.id.provider.wire}:${account.id.key}"
     }

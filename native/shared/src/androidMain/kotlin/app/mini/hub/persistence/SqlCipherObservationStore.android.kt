@@ -104,7 +104,9 @@ class SqlCipherObservationStore(
                 last_processed_time_millis INTEGER NOT NULL,
                 last_processed_key TEXT,
                 processed_count INTEGER NOT NULL,
-                gap_count INTEGER NOT NULL
+                gap_count INTEGER NOT NULL,
+                next_allowed_at_millis INTEGER NOT NULL DEFAULT 0,
+                retry_attempt INTEGER NOT NULL DEFAULT 0
             )
         """
     }
@@ -134,6 +136,7 @@ class SqlCipherObservationStore(
                 if (currentVersion < 3) migrateToVersion3(db)
                 if (currentVersion < 4) migrateToVersion4(db)
                 if (currentVersion < 5) migrateToVersion5(db)
+                if (currentVersion < 6) migrateToVersion6(db)
                 db.version = DATABASE_VERSION
                 db.setTransactionSuccessful()
             } finally {
@@ -145,6 +148,7 @@ class SqlCipherObservationStore(
         migrateToVersion3(db)
         migrateToVersion4(db)
         migrateToVersion5(db)
+        migrateToVersion6(db)
 
         // Probe FTS5 capability safely
         isFts5Supported = try {
@@ -183,6 +187,14 @@ class SqlCipherObservationStore(
         db.execSQL("DROP TABLE IF EXISTS obs_fts")
         db.execSQL(ObservationSchema.CREATE_FTS_OBSERVATIONS)
         db.execSQL(ObservationSchema.POPULATE_FTS_FROM_EXISTING)
+    }
+
+    private fun migrateToVersion6(db: SQLiteDatabase) {
+        val columns = mutableSetOf<String>()
+        db.rawQuery("PRAGMA table_info(ingest_cursors)", null).use { cursor ->
+            while (cursor.moveToNext()) columns.add(cursor.getString(cursor.getColumnIndexOrThrow("name")))
+        }
+        ObservationSchema.version6CursorStatements(columns).forEach { db.execSQL(it) }
     }
 
     private fun migrateToVersion2(db: SQLiteDatabase) {
@@ -492,6 +504,8 @@ class SqlCipherObservationStore(
             put("last_processed_key", cursor.lastProcessedKey)
             put("processed_count", cursor.processedCount)
             put("gap_count", cursor.gapCount)
+            put("next_allowed_at_millis", cursor.nextAllowedAtMillis)
+            put("retry_attempt", cursor.retryAttempt)
         }
         db.insertWithOnConflict("ingest_cursors", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
@@ -633,6 +647,8 @@ class SqlCipherObservationStore(
                     lastProcessedKey = cursor.getString(cursor.getColumnIndexOrThrow("last_processed_key")),
                     processedCount = cursor.getLong(cursor.getColumnIndexOrThrow("processed_count")),
                     gapCount = cursor.getLong(cursor.getColumnIndexOrThrow("gap_count")),
+                    nextAllowedAtMillis = cursor.getLong(cursor.getColumnIndexOrThrow("next_allowed_at_millis")),
+                    retryAttempt = cursor.getInt(cursor.getColumnIndexOrThrow("retry_attempt")),
                 )
             } else null
         }

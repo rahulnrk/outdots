@@ -9,7 +9,7 @@ package app.mini.hub.persistence
  *  - 4: notification_observations.notification_category (null = reconstruct from stored text)
  */
 object ObservationSchema {
-    const val VERSION = 5
+    const val VERSION = 6
 
     const val INDEX_FTS_VERSION = "CREATE INDEX IF NOT EXISTS idx_obs_fts_version ON ingest_cursors (source, last_processed_time_millis)"
     const val CREATE_OBSERVATIONS_V1 = """
@@ -62,7 +62,9 @@ object ObservationSchema {
             last_processed_time_millis INTEGER NOT NULL,
             last_processed_key TEXT,
             processed_count INTEGER NOT NULL,
-            gap_count INTEGER NOT NULL
+            gap_count INTEGER NOT NULL,
+            next_allowed_at_millis INTEGER NOT NULL DEFAULT 0,
+            retry_attempt INTEGER NOT NULL DEFAULT 0
         )
     """
 
@@ -107,6 +109,15 @@ object ObservationSchema {
     fun version4Statements(existingObservationColumns: Set<String>): List<String> = buildList {
         if ("notification_category" !in existingObservationColumns) {
             add("ALTER TABLE notification_observations ADD COLUMN notification_category TEXT")
+        }
+    }
+
+    fun version6CursorStatements(existingCursorColumns: Set<String>): List<String> = buildList {
+        if ("next_allowed_at_millis" !in existingCursorColumns) {
+            add("ALTER TABLE ingest_cursors ADD COLUMN next_allowed_at_millis INTEGER NOT NULL DEFAULT 0")
+        }
+        if ("retry_attempt" !in existingCursorColumns) {
+            add("ALTER TABLE ingest_cursors ADD COLUMN retry_attempt INTEGER NOT NULL DEFAULT 0")
         }
     }
 

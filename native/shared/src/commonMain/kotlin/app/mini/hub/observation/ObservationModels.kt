@@ -157,4 +157,6 @@ data class IngestCursor(
     val lastProcessedKey: String?,
     val processedCount: Long,
     val gapCount: Long,
+    val nextAllowedAtMillis: Long = 0L,
+    val retryAttempt: Int = 0,
 )

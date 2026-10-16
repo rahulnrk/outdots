@@ -179,4 +179,47 @@ class ConnectorEngineAndGatewayTest {
         assertEquals("gmail:m_sent_1", outbox.receipt)
         assertTrue(sentRaw != null)
     }
+
+    @Test
+    fun rateLimitPersistsRetryAdmissionAndPreventsPrematureSync() {
+        val accounts = InMemoryConnectedAccountStore()
+        val tokens = InMemoryAccessTokenStore()
+        val store = InMemoryObservationStore()
+        val account = ConnectedAccount(
+            AccountId(Provider.OUTLOOK, "retry_account"), "user", "User", AccountType.MicrosoftPersonal,
+            ConnectorRoute.OfficialProviderApi, ConnectionState.Authorized, setOf("Mail.Read"),
+        )
+        accounts.upsert(account)
+        tokens.put(account.id, StoredAccessToken("token", null))
+        var calls = 0
+        val connector = object : AccountConnector {
+            override val provider = Provider.OUTLOOK
+            override val route = ConnectorRoute.OfficialProviderApi
+            override fun discoverAccount(accessToken: StoredAccessToken, transport: ProviderHttpTransport) =
+                ProviderAccountIdentity(Provider.OUTLOOK, "user", "User", AccountType.MicrosoftPersonal)
+            override fun sync(account: ConnectedAccount, accessToken: StoredAccessToken, checkpoint: SyncCheckpoint, transport: ProviderHttpTransport, maxMessages: Int): SyncResult {
+                calls++
+                throw ConnectorHttpException(429, "rate limited", kind = ProviderErrorKind.RateLimited, retryAfterSeconds = 60)
+            }
+        }
+        val engine = ConnectorSyncEngine(
+            accounts = accounts,
+            tokens = tokens,
+            store = store,
+            digest = digest,
+            connectors = mapOf(Provider.OUTLOOK to connector),
+            refreshers = emptyMap(),
+            transport = ProviderHttpTransport.of { error("transport must not be called") },
+        )
+
+        engine.syncAll(1_700_000_000_000L)
+        val cursor = store.getCursor(ConnectorSyncEngine.cursorSource(account))
+        assertEquals(1, calls)
+        assertEquals(1, cursor?.retryAttempt)
+        assertTrue(cursor != null && cursor.nextAllowedAtMillis in 1_700_000_060_000L..1_700_000_075_000L)
+
+        val report = engine.syncAll(1_700_000_001_000L).single()
+        assertEquals("backoff_active", report.skippedReason)
+        assertEquals(1, calls)
+    }
 }
