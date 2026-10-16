@@ -1,6 +1,7 @@
 package app.mini.hub.connector
 
 import app.mini.hub.action.ExactActionPayload
+import app.mini.hub.action.ActionRoute
 import app.mini.hub.action.GatewayResult
 import app.mini.hub.action.OutboxCommand
 import app.mini.hub.action.ProviderGateway
@@ -59,6 +60,13 @@ class ConnectorProviderGateway(
         }
         val descriptor = ConnectorCatalog.apiRouteFor(accountId.provider)
             ?: return GatewayResult.Rejected("no_api_route_for_provider")
+        if (accountId.provider == Provider.INSTAGRAM && payload.route == ActionRoute.Api) {
+            val lastInbound = payload.replyWindowLastInboundMillis
+                ?: return GatewayResult.Rejected("instagram_reply_window_unknown")
+            if (!InstagramApiConnector.windowOpen(lastInbound, nowMillis())) {
+                return GatewayResult.Rejected(InstagramApiSender.OUTSIDE_WINDOW)
+            }
+        }
         val sender = senders.firstOrNull { it.provider == accountId.provider }
             ?: return GatewayResult.Rejected("sender_not_implemented")
         if (payload.attachments.isNotEmpty()) return GatewayResult.Rejected("attachments_not_supported_yet")

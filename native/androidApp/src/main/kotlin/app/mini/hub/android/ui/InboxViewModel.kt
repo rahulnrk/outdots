@@ -1131,6 +1131,9 @@ class InboxViewModel(
             ?.takeIf { it.startsWith("provider:${selected.accountId.key}:") }
             ?.removePrefix("provider:${selected.accountId.key}:")
         val replyTarget = app.mini.hub.connector.ReplyTargets.forProvider(provider, providerMessageId, anchor?.replyAnchor)
+        val replyWindowLastInboundMillis = if (provider == app.mini.hub.domain.Provider.INSTAGRAM) {
+            live.filter { isInboundMessage(it, connectedAccount) }.maxOfOrNull { it.postTime.epochMillis }
+        } else null
 
         // Email needs an address; chat routes address the conversation itself.
         val typed = recipient.trim()
@@ -1165,6 +1168,7 @@ class InboxViewModel(
             grantVersion = grantVersion,
             policyVersion = policyVersion,
             replyTarget = if (route == ActionRoute.Api) replyTarget else null,
+            replyWindowLastInboundMillis = if (route == ActionRoute.Api) replyWindowLastInboundMillis else null,
         )
 
         val note = when {

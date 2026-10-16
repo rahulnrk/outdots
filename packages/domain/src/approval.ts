@@ -114,8 +114,11 @@ async function dispatchOutboxInternal(state: HubState, commandId: string, now: s
   const account = accountForDraft(state, draft);
   if (!account) return failCommand(state, commandId, 'expired_or_invalidated', 'account_missing_for_approved_command', now);
   const approval = [...state.approvals].filter((item) => item.draftId === command.draftId && item.reviewDigest === command.reviewDigest).sort((a, b) => b.approvedAt.localeCompare(a.approvedAt))[0];
-  if (!approval || approval.consumed || !validInstant(approval.approvedAt) || Date.parse(now) < Date.parse(approval.approvedAt)) return failCommand(state, commandId, 'expired_or_invalidated', 'clock_skew_detected', now);
-  if (Date.parse(approval.expiresAt) < Date.parse(now)) return failCommand(state, commandId, 'expired_or_invalidated', 'approval_missing_consumed_or_expired', now);
+  if (!approval) return failCommand(state, commandId, 'expired_or_invalidated', 'approval_missing', now);
+  if (approval.consumed) return failCommand(state, commandId, 'expired_or_invalidated', 'approval_consumed', now);
+  if (!validInstant(approval.approvedAt) || !validInstant(approval.expiresAt)) return failCommand(state, commandId, 'expired_or_invalidated', 'approval_timestamp_invalid', now);
+  if (Date.parse(now) < Date.parse(approval.approvedAt)) return failCommand(state, commandId, 'expired_or_invalidated', 'clock_skew_detected', now);
+  if (Date.parse(approval.expiresAt) < Date.parse(now)) return failCommand(state, commandId, 'expired_or_invalidated', 'approval_expired', now);
   if (account.capabilities.policyVersion !== command.policyVersion || grantVersionFor(account) !== command.grantVersion) return failCommand(state, commandId, 'expired_or_invalidated', 'policy_or_grants_changed_since_approval', now);
   const currentDigest = await digestReviewPayload(reviewPayloadFromDraft(draft, command.policyVersion, command.grantVersion));
   if (currentDigest !== command.reviewDigest) return failCommand(state, commandId, 'expired_or_invalidated', 'review_payload_changed_since_approval', now);

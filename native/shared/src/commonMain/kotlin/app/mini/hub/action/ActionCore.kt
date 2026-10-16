@@ -35,6 +35,8 @@ data class ExactActionPayload(
     /** Cc/Bcc for email. Part of the approved digest. */
     val cc: List<String> = emptyList(),
     val bcc: List<String> = emptyList(),
+    /** Last inbound event used to prove a time-sensitive provider reply window at dispatch. */
+    val replyWindowLastInboundMillis: Long? = null,
 ) {
     init {
         require(accountId.isNotBlank())
@@ -71,6 +73,7 @@ data class ExactActionPayload(
         replyTarget?.let { append('|').append("reply:").append(encodeField(it)) }
         if (cc.isNotEmpty()) append("|cc:").append(cc.sorted().joinToString(";") { encodeField(it) })
         if (bcc.isNotEmpty()) append("|bcc:").append(bcc.sorted().joinToString(";") { encodeField(it) })
+        replyWindowLastInboundMillis?.let { append("|reply_window_last_inbound:").append(it) }
     }
 
     private fun encodeField(value: String): String =
