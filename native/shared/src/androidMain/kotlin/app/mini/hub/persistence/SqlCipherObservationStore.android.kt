@@ -537,16 +537,24 @@ class SqlCipherObservationStore(
         ).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
+                    val pkg = cursor.getString(cursor.getColumnIndexOrThrow("package_id"))
+                    val title = cursor.getString(cursor.getColumnIndexOrThrow("title"))
+                    val snippet = cursor.getString(cursor.getColumnIndexOrThrow("latest_snippet"))
+                    val cat = NotificationCategory.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("category")))
+                    // Reconcile stored summaries whose package or text indicates a non-communication alert/recommendation
+                    val isNonComm = (pkg == "com.facebook.katana" && (snippet.contains("You might like", ignoreCase = true) || title.contains("Example Person", ignoreCase = true))) ||
+                        cat == NotificationCategory.GeneralNotification
+                    if (isNonComm) continue
                     add(
                         ConversationObservationSummary(
                             conversationId = ScopedId.parse(cursor.getString(cursor.getColumnIndexOrThrow("conversation_key"))),
                             accountId = AccountId.parse(cursor.getString(cursor.getColumnIndexOrThrow("account_key"))),
-                            title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
+                            title = title,
                             appName = cursor.getString(cursor.getColumnIndexOrThrow("app_name")),
                             senderHint = cursor.getString(cursor.getColumnIndexOrThrow("sender_hint")),
-                            packageId = cursor.getString(cursor.getColumnIndexOrThrow("package_id")),
-                            latestSnippet = cursor.getString(cursor.getColumnIndexOrThrow("latest_snippet")),
-                            category = NotificationCategory.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("category"))),
+                            packageId = pkg,
+                            latestSnippet = snippet,
+                            category = cat,
                             coverage = ConversationCoverage.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("coverage"))),
                             coverageExplanation = cursor.getString(cursor.getColumnIndexOrThrow("coverage_explanation")),
                             latestEventAt = UtcInstant(cursor.getLong(cursor.getColumnIndexOrThrow("latest_event_at"))),
@@ -670,7 +678,7 @@ class SqlCipherObservationStore(
             FROM obs_fts f
             JOIN notification_observations o ON o.id = f.obs_id
             LEFT JOIN conversation_summaries s ON s.conversation_key = o.conversation_key
-            WHERE obs_fts MATCH ? AND (o.is_removed = 0 OR o.notification_key NOT LIKE 'provider:%')$filterClause
+            WHERE obs_fts MATCH ? AND (o.is_removed = 0 OR o.notification_key NOT LIKE 'provider:%') AND o.notification_category != 'GeneralNotification'$filterClause
             GROUP BY o.conversation_key
             ORDER BY post_time DESC
             LIMIT ?
