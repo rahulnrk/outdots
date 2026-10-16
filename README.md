@@ -1,8 +1,18 @@
 # MINI: Private AI Communication Hub
 
+The [complete Outdots roadmap and screenshot audit](docs/OUTDOTS_COMPLETE_ROADMAP_2026-10-16.md)
+consolidates the latest product decisions, the 19-screen review, implementation packages and
+qualification gates (16 October 2026). It supplements the earlier requirements snapshot;
+planned work is not a claim of implemented or qualified capability.
+
 A local-first unified inbox. MINI pulls messages from several services into one encrypted on-device
 store, flags what needs attention, drafts replies with an on-device model, and sends only after the
 user reviews the exact text. Product spec: `private-ai-communication-hub-architecture-v1-2.md`.
+
+Current Android product direction and development gaps are classified in
+[Product requirements](docs/PRODUCT_REQUIREMENTS.md) (15 October 2026), including connector-led
+Inbox, Focus assistant, media, privacy choices and manual Light/Dark mode. This is a requirements
+update, not an implementation or release claim; conflicting older product direction is historical.
 
 Per-feature status lives in [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md). It
 separates "fixture-tested" from "qualified on device/live"; passing unit tests do not imply live

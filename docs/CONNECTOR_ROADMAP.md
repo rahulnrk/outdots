@@ -1,5 +1,7 @@
 # Connector roadmap
 
+> **Product scope update, 15 October 2026:** [Current requirements](PRODUCT_REQUIREMENTS.md) supersede conflicting work order and coverage claims here. Further Instagram, Facebook/Messenger and LinkedIn work is deferred. An official API is not a guarantee of full history, personal-inbox access, new-conversation support, all media types or live-qualified sending. WhatsApp personal currently uses an unofficial debug linked-device route. The register requires capability-by-capability evidence and treats the reported notification clutter as unresolved. No connector consolidation, protocol work, install, send or gate change is authorized by this documentation update.
+
 **Date:** 13 October 2026. Inputs: arch v1.2, [implementation status](IMPLEMENTATION_STATUS.md),
 [connectors](CONNECTORS.md), [phone-local bridge feasibility](PHONE_LOCAL_BRIDGE_FEASIBILITY.md) and the external
 "Cross-Platform Communication Connectors Study" (Oct 2026).

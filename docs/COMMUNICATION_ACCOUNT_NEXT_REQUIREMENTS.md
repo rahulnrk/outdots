@@ -1,5 +1,7 @@
 # Next requirements: genuine multi-account provider connections
 
+> **Historical milestone snapshot; not current implementation status.** Gmail/Outlook adapters and account flows now exist. The missing-connector/configuration claims below describe the earlier notification-only milestone and must not be applied to the current checkout or phone. Use [Product requirements](PRODUCT_REQUIREMENTS.md), especially PR-01 and PR-03–07, for current account/history/search/media gaps, and current source plus dated evidence for capability claims. Do not inspect or expose stored credentials to resolve this older text.
+
 The selected-source milestone is notification observation only. A checked Gmail, Outlook, Teams, WhatsApp, Facebook/Messenger, Instagram, or LinkedIn source means that exact Android package may contribute notification observations. It does not establish a signed-in account, mailbox access, provider identity, or authenticated sync.
 
 ## Gmail authorization and sync prerequisites

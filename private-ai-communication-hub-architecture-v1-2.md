@@ -2,6 +2,8 @@
 
 Prepared for Rahul Kumar Nandepu · 8 October 2026
 
+> **Product requirements update, 15 October 2026:** [Current requirements and classified gaps](docs/PRODUCT_REQUIREMENTS.md) supersede conflicting product direction in this baseline. They preserve existing conversations and exact review, require a connector-led clean Inbox, and add Focus assistant, media, personalisation and manual Light/Dark requirements. Local models and model APIs remain candidates until pilot validation; earlier named models/runtimes are not a final choice. MINI login and optional encrypted continuity are new design work, not existing services. Current local security/account boundaries remain enforced until any replacement design is separately authorized and qualified. Recording these requirements does not authorize app implementation or private-data uploads.
+
 Revision 1.1 adds a source-reviewed Jcode adaptation: a shared resource owner, demand-loaded inference, explicit cache/queue budgets and memory regression measurements. The local privacy contract and native/shared-core technology choices remain in force. See section 20.
 
 **Design decision:** Build a cross-platform personal communication hub whose operational core, AI inference and personal memory live on the user's device. Use typed, provider-specific adapters for account access. Trusted application code controls every outbound action. A small publisher backend distributes updates and handles subscriptions; it does not receive private conversations or run inference.

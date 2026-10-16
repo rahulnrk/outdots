@@ -1,5 +1,7 @@
 # Product convenience priorities
 
+> **Current requirements:** [15 October product requirements and development gaps](PRODUCT_REQUIREMENTS.md) classify what to preserve, correct, build, experiment with, defer and decide. They supersede conflicting delivery/privacy/model assumptions below. In particular, a phone notification does not establish a chat or an authenticated account; provider completeness and actual media capabilities must be qualified. Manual Light/Dark selection is an explicit requirement. Documentation does not authorize implementation.
+
 The 10 October 2026 inbox/dashboard, local intelligence, memory and connector
 decisions are recorded in [the current product decision record](PRODUCT_DECISIONS_2026-10-10.md).
 Bridge hosting and platform launch order remain open for discussion.

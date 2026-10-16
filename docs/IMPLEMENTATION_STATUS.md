@@ -1,5 +1,9 @@
 # Implementation status
 
+> **16 October current-stage review:** The [complete roadmap and 19-screen audit](OUTDOTS_COMPLETE_ROADMAP_2026-10-16.md) inspects source at `be22591` and supplied rendered screenshots. The app remains an engineering prototype before the intended Focus pilot; demonstrated false-chat/attention and usability failures remain open. Screenshot restriction removal exists in source. No new device, model or provider qualification was performed for this review; the historical feature evidence below must not be read as acceptance of the expanded product.
+
+> **15 October requirements/gap overlay:** [Product requirements](PRODUCT_REQUIREMENTS.md) records the current Android direction and a source-inspected gap register at `a110a1c`. The table below retains earlier milestone evidence and is not comprehensive current acceptance. Read the dated [Phase 2 report](../native/review-artifacts/phase2-acceptance/REPORT.md) and [Phase 3A report](../native/review-artifacts/phase3a-acceptance/REPORT.md) separately; Phase 3A is open for review and Phase 3B is on hold. The user's current notification-to-chat clutter report remains unresolved despite earlier passing checks. Requirements added here do not change implementation or qualification state.
+
 Factual status per feature. Legend: **Implemented+tested**, **Partial**, **Simulated** (fixture/demo only),
 **Blocked** (external dependency), **Not started**. Updated 2026-10-11 after Stage 1 stabilization (T1-T6, fixture-tested; none device-verified). Live Gmail learning and MediaPipe personalization remain blocked.
 

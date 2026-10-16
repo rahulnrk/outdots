@@ -1,5 +1,7 @@
 # MINI product decisions: local intelligence and connector hosting
 
+> **Historical decision record.** See [Product requirements, 15 October 2026](PRODUCT_REQUIREMENTS.md) for current direction and classified development gaps. Android is the product target and web is a reference. Instagram, Facebook/Messenger and LinkedIn work and assistant voice are deferred. Local models and model APIs remain open until pilot validation; optional hosted inference/continuity need separate privacy designs and authorization. Cross-source assistance is a current requirement with permission/identity design still open. Earlier bridge choices and local-only product assumptions below must not be used to start deferred work or claim a selected hosted route. Existing technical safeguards remain in force.
+
 Updated: 10 October 2026, Asia/Kolkata.
 
 Sources: [initial product discussion](https://chatgpt.com/share/6aca269c-97d0-83e8-8024-df61549c71d3), [updated history and personalization discussion](https://chatgpt.com/share/6aca2980-3ed0-83ee-a1b9-0432de951892), read in the browser, and the connector choices made in this chat. The updated discussion and the user's latest correction supersede the earlier attachment-size and selected-message retention rules. Only explicit user selections are recorded as agreed. Assistant suggestions and unresolved questions are not approvals. This document records product intent; it does not establish implemented or live-qualified functionality.
