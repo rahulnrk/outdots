@@ -1,7 +1,6 @@
 package app.mini.hub.android
 
 import android.os.Bundle
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
@@ -36,9 +35,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Suppress app-switcher previews of private content (architecture section 11).
-        window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
-
         MiniHubRuntime.init(applicationContext)
         val storage = MiniHubRuntime.storage
         if (storage is RuntimeStorage.Failed) {
