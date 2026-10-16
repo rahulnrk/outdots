@@ -5,6 +5,7 @@ import app.mini.hub.action.GatewayResult
 import app.mini.hub.action.OutboxCommand
 import app.mini.hub.action.ProviderGateway
 import app.mini.hub.connector.AccessTokenStore
+import app.mini.hub.connector.AccountOperationCoordinator
 import app.mini.hub.connector.ConnectedAccount
 import app.mini.hub.connector.ConnectedAccountStore
 import app.mini.hub.connector.StoredAccessToken
@@ -22,20 +23,23 @@ class RefreshingGateway(
     private val tokens: AccessTokenStore,
     private val refresh: (ConnectedAccount, StoredAccessToken) -> StoredAccessToken?,
     private val delegate: ProviderGateway,
+    private val operations: AccountOperationCoordinator = AccountOperationCoordinator(),
     private val nowMillis: () -> Long,
 ) : ProviderGateway {
     override fun execute(command: OutboxCommand, payload: ExactActionPayload): GatewayResult {
         val accountId = runCatching { AccountId.parse(payload.accountId) }.getOrNull()
             ?: return delegate.execute(command, payload)
-        val account = accounts.get(accountId) ?: return delegate.execute(command, payload)
-        val token = tokens.get(accountId) ?: return delegate.execute(command, payload)
-        if (token.isExpired(nowMillis() + EXPIRY_SKEW_MILLIS)) {
-            if (refresh(account, token) == null) {
-                val message = accounts.get(accountId)?.userActionRequired ?: DEFAULT_RECONNECT
-                return GatewayResult.Rejected("credential_refresh_failed: $message")
+        return operations.withAccount(accountId) {
+            val account = accounts.get(accountId) ?: return@withAccount delegate.execute(command, payload)
+            val token = tokens.get(accountId) ?: return@withAccount delegate.execute(command, payload)
+            if (token.isExpired(nowMillis() + EXPIRY_SKEW_MILLIS)) {
+                if (refresh(account, token) == null) {
+                    val message = accounts.get(accountId)?.userActionRequired ?: DEFAULT_RECONNECT
+                    return@withAccount GatewayResult.Rejected("credential_refresh_failed: $message")
+                }
             }
+            delegate.execute(command, payload)
         }
-        return delegate.execute(command, payload)
     }
 
     companion object {

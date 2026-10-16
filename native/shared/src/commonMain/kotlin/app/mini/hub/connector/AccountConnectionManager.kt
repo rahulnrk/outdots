@@ -8,6 +8,7 @@ class AccountConnectionManager(
     private val accounts: ConnectedAccountStore,
     private val tokens: AccessTokenStore,
     private val ids: IdGenerator,
+    private val operations: AccountOperationCoordinator = AccountOperationCoordinator(),
 ) {
     fun attach(
         identity: ProviderAccountIdentity,
@@ -46,21 +47,27 @@ class AccountConnectionManager(
      * which keeps existing history attached and prevents a second copy of every message.
      */
     fun disconnect(id: AccountId): Boolean {
-        tokens.remove(id)
-        val existing = accounts.get(id) ?: return false
-        accounts.upsert(
-            existing.copy(
-                state = ConnectionState.Disconnected,
-                userActionRequired = DISCONNECTED_ACTION,
-            ),
-        )
-        return true
+        return operations.withAccount(id) {
+            operations.invalidate(id)
+            tokens.remove(id)
+            val existing = accounts.get(id) ?: return@withAccount false
+            accounts.upsert(
+                existing.copy(
+                    state = ConnectionState.Disconnected,
+                    userActionRequired = DISCONNECTED_ACTION,
+                ),
+            )
+            true
+        }
     }
 
     /** Permanently forgets the account metadata. Local message history is still not deleted here. */
     fun forget(id: AccountId): Boolean {
-        tokens.remove(id)
-        return accounts.remove(id)
+        return operations.withAccount(id) {
+            operations.invalidate(id)
+            tokens.remove(id)
+            accounts.remove(id)
+        }
     }
 
     companion object {

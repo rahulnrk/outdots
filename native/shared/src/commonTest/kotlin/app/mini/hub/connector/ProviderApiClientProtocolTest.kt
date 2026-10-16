@@ -1,5 +1,6 @@
 package app.mini.hub.connector
 
+import app.mini.hub.domain.UtcInstant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -32,5 +33,19 @@ class ProviderApiClientProtocolTest {
             assertEquals(ProviderErrorKind.Protocol, error.kind)
             assertEquals("invalid_success_body", error.reason)
         }
+    }
+
+    @Test
+    fun parsesRetryAfterSecondsAndHttpDateWithInjectedClock() {
+        val now = UtcInstant.parse("2026-10-16T12:00:00Z").epochMillis
+        assertEquals(3_600L, ConnectorHttpException.retryAfter(
+            ProviderHttpResponse(429, "", mapOf("Retry-After" to "3600")), now,
+        ))
+        assertEquals(60L, ConnectorHttpException.retryAfter(
+            ProviderHttpResponse(429, "", mapOf("Retry-After" to "Fri, 16 Oct 2026 12:01:00 GMT")), now,
+        ))
+        assertEquals(null, ConnectorHttpException.retryAfter(
+            ProviderHttpResponse(429, "", mapOf("Retry-After" to "999999999999999999999")), now,
+        ))
     }
 }

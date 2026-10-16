@@ -35,7 +35,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        MiniHubRuntime.init(applicationContext)
+        setContent {
+            MaterialTheme {
+                Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+                    Text("Opening MINI storage…", style = MaterialTheme.typography.headlineSmall)
+                    Text("Encrypted history is being opened before the inbox is enabled.", modifier = Modifier.padding(top = 12.dp))
+                }
+            }
+        }
+        Thread({
+            MiniHubRuntime.init(applicationContext)
+            runOnUiThread { finishRuntimeSetup() }
+        }, "mini-runtime-bootstrap").start()
+    }
+
+    private fun finishRuntimeSetup() {
         val storage = MiniHubRuntime.storage
         if (storage is RuntimeStorage.Failed) {
             // Blocking: no inbox, no accounts, no sending. Nothing would be durable.

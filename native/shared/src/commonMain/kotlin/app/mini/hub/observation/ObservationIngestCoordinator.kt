@@ -37,6 +37,8 @@ class ObservationIngestCoordinator(
      */
     val maxWriteRetries: Int = 2,
 ) {
+    private val processingLock = Any()
+
     fun setUiListener(listener: ObservationUiListener?) {
         uiListener = listener
     }
@@ -55,7 +57,11 @@ class ObservationIngestCoordinator(
         return result
     }
 
-    fun processNext(): IngestProcessResult {
+    fun processNext(): IngestProcessResult = synchronized(processingLock) {
+        processNextInternal()
+    }
+
+    private fun processNextInternal(): IngestProcessResult {
         val payload = queue.poll() ?: return IngestProcessResult.QueueEmpty
         val lk = payload.correlationId ?: payload.key
 
@@ -216,7 +222,11 @@ class ObservationIngestCoordinator(
      * For removals, markRemoved is called immediately so ordering relative to inserts/updates of
      * the same key within one drain call is correct.
      */
-    fun drainAndProcessAll(maxBatch: Int = 1000): Int {
+    fun drainAndProcessAll(maxBatch: Int = 1000): Int = synchronized(processingLock) {
+        drainAndProcessAllInternal(maxBatch)
+    }
+
+    private fun drainAndProcessAllInternal(maxBatch: Int): Int {
         val batch = queue.drain(maxBatch)
         if (batch.isEmpty()) return 0
 

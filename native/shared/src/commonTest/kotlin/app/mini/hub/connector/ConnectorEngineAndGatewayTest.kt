@@ -181,6 +181,42 @@ class ConnectorEngineAndGatewayTest {
     }
 
     @Test
+    fun malformedSuccessfulSendBecomesUnknownAndIsNotRetryable() {
+        val accounts = InMemoryConnectedAccountStore()
+        val tokens = InMemoryAccessTokenStore()
+        val account = ConnectedAccount(
+            AccountId(Provider.GMAIL, "g_protocol"), "user@gmail.com", "User", AccountType.GoogleConsumer,
+            ConnectorRoute.OfficialProviderApi, ConnectionState.Healthy,
+            grantedScopes = setOf(GmailApiConnector.SCOPE_READONLY, GmailApiConnector.SCOPE_SEND),
+        )
+        accounts.upsert(account)
+        tokens.put(account.id, StoredAccessToken("t1", null))
+        val gateway = ConnectorProviderGateway(
+            accounts = accounts,
+            tokens = tokens,
+            senders = listOf(GmailSender("https://gmail.googleapis.com/gmail/v1/users/me")),
+            gates = GateEvidenceSource { listOf(GateEvidence(ReleaseGate.SendQualification, "Verified live")) },
+            transport = ProviderHttpTransport.of { ProviderHttpResponse(200, "{\"accepted\":true") },
+            nowMillis = { 1_700_000_000_000L },
+        )
+        val payload = ExactActionPayload(
+            accountId = account.id.key, conversationId = "t1", route = ActionRoute.Api,
+            recipients = listOf("to@example.com"), subject = "Sub", body = "Body text", attachments = emptyList(),
+            sourceVersions = emptyList(), grantVersion = "v1", policyVersion = "v1",
+        )
+        var nextId = 0
+        val controller = ActionController(
+            clock = Clock { UtcInstant(1_700_000_000_000L) },
+            digest = digest,
+            ids = ActionIdGenerator { "protocol-${++nextId}" },
+        )
+        val (state, command) = controller.approve(app.mini.hub.action.ActionState(), payload)
+        val afterDispatch = controller.dispatch(state, command.id, payload, gateway, null)
+        assertEquals(app.mini.hub.action.OutboxState.OutcomeUnknown, afterDispatch.outbox.single().state)
+        assertTrue(afterDispatch.outbox.single().failureReason?.contains("protocol") == true)
+    }
+
+    @Test
     fun rateLimitPersistsRetryAdmissionAndPreventsPrematureSync() {
         val accounts = InMemoryConnectedAccountStore()
         val tokens = InMemoryAccessTokenStore()
@@ -199,7 +235,7 @@ class ConnectorEngineAndGatewayTest {
                 ProviderAccountIdentity(Provider.OUTLOOK, "user", "User", AccountType.MicrosoftPersonal)
             override fun sync(account: ConnectedAccount, accessToken: StoredAccessToken, checkpoint: SyncCheckpoint, transport: ProviderHttpTransport, maxMessages: Int): SyncResult {
                 calls++
-                throw ConnectorHttpException(429, "rate limited", kind = ProviderErrorKind.RateLimited, retryAfterSeconds = 60)
+                throw ConnectorHttpException(429, "rate limited", kind = ProviderErrorKind.RateLimited, retryAfterSeconds = 3_600)
             }
         }
         val engine = ConnectorSyncEngine(
@@ -216,7 +252,7 @@ class ConnectorEngineAndGatewayTest {
         val cursor = store.getCursor(ConnectorSyncEngine.cursorSource(account))
         assertEquals(1, calls)
         assertEquals(1, cursor?.retryAttempt)
-        assertTrue(cursor != null && cursor.nextAllowedAtMillis in 1_700_000_060_000L..1_700_000_075_000L)
+        assertTrue(cursor != null && cursor.nextAllowedAtMillis in 1_700_003_600_000L..1_700_003_630_000L)
 
         val report = engine.syncAll(1_700_000_001_000L).single()
         assertEquals("backoff_active", report.skippedReason)

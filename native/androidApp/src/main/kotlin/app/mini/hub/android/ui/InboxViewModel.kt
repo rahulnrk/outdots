@@ -374,8 +374,11 @@ class InboxViewModel(
 
     private fun persistCurrentDraft() {
         val selected = _state.value.selectedConversation ?: return
+        persistDraftSnapshot(selected, _state.value)
+    }
+
+    private fun persistDraftSnapshot(selected: ConversationObservationSummary, s: InboxViewState) {
         val store = draftStore ?: return
-        val s = _state.value
         val empty = s.localDraftText.isBlank() &&
             s.composeNewTo.orEmpty().isBlank() &&
             s.composeCc.isBlank() &&
@@ -383,7 +386,7 @@ class InboxViewModel(
             s.composeSubject.isBlank()
         if (empty) {
             if (!s.isLocalDraftInProgress) store.deleteDraft(selected.conversationId.key)
-            publishDrafts()
+            publishDraftsFromWorker(store)
             return
         }
 
@@ -418,7 +421,14 @@ class InboxViewModel(
                 activeVersionId = effectiveVersions.getOrNull(s.selectedVersionIndex)?.id?.ifEmpty { null },
             ),
         )
-        publishDrafts()
+        publishDraftsFromWorker(store)
+    }
+
+    private fun publishDraftsFromWorker(store: app.mini.hub.persistence.ConversationDraftStore) {
+        val drafts = store.listDrafts()
+        postToMain("drafts") {
+            _state.value = _state.value.copy(savedDrafts = drafts)
+        }
     }
 
     private fun restoreDraftState(
@@ -465,7 +475,8 @@ class InboxViewModel(
     )
 
     private fun publishDrafts() {
-        _state.value = _state.value.copy(savedDrafts = draftStore?.listDrafts().orEmpty())
+        val store = draftStore ?: return
+        refreshRunner(Runnable { publishDraftsFromWorker(store) })
     }
 
     private fun loadedDraft(conversationKey: String): app.mini.hub.persistence.ConversationDraft? =
@@ -629,65 +640,86 @@ class InboxViewModel(
     }
 
     fun selectConversationFromSearch(result: app.mini.hub.search.SearchResult) {
-        val conv = _state.value.conversations.firstOrNull { it.conversationId == result.conversationId }
-            ?: observationStore.getConversationSummaries(result.accountId).firstOrNull { it.conversationId == result.conversationId }
-        if (conv != null) {
-            selectConversation(conv)
-        }
+        val generation = ++conversationLoadGeneration
+        refreshRunner(Runnable {
+            val conv = _state.value.conversations.firstOrNull { it.conversationId == result.conversationId }
+                ?: observationStore.getConversationSummaries(result.accountId).firstOrNull { it.conversationId == result.conversationId }
+            postToMain("search-selection") {
+                if (generation != conversationLoadGeneration) return@postToMain
+                conv?.let { selectConversation(it) }
+            }
+        })
     }
 
     fun selectConversation(summary: ConversationObservationSummary) {
-        val observations = observationStore.getObservationsForConversation(summary.conversationId)
-        val compartment = CompartmentId(summary.accountId.key)
-
-        val retrieved = retrievalEngine.retrieve(
-            ScopedRetrievalQuery(
-                conversationId = summary.conversationId,
-                compartment = compartment,
-                tokenBudget = 650,
-            ),
-        )
-
-        val styleCategory = StyleContext.forMessage(summary.accountId.provider, summary.title, summary.latestSnippet)
-        val style = styleEngine.resolveProfile(
-            category = styleCategory,
-            recipientId = styleRecipient(summary),
-            now = clock.now(),
-            account = summary.accountId,
-        )
-
-        persistCurrentDraft()
+        val generation = ++conversationLoadGeneration
+        val previousState = _state.value
+        val previous = previousState.selectedConversation
+        val previousWasDifferent = previous?.conversationId != summary.conversationId
+        if (previous != null && previousWasDifferent) {
+            // Snapshot persistence and all durable reads happen on the worker below. The UI gets a
+            // selection immediately, while this generation prevents a slow store from winning.
+            _state.value = _state.value.copy(
+                selectedConversation = summary,
+                selectedTimeline = emptyList(),
+                retrievedContext = null,
+                activeStyleProfile = null,
+                activeReviewPayload = null,
+                reviewContext = null,
+                conversationLoadStatus = "Loading this conversation…",
+            )
+        }
         abandonLocalDraft()
-        markConversationSeen(summary.conversationId.key, summary.latestEventAt.epochMillis)
-        val draft = loadedDraft(summary.conversationId.key)
-        val restored = restoreDraftState(draft, summary.accountId)
-        _state.value = _state.value.copy(
-            selectedConversation = summary,
-            selectedTimeline = observations,
-            retrievedContext = retrieved,
-            activeStyleProfile = style,
-            activeReviewPayload = null,
-            outboxStatusMessage = null,
-            localDraftText = restored.body,
-            originalGeneratedDraft = restored.originalGeneratedDraft,
-            localDraftProvenance = restored.provenance,
-            draftVersions = restored.versions,
-            selectedVersionIndex = restored.selectedIndex,
-            showWhyThisDraft = false,
-            targetMessageIdToHighlight = null,
-            composeNewTo = if (draft?.isNewEmail == true) draft.to else null,
-            composeCc = draft?.cc.orEmpty(),
-            composeBcc = draft?.bcc.orEmpty(),
-            composeSubject = draft?.subject.orEmpty(),
-            localDraftWarning = null,
-            localDraftStatus = null,
-            localDraftFeedback = null,
-            isLocalDraftInProgress = false,
-            // The failure pause belongs to the runtime, not the conversation; keep offering retry.
-            isLocalAiRetryAvailable = localDraftExperiment?.needsRecovery == true,
-            conversationLoadStatus = null,
-        )
-        loadFullConversation(summary)
+        refreshRunner(Runnable {
+            if (previous != null && previousWasDifferent) persistDraftSnapshot(previous, previousState)
+            val observations = observationStore.getObservationsForConversation(summary.conversationId)
+            val retrieved = retrievalEngine.retrieve(
+                ScopedRetrievalQuery(
+                    conversationId = summary.conversationId,
+                    compartment = CompartmentId(summary.accountId.key),
+                    tokenBudget = 650,
+                ),
+            )
+            val styleCategory = StyleContext.forMessage(summary.accountId.provider, summary.title, summary.latestSnippet)
+            val style = styleEngine.resolveProfile(
+                category = styleCategory,
+                recipientId = styleRecipient(summary),
+                now = clock.now(),
+                account = summary.accountId,
+            )
+            markConversationSeen(summary.conversationId.key, summary.latestEventAt.epochMillis)
+            val draft = loadedDraft(summary.conversationId.key)
+            val restored = restoreDraftState(draft, summary.accountId)
+            postToMain("conversation-selection") {
+                if (generation != conversationLoadGeneration) return@postToMain
+                _state.value = _state.value.copy(
+                    selectedConversation = summary,
+                    selectedTimeline = observations,
+                    retrievedContext = retrieved,
+                    activeStyleProfile = style,
+                    activeReviewPayload = null,
+                    outboxStatusMessage = null,
+                    localDraftText = restored.body,
+                    originalGeneratedDraft = restored.originalGeneratedDraft,
+                    localDraftProvenance = restored.provenance,
+                    draftVersions = restored.versions,
+                    selectedVersionIndex = restored.selectedIndex,
+                    showWhyThisDraft = false,
+                    targetMessageIdToHighlight = null,
+                    composeNewTo = if (draft?.isNewEmail == true) draft.to else null,
+                    composeCc = draft?.cc.orEmpty(),
+                    composeBcc = draft?.bcc.orEmpty(),
+                    composeSubject = draft?.subject.orEmpty(),
+                    localDraftWarning = null,
+                    localDraftStatus = null,
+                    localDraftFeedback = null,
+                    isLocalDraftInProgress = false,
+                    isLocalAiRetryAvailable = localDraftExperiment?.needsRecovery == true,
+                    conversationLoadStatus = null,
+                )
+                loadFullConversation(summary)
+            }
+        })
     }
 
     private fun loadFullConversation(summary: ConversationObservationSummary) {
@@ -1325,15 +1357,14 @@ class InboxViewModel(
         val context = _state.value.reviewContext
         val launcher = (handoffLauncher as? AndroidNativeHandoffLauncher)?.forPackage(context?.handoffPackage) ?: handoffLauncher
 
-        var outboxCmdId: String? = null
-        actionStore.transaction { currentActionState ->
-            val (approvedState, command) = actionController.approve(currentActionState, payload)
-            outboxCmdId = command.id
-            approvedState.copy(reviewedSnapshots = approvedState.reviewedSnapshots + payload.toReviewedSnapshot(command))
-        }
-        val cmdId = outboxCmdId ?: return
-
         if (payload.route == ActionRoute.NativeHandoff) {
+            var outboxCmdId: String? = null
+            actionStore.transaction { currentActionState ->
+                val (approvedState, command) = actionController.approve(currentActionState, payload)
+                outboxCmdId = command.id
+                approvedState.copy(reviewedSnapshots = approvedState.reviewedSnapshots + payload.toReviewedSnapshot(command))
+            }
+            val cmdId = outboxCmdId ?: return
             // Handoff opens an activity: it must stay on the main thread and makes no network call.
             val finalState = actionStore.transaction {
                 actionController.dispatch(it, cmdId, payload, gateway, launcher, liveDispatchChecks(payload))
@@ -1349,6 +1380,13 @@ class InboxViewModel(
         _state.value = _state.value.copy(isSending = true, outboxStatusMessage = "Sending through ${context?.providerName ?: "the provider"}…")
         sendRunner(Runnable {
             val finalCommand = runCatching {
+                var outboxCmdId: String? = null
+                actionStore.transaction { currentActionState ->
+                    val (approvedState, command) = actionController.approve(currentActionState, payload)
+                    outboxCmdId = command.id
+                    approvedState.copy(reviewedSnapshots = approvedState.reviewedSnapshots + payload.toReviewedSnapshot(command))
+                }
+                val cmdId = outboxCmdId ?: return@runCatching null
                 val liveChecks = liveDispatchChecks(payload)
                 val begun = actionStore.transaction { actionController.beginDispatch(it, cmdId, payload, liveChecks) }
                 val command = begun.outbox.first { it.id == cmdId }
@@ -1359,7 +1397,7 @@ class InboxViewModel(
                     actionStore.transaction { actionController.completeDispatch(it, cmdId, result) }
                         .outbox.find { it.id == cmdId }
                 }
-            }.getOrNull() ?: actionStore.snapshot().outbox.find { it.id == cmdId }
+            }.getOrNull() ?: actionStore.snapshot().outbox.lastOrNull()
             postToMain("send-result") {
                 sendInFlight = false
                 applyDispatchResult(payload, context, finalCommand)

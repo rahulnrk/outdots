@@ -380,7 +380,9 @@ class InMemoryObservationStore : ObservationStore {
 
         // Find matching non-removed observations
         val matches = observations.values
-            .filter { !it.isRemoved }
+            // OS dismissal preserves permitted history; provider-deleted rows are explicitly
+            // identified by their durable provider key and remain hidden.
+            .filter { !it.isRemoved || !it.notificationKey.startsWith("provider:") }
             .filter { query.sourceFilter == null || it.packageId == query.sourceFilter }
             .filter { obs ->
                 val fullText = (listOfNotNull(obs.title, obs.senderHint) + obs.textFragments).joinToString(" ").lowercase()

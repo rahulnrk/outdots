@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import app.mini.hub.action.DigestProvider
 import app.mini.hub.connector.AccountConnectionManager
+import app.mini.hub.connector.AccountOperationCoordinator
 import app.mini.hub.connector.ConnectedAccount
 import app.mini.hub.connector.ConnectorObservationFactory
 import app.mini.hub.connector.ConnectorSyncEngine
@@ -13,6 +14,7 @@ import app.mini.hub.connector.GmailApiConnector
 import app.mini.hub.connector.ProviderHttpResponse
 import app.mini.hub.connector.ProviderHttpTransport
 import app.mini.hub.connector.ProviderMessage
+import app.mini.hub.connector.ProviderErrorKind
 import app.mini.hub.connector.StoredAccessToken
 import app.mini.hub.connector.SyncCheckpoint
 import app.mini.hub.domain.IdGenerator
@@ -83,12 +85,13 @@ class AndroidGmailConnector(
     private val refresher: GoogleTokenRefresher = GoogleTokenRefresher(),
     private val transport: ProviderHttpTransport = AndroidProviderHttpTransport(),
     private val onMessagesFetched: (ConnectedAccount, List<ProviderMessage>) -> Unit = { _, _ -> },
+    private val operations: AccountOperationCoordinator = AccountOperationCoordinator(),
 ) {
     private val accounts = AndroidConnectedAccountStore(context)
     private val tokens = AndroidKeystoreAccessTokenStore(context)
     private val connector = GmailApiConnector()
 
-    fun connectionManager() = AccountConnectionManager(accounts, tokens, IdGenerator { "unused-$it" })
+    fun connectionManager() = AccountConnectionManager(accounts, tokens, IdGenerator { "unused-$it" }, operations)
 
     /** Syncs the newest page for every Gmail account that is still connected. */
     fun syncAllConnected(nowMillis: Long, trigger: String): List<GmailSyncReport> =
@@ -105,12 +108,20 @@ class AndroidGmailConnector(
                 report
             }
 
-    fun sync(account: ConnectedAccount, checkpoint: SyncCheckpoint, nowMillis: Long): GmailSyncReport {
+    fun sync(account: ConnectedAccount, checkpoint: SyncCheckpoint, nowMillis: Long): GmailSyncReport =
+        operations.withAccount(account.id) { syncInternal(account, checkpoint, nowMillis) }
+
+    private fun syncInternal(account: ConnectedAccount, checkpoint: SyncCheckpoint, nowMillis: Long): GmailSyncReport {
         require(account.id.provider == Provider.GMAIL)
         val current = accounts.get(account.id) ?: error("Gmail account is not registered")
         check(current.providerAccountId == account.providerAccountId) { "Account metadata changed" }
         if (current.state == ConnectionState.Disconnected) {
             return GmailSyncReport(current.id.localId, checkpoint, 0, 0, current.state, false, "disconnected")
+        }
+        val source = "gmail:${current.id.key}"
+        val previousCursor = observationStore.getCursor(source)
+        if (previousCursor != null && previousCursor.nextAllowedAtMillis > nowMillis) {
+            return GmailSyncReport(current.id.localId, checkpoint, 0, 0, current.state, false, "backoff_active")
         }
         var token = tokens.get(current.id) ?: run {
             // A revoked or expired account has no credential by design. Keep its specific status and
@@ -132,7 +143,6 @@ class AndroidGmailConnector(
                 ?: return GmailSyncReport(current.id.localId, checkpoint, 0, 0, accounts.get(current.id)?.state ?: current.state, false, "refresh_failed")
             refreshed = true
         }
-        val previousCursor = observationStore.getCursor("gmail:${current.id.key}")
         val startHistoryId = checkpoint.cursor ?: previousCursor?.lastProcessedKey
         val incResult = try {
             connector.syncIncremental(current, token, startHistoryId, transport, PAGE_SIZE, isKnown)
@@ -145,10 +155,12 @@ class AndroidGmailConnector(
                 try {
                     connector.syncIncremental(current, retryToken, startHistoryId, transport, PAGE_SIZE, isKnown)
                 } catch (retryError: ConnectorHttpException) {
+                    persistRetryAdmission(source, previousCursor, nowMillis, retryError)
                     classifyAndMark(current, retryError)
                     throw retryError
                 }
             } else {
+                persistRetryAdmission(source, previousCursor, nowMillis, error)
                 classifyAndMark(current, error)
                 throw error
             }
@@ -160,7 +172,7 @@ class AndroidGmailConnector(
         val removals = tombstones.map { it.notificationKey to app.mini.hub.domain.UtcInstant(nowMillis) }
         val nextGap = (previousCursor?.gapCount ?: 0L) + if (incResult.gap) 1L else 0L
         val cursor = IngestCursor(
-            source = "gmail:${current.id.key}",
+            source = source,
             lastProcessedTimeMillis = nowMillis,
             lastProcessedKey = incResult.nextHistoryId,
             processedCount = (previousCursor?.processedCount ?: 0L) + newObs.size,
@@ -181,19 +193,21 @@ class AndroidGmailConnector(
         return GmailSyncReport(current.id.localId, nextCheckpoint, incResult.listedCount, newObs.size, ConnectionState.Healthy, refreshed, moreAvailable = incResult.moreAvailable)
     }
 
-    fun fetchThread(threadId: String, account: ConnectedAccount): List<app.mini.hub.connector.ProviderMessage> {
-        val token = tokens.get(account.id) ?: error("Credential missing for Gmail account")
-        return connector.fetchThread(threadId, token, transport, account.displayName, account.id)
-    }
+    fun fetchThread(threadId: String, account: ConnectedAccount): List<app.mini.hub.connector.ProviderMessage> =
+        operations.withAccount(account.id) {
+            val token = tokens.get(account.id) ?: error("Credential missing for Gmail account")
+            connector.fetchThread(threadId, token, transport, account.displayName, account.id)
+        }
 
-    fun fetchAttachment(account: ConnectedAccount, messageId: String, attachmentId: String): ByteArray? {
-        val token = tokens.get(account.id) ?: return null
-        return connector.fetchAttachment(messageId, attachmentId, token, transport)
-    }
+    fun fetchAttachment(account: ConnectedAccount, messageId: String, attachmentId: String): ByteArray? =
+        operations.withAccount(account.id) {
+            val token = tokens.get(account.id) ?: return@withAccount null
+            connector.fetchAttachment(messageId, attachmentId, token, transport)
+        }
 
     /** Same refresh-and-mark path sync uses; for send and conversation reads. */
     fun refreshForUse(account: ConnectedAccount, token: StoredAccessToken, nowMillis: Long): StoredAccessToken? =
-        refreshOrMark(account, token, nowMillis)
+        operations.withAccount(account.id) { refreshOrMark(account, token, nowMillis) }
 
     private fun refreshOrMark(account: ConnectedAccount, token: StoredAccessToken, nowMillis: Long): StoredAccessToken? =
         when (val outcome = refresher.refresh(token, nowMillis)) {
@@ -231,6 +245,30 @@ class AndroidGmailConnector(
         Log.w(LOG_TAG, "account=${account.id.localId} HTTP ${error.statusCode} (${error.reason ?: "none"}); marked $state")
     }
 
+    private fun persistRetryAdmission(source: String, previous: IngestCursor?, nowMillis: Long, error: ConnectorHttpException) {
+        if (error.kind != ProviderErrorKind.RateLimited && error.kind != ProviderErrorKind.Transient) return
+        val attempt = (previous?.retryAttempt ?: 0) + 1
+        val exponential = (1_000L shl (attempt - 1).coerceAtMost(13)).coerceAtMost(MAX_BACKOFF_MILLIS)
+        val requested = error.retryAfterSeconds?.let { seconds ->
+            seconds.takeIf { it in 1L..MAX_PROVIDER_DELAY_SECONDS }?.let { it * 1_000L }
+        }
+        val base = (requested ?: exponential).coerceAtLeast(1_000L)
+        val jitterBound = minOf(base / 4, MAX_JITTER_MILLIS)
+        val jitter = if (jitterBound == 0L) 0L else
+            (source.hashCode().toLong().and(Long.MAX_VALUE) % (jitterBound + 1L))
+        observationStore.checkpointCursor(
+            IngestCursor(
+                source = source,
+                lastProcessedTimeMillis = nowMillis,
+                lastProcessedKey = previous?.lastProcessedKey,
+                processedCount = previous?.processedCount ?: 0L,
+                gapCount = previous?.gapCount ?: 0L,
+                nextAllowedAtMillis = nowMillis + base + jitter,
+                retryAttempt = attempt,
+            ),
+        )
+    }
+
     private fun markState(account: ConnectedAccount, state: ConnectionState, action: String?) {
         accounts.upsert((accounts.get(account.id) ?: account).copy(state = state, userActionRequired = action))
     }
@@ -239,6 +277,9 @@ class AndroidGmailConnector(
         const val LOG_TAG = "MiniGmailSync"
         private const val PAGE_SIZE = 50
         private const val EXPIRY_SKEW_MILLIS = 60_000L
+        private const val MAX_BACKOFF_MILLIS = 15 * 60_000L
+        private const val MAX_PROVIDER_DELAY_SECONDS = 30L * 24L * 60L * 60L
+        private const val MAX_JITTER_MILLIS = 30_000L
         private val SCOPE_REASONS = setOf("insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT")
         const val RECONNECT_ACTION = "Reconnect Gmail to resume this account. Local history is preserved."
         const val REVOKED_ACTION = "Google access for this account was removed. Tap Connect Gmail and choose this account to restore syncing. Local history is preserved."

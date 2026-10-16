@@ -71,7 +71,9 @@ fun classifyCommunication(payload: NotificationRawPayload): CommunicationKind {
         }
         CommunicationSource.Instagram, CommunicationSource.FacebookMessenger, CommunicationSource.X -> when {
             messagingEvidence -> CommunicationKind.ConversationMessage
-            looksLikeSocialActivity(payload.title, payload.text, payload.subText) -> CommunicationKind.NotCommunication
+            looksLikeSocialActivity(payload.title, payload.text, payload.subText) ->
+                if (hasConversationContinuation(payload.text)) CommunicationKind.ConversationMessage
+                else CommunicationKind.NotCommunication
             hasPersonAndBody(payload) -> CommunicationKind.ConversationMessage
             else -> CommunicationKind.NotCommunication
         }
@@ -183,7 +185,9 @@ fun isConversationSummary(summary: ConversationObservationSummary): Boolean {
         if (source == CommunicationSource.Instagram || source == CommunicationSource.X ||
             source == CommunicationSource.FacebookMessenger
         ) {
-            if (looksLikeRecommendation(summary)) return false
+            // Reconstruct only structural social activity evidence. A person discussing a
+            // recommendation is a genuine message and must not be hidden by a topic keyword.
+            if (classifyCommunication(summaryAsPayload(summary)) != CommunicationKind.ConversationMessage) return false
             return true
         }
         if (source == CommunicationSource.LinkedIn) return isLinkedInMessageSummary(summary)
@@ -229,7 +233,6 @@ private fun looksLikeRecommendation(summary: ConversationObservationSummary): Bo
         "friend suggestion",
         "connection suggestion",
         "people you may know",
-        "recommendation",
     ).any { it in hay }
 }
 
@@ -277,6 +280,14 @@ private fun hasPersonAndBody(payload: NotificationRawPayload): Boolean {
     val source = CommunicationSource.forExactPackage(payload.packageId)
     if (source != null && title.equals(source.displayName, ignoreCase = true)) return false
     return title.length <= 80
+}
+
+private fun hasConversationContinuation(text: String): Boolean {
+    val hay = text.lowercase()
+    return listOf(
+        "can you", "could you", "would you", "please", "send me", "let's", "lets ",
+        "are you", "did you", "will you", "what do", "how do", "tomorrow",
+    ).any { it in hay }
 }
 
 private fun isMessagingServiceStatus(payload: NotificationRawPayload): Boolean {
@@ -331,7 +342,6 @@ private fun looksLikeSocialActivity(title: String?, text: String, subText: Strin
             "suggested friend",
             "friend suggestion",
             "connection suggestion",
-            "recommendation",
         ),
     )
 }

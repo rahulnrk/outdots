@@ -36,12 +36,13 @@ class UnifiedSearchTest {
         pkg: String,
         postAt: Long = 1_700_000_000_000L,
         isRemoved: Boolean = false,
+        notificationKey: String = "key_$id",
     ) = ObservedNotification(
         id = ScopedId(account, ScopedId.Kind.OBSERVATION, "obs_$id"),
         accountId = account,
         conversationId = ScopedId(account, ScopedId.Kind.CONVERSATION, convKey),
         packageId = pkg,
-        notificationKey = "key_$id",
+        notificationKey = notificationKey,
         notificationId = id.hashCode(),
         tag = null,
         senderHint = "Sender_$id",
@@ -121,11 +122,22 @@ class UnifiedSearchTest {
     fun removedMessagesNeverAppearInSearchResults() {
         for ((name, store) in stores()) {
             store.persistObservation(makeObs(acctGmail, "conv_live", "20", "Live Meeting", "Confidential notes", "com.google.android.gm", isRemoved = false))
-            store.persistObservation(makeObs(acctGmail, "conv_del", "21", "Deleted Meeting", "Confidential notes deleted", "com.google.android.gm", isRemoved = true))
+            store.persistObservation(makeObs(acctGmail, "conv_del", "21", "Deleted Meeting", "Confidential notes deleted", "com.google.android.gm", isRemoved = true, notificationKey = "provider:${acctGmail.key}:m21"))
 
             val results = store.search(SearchQuery("confidential"))
-            assertEquals(1, results.size, "$name: removed messages must not appear")
+            assertEquals(1, results.size, "$name: provider-deleted messages must not appear")
             assertEquals("conv_live", results.single().conversationId.value, name)
+        }
+    }
+
+    @Test(timeout = 30_000)
+    fun dismissedMessagesRemainSearchableWhileProviderDeletionDoesNot() {
+        for ((name, store) in stores()) {
+            val dismissed = makeObs(acctGmail, "conv_dismissed", "22", "Dismissed Meeting", "Dismissible confidential notes", "com.google.android.gm", isRemoved = true)
+            store.persistObservation(dismissed)
+            val results = store.search(SearchQuery("dismissible"))
+            assertEquals(1, results.size, "$name: dismissed history remains searchable")
+            assertEquals("conv_dismissed", results.single().conversationId.value, name)
         }
     }
 

@@ -110,7 +110,12 @@ class ConnectorProviderGateway(
 
         /** A failure response is a definite "not sent" except where the provider may have acted. */
         fun classify(e: ConnectorHttpException): SendOutcome = when (e.kind) {
-            ProviderErrorKind.Transient -> SendOutcome.Unknown("provider_outcome_unknown:${e.statusCode}")
+            // A successful response with an invalid body may arrive after the provider accepted a
+            // write. Treat it like a transport failure so the outbox records uncertainty and never
+            // invites a duplicate resend based on a false rejection.
+            ProviderErrorKind.Protocol,
+            ProviderErrorKind.Transient,
+            -> SendOutcome.Unknown("provider_outcome_unknown:${e.kind.name.lowercase()}:${e.statusCode}")
             ProviderErrorKind.RateLimited -> SendOutcome.Rejected("rate_limited" + (e.retryAfterSeconds?.let { ":retry_after=$it" } ?: ""))
             else -> SendOutcome.Rejected("${e.kind.name.lowercase()}:${e.statusCode}:${e.reason ?: "none"}")
         }

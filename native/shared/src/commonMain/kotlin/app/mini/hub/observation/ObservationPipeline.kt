@@ -316,7 +316,15 @@ class NotificationDeduplicator(
             return DedupeAction.Insert(normalized)
         }
 
-        // Check if exact duplicate (same key, postTime, and content digest)
+        // A removed row is historical evidence. Reusing its OS key is a new occurrence rather than
+        // resurrecting the dismissed/provider-deleted row.
+        if (existing.isRemoved) {
+            return DedupeAction.Insert(normalized)
+        }
+
+        // A changed body or event timestamp on a live row is a provider revision. Reuse after a
+        // durable removal is handled above as a new occurrence because dismissal is evidence that
+        // the prior row must remain historical.
         if (existing.postTime == normalized.postTime && existing.rawTextDigest == normalized.rawTextDigest) {
             return DedupeAction.DropDuplicate(normalized.notificationKey)
         }

@@ -382,6 +382,33 @@ class CommunicationSourcesTest {
     }
 
     @Test
+    fun socialMessageAboutRecommendationRemainsConversation() {
+        val message = payload("com.instagram.android").copy(
+            title = "Asha",
+            senderHint = "Asha",
+            text = "Please send me your recommendation today.",
+        )
+        assertEquals(CommunicationKind.ConversationMessage, classifyCommunication(message))
+        val summary = ConversationObservationSummary(
+            conversationId = ScopedId(AccountId(Provider.INSTAGRAM, "local_user"), ScopedId.Kind.CONVERSATION, "asha"),
+            accountId = AccountId(Provider.INSTAGRAM, "local_user"),
+            title = "Asha",
+            appName = "Instagram",
+            senderHint = "Asha",
+            packageId = "com.instagram.android",
+            latestSnippet = message.text,
+            category = NotificationCategory.DirectMessage,
+            coverage = ConversationCoverage.NotificationOnly,
+            coverageExplanation = "notification",
+            latestEventAt = clock.now(),
+            observationCount = 1,
+            unreadCount = 1,
+            isRemoved = false,
+        )
+        assertTrue(isConversationSummary(summary))
+    }
+
+    @Test
     fun wp01_facebookKatanaRecommendationFilteredOut() {
         val fbRecommendation = payload("com.facebook.katana").copy(
             title = "Example Person",

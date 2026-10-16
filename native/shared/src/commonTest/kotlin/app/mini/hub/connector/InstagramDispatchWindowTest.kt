@@ -83,4 +83,51 @@ class InstagramDispatchWindowTest {
 
         assertEquals(GatewayResult.Rejected("instagram_reply_window_unknown"), gateway.execute(command, payload(null)))
     }
+
+    @Test
+    fun windowExpiryAfterReviewRejectsWithoutProviderWrite() {
+        var nowMillis = now + InstagramApiConnector.WINDOW_MILLIS - 1L
+        var sends = 0
+        val gateway = ConnectorProviderGateway(
+            accounts = InMemoryConnectedAccountStore().also { it.upsert(account) },
+            tokens = InMemoryAccessTokenStore().also { it.put(account.id, StoredAccessToken("token", null)) },
+            senders = listOf(object : ProviderSender {
+                override val provider = Provider.INSTAGRAM
+                override fun send(account: ConnectedAccount, token: StoredAccessToken, payload: ExactActionPayload, clientRequestId: String, transport: ProviderHttpTransport): SendOutcome {
+                    sends++
+                    return SendOutcome.Accepted("unexpected")
+                }
+            }),
+            gates = GateEvidenceSource { emptyList() },
+            transport = ProviderHttpTransport.of { error("provider must not be called") },
+            nowMillis = { nowMillis },
+        )
+        val reviewed = payload(now)
+        nowMillis = now + InstagramApiConnector.WINDOW_MILLIS + 1L
+
+        assertEquals(GatewayResult.Rejected(InstagramApiSender.OUTSIDE_WINDOW), gateway.execute(command, reviewed))
+        assertEquals(0, sends)
+    }
+
+    @Test
+    fun openWindowAllowsOfficialApiRoute() {
+        var sends = 0
+        val gateway = ConnectorProviderGateway(
+            accounts = InMemoryConnectedAccountStore().also { it.upsert(account) },
+            tokens = InMemoryAccessTokenStore().also { it.put(account.id, StoredAccessToken("token", null)) },
+            senders = listOf(object : ProviderSender {
+                override val provider = Provider.INSTAGRAM
+                override fun send(account: ConnectedAccount, token: StoredAccessToken, payload: ExactActionPayload, clientRequestId: String, transport: ProviderHttpTransport): SendOutcome {
+                    sends++
+                    return SendOutcome.Accepted("instagram:ok")
+                }
+            }),
+            gates = GateEvidenceSource { listOf(GateEvidence(ReleaseGate.SendQualification, "Verified live")) },
+            transport = ProviderHttpTransport.of { error("transport should be unused by fixture sender") },
+            nowMillis = { now },
+        )
+
+        assertEquals(GatewayResult.Accepted("instagram:ok"), gateway.execute(command, payload(now)))
+        assertEquals(1, sends)
+    }
 }

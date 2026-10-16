@@ -1,5 +1,8 @@
 package app.mini.hub.connector
 
+import app.mini.hub.domain.Clock
+import app.mini.hub.domain.SystemClock
+
 /**
  * Shared request edge for API adapters: bearer auth, HTTPS-only requests, uniform error
  * classification and Retry-After capture. Messages never include response bodies or tokens.
@@ -12,6 +15,7 @@ class ProviderApiClient(
     private val reasonOf: (JsonValue?) -> String? = ::defaultReason,
     /** Lets an adapter refine kinds (e.g. Gmail 404 on history = cursor invalid). */
     private val classify: (status: Int, reason: String?) -> ProviderErrorKind = { s, _ -> ConnectorHttpException.defaultKind(s) },
+    private val clock: Clock = SystemClock,
 ) {
     fun get(url: String): JsonValue = call(ProviderHttpRequest(HttpMethod.GET, url, auth()))
 
@@ -55,7 +59,7 @@ class ProviderApiClient(
             message = "$providerName ${request.redacted()} failed: HTTP ${response.statusCode}${reason?.let { " ($it)" } ?: ""}",
             reason = reason,
             kind = classify(response.statusCode, reason),
-            retryAfterSeconds = ConnectorHttpException.retryAfter(response),
+            retryAfterSeconds = ConnectorHttpException.retryAfter(response, clock.now().epochMillis),
         )
     }
 

@@ -7,6 +7,7 @@ import android.util.Log
 import app.mini.hub.action.DigestProvider
 import app.mini.hub.android.BuildConfig
 import app.mini.hub.connector.AccountSyncReport
+import app.mini.hub.connector.AccountOperationCoordinator
 import app.mini.hub.connector.Capability
 import app.mini.hub.connector.CapabilityResolver
 import app.mini.hub.connector.CapabilitySnapshot
@@ -68,12 +69,13 @@ class AndroidConnectorRegistry(
     private val appContext = context.applicationContext
     private val accounts = AndroidConnectedAccountStore(appContext)
     private val tokens = AndroidKeystoreAccessTokenStore(appContext)
+    private val operations = AccountOperationCoordinator()
     private val gateEvidence = GateEvidenceStore(appContext)
     internal val whatsappHost = WhatsAppAndroidHost(appContext, accounts, tokens)
 
     val gmailOAuth = GmailOAuthClient(appContext)
     val outlookOAuth = OutlookOAuthClient(appContext)
-    private val gmail = AndroidGmailConnector(appContext, store, digest, transport = transport, onMessagesFetched = onMessagesFetched)
+    private val gmail = AndroidGmailConnector(appContext, store, digest, transport = transport, onMessagesFetched = onMessagesFetched, operations = operations)
 
     private val outlookConnector = OutlookGraphConnector()
     private val teamsConnector = TeamsChatConnector()
@@ -152,6 +154,7 @@ class AndroidConnectorRegistry(
         ),
         transport = transport,
         onMessagesFetched = onMessagesFetched,
+        operations = operations,
     )
 
     private fun configuredClients(): Set<Provider> = buildSet {
@@ -185,6 +188,7 @@ class AndroidConnectorRegistry(
     /** Refreshes an expired token through the provider's existing refresher before any send. */
     val gateway: app.mini.hub.action.ProviderGateway = RefreshingGateway(
         accounts, tokens, { account, token -> refreshForUse(account, token) }, directGateway,
+        operations = operations,
     ) { System.currentTimeMillis() }
 
     /** Gmail uses its Google refresher; every other route uses the sync engine's refreshers. */
@@ -313,7 +317,10 @@ class AndroidConnectorRegistry(
      * Full conversation text from the provider, for reading and drafting. Returns null when the
      * provider has no conversation reader, so the caller keeps the stored timeline.
      */
-    fun fetchConversation(account: ConnectedAccount, conversationId: String): List<ProviderMessage>? {
+    fun fetchConversation(account: ConnectedAccount, conversationId: String): List<ProviderMessage>? =
+        operations.withAccount(account.id) { fetchConversationInternal(account, conversationId) }
+
+    private fun fetchConversationInternal(account: ConnectedAccount, conversationId: String): List<ProviderMessage>? {
         var token = tokens.get(account.id) ?: return null
         if (token.isExpired(System.currentTimeMillis() + RefreshingGateway.EXPIRY_SKEW_MILLIS)) {
             token = refreshForUse(account, token) ?: return null
@@ -425,7 +432,7 @@ class AndroidConnectorRegistry(
             whatsappHost.logout(account.id)
         }
         app.mini.hub.connector.AccountConnectionManager(
-            accounts, tokens, app.mini.hub.domain.IdGenerator { "unused-$it" },
+            accounts, tokens, app.mini.hub.domain.IdGenerator { "unused-$it" }, operations,
         ).disconnect(account.id)
     }
 

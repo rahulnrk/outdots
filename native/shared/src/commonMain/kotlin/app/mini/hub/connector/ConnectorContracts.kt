@@ -2,6 +2,8 @@ package app.mini.hub.connector
 
 import app.mini.hub.domain.AccountId
 import app.mini.hub.domain.Provider
+import app.mini.hub.domain.SystemClock
+import app.mini.hub.domain.UtcInstant
 
 /** Truthful route classes. A bridge is never presented as an official provider API. */
 enum class ConnectorRoute {
@@ -82,6 +84,40 @@ interface AccessTokenStore {
     fun get(accountId: AccountId): StoredAccessToken?
     fun put(accountId: AccountId, token: StoredAccessToken)
     fun remove(accountId: AccountId)
+}
+
+/**
+ * Serializes provider work per account while allowing unrelated accounts to proceed. The same
+ * owner is shared by sync, reads, sends, refreshes and disconnect/reconnect mutations so an older
+ * refresh cannot race a credential removal or a newer connection.
+ */
+class AccountOperationCoordinator {
+    private class Entry {
+        val lock = Any()
+        var generation: Long = 0L
+    }
+
+    private val entries = mutableMapOf<String, Entry>()
+
+    private fun entry(accountId: AccountId): Entry = synchronized(entries) {
+        entries.getOrPut(accountId.key) { Entry() }
+    }
+
+    fun <T> withAccount(accountId: AccountId, block: () -> T): T {
+        val owner = entry(accountId)
+        return synchronized(owner.lock) { block() }
+    }
+
+    /** Invalidates work that was logically older than a disconnect or account replacement. */
+    fun invalidate(accountId: AccountId) {
+        val owner = entry(accountId)
+        synchronized(owner.lock) { owner.generation++ }
+    }
+
+    fun generation(accountId: AccountId): Long {
+        val owner = entry(accountId)
+        return synchronized(owner.lock) { owner.generation }
+    }
 }
 
 class InMemoryConnectedAccountStore : ConnectedAccountStore {
@@ -243,7 +279,22 @@ class ConnectorHttpException(
             else -> ProviderErrorKind.Rejected
         }
 
-        /** Parses Retry-After seconds. HTTP-date values are treated as unknown rather than guessed. */
-        fun retryAfter(response: ProviderHttpResponse): Long? = response.header("Retry-After")?.trim()?.toLongOrNull()
+        /** Parses bounded seconds or RFC 7231 HTTP-date Retry-After values. */
+        fun retryAfter(response: ProviderHttpResponse, nowMillis: Long = SystemClock.now().epochMillis): Long? {
+            val value = response.header("Retry-After")?.trim() ?: return null
+            value.toLongOrNull()?.takeIf { it in 0L..MAX_RETRY_AFTER_SECONDS }?.let { return it }
+            val match = HTTP_DATE.matchEntire(value) ?: return null
+            val g = match.groupValues
+            val month = MONTHS.indexOf(g[2]) + 1
+            if (month !in 1..12) return null
+            val dateMillis = runCatching {
+                UtcInstant.parse("${g[3]}-${month.toString().padStart(2, '0')}-${g[1]}T${g[4]}:${g[5]}:${g[6]}Z").epochMillis
+            }.getOrNull() ?: return null
+            return ((dateMillis - nowMillis).coerceAtLeast(0L) + 999L) / 1_000L
+        }
+
+        private val HTTP_DATE = Regex("^[A-Za-z]{3}, (\\d{2}) ([A-Za-z]{3}) (\\d{4}) (\\d{2}):(\\d{2}):(\\d{2}) GMT$")
+        private val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+        private const val MAX_RETRY_AFTER_SECONDS = 30L * 24L * 60L * 60L
     }
 }

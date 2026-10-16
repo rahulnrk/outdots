@@ -201,6 +201,36 @@ class S1StoredMessageIntegrityTest {
         close(second)
     }
 
+    @Test(timeout = 60_000)
+    fun reusedNotificationKeyAfterDismissalCreatesNewOccurrence() {
+        val file = dbFile("s1-occurrence")
+        var counter = 0
+        fun payload(at: Long, text: String) = NotificationRawPayload(
+            key = "reused-key", packageId = "com.whatsapp", notificationId = 7,
+            postTimeMillis = at, senderHint = "Asha", title = "Asha", text = text,
+            hasMessagingStyle = true, category = "msg",
+        )
+        fun coordinator(store: ObservationStore) = ObservationIngestCoordinator(
+            normalizer = NotificationNormalizer(IdGenerator { "occ-${counter++}" }, DigestProvider { "d-${it.hashCode()}" }),
+            store = store,
+            clock = Clock { UtcInstant(1_700_000_100_000L) },
+        )
+        val store = JdbcObservationStore(file.path)
+        val first = coordinator(store)
+        assertTrue(first.enqueue(payload(1_700_000_000_000L, "first occurrence")) != app.mini.hub.observation.IngestOfferResult.Filtered)
+        assertTrue(first.processNext() is IngestProcessResult.Created)
+        assertEquals(1, store.markRemoved("reused-key", UtcInstant(1_700_000_001_000L)))
+
+        val second = coordinator(store)
+        assertTrue(second.enqueue(payload(1_700_000_002_000L, "second occurrence")) != app.mini.hub.observation.IngestOfferResult.Filtered)
+        assertTrue(second.processNext() is IngestProcessResult.Created)
+        val rows = store.getObservationsForConversation(ScopedId(wa, ScopedId.Kind.CONVERSATION, "Asha"))
+        assertEquals(2, rows.size, "key reuse after dismissal must preserve both occurrences")
+        assertTrue(rows.any { it.isRemoved && it.textFragments.single() == "first occurrence" })
+        assertTrue(rows.any { !it.isRemoved && it.textFragments.single() == "second occurrence" })
+        close(store)
+    }
+
     // A5: Android permits dismissed notification rows in search; JDBC excludes them. Provider deletion differs.
     @Test(timeout = 60_000)
     fun dismissalKeepsHistorySearchableButProviderDeletionDoesNot() {
