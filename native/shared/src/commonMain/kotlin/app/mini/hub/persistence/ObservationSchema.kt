@@ -9,9 +9,9 @@ package app.mini.hub.persistence
  *  - 4: notification_observations.notification_category (null = reconstruct from stored text)
  */
 object ObservationSchema {
-    const val VERSION = 4
+    const val VERSION = 5
 
-    /** Observations table as created by versions 1 and 2. Version 3 columns are added by migration. */
+    const val INDEX_FTS_VERSION = "CREATE INDEX IF NOT EXISTS idx_obs_fts_version ON ingest_cursors (source, last_processed_time_millis)"
     const val CREATE_OBSERVATIONS_V1 = """
         CREATE TABLE IF NOT EXISTS notification_observations (
             id TEXT NOT NULL PRIMARY KEY,
@@ -73,15 +73,17 @@ object ObservationSchema {
             account_key UNINDEXED,
             package_id UNINDEXED,
             title,
-            body
+            body,
+            tokenize="unicode61 remove_diacritics 2 categories 'L* N* Co M*'"
         )
     """
 
     const val POPULATE_FTS_FROM_EXISTING = """
-        INSERT OR REPLACE INTO obs_fts(obs_id, conversation_key, account_key, package_id, title, body)
+        INSERT INTO obs_fts(obs_id, conversation_key, account_key, package_id, title, body)
         SELECT id, conversation_key, account_key, package_id, coalesce(title, ''), text_fragments_json
         FROM notification_observations
-        WHERE is_removed = 0
+        WHERE (is_removed = 0 OR (is_removed = 1 AND notification_key NOT LIKE 'provider:%'))
+          AND id NOT IN (SELECT obs_id FROM obs_fts)
     """
 
     const val INDEX_NOTIFICATION_KEY =

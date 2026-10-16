@@ -102,12 +102,7 @@ class CommunicationSourcePolicy(
         if (payload.tag == "synthetic_test") return true
         if (!isEligiblePackage(payload.packageId)) return false
         if (payload.isRemoved) return true
-        return when (classifyCommunication(payload)) {
-            CommunicationKind.ConversationMessage -> true
-            CommunicationKind.LinkedInActivity ->
-                classifyLinkedInActivity(payload)?.let { it in selectedLinkedInActivities() } == true
-            CommunicationKind.NotCommunication -> false
-        }
+        return classifyCommunication(payload).isInboxEligible
     }
 
     fun isEligiblePackage(packageId: String): Boolean {

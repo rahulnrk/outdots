@@ -69,7 +69,7 @@ class ObservationIngestCoordinator(
                     return IngestProcessResult.DuplicateIgnored(normalized.notificationKey)
                 }
             }
-            val action = deduplicator.evaluate(normalized)
+            val action = deduplicator.evaluate(normalized, store)
 
             when (action) {
                 is NotificationDeduplicator.DedupeAction.Insert -> {
@@ -203,7 +203,7 @@ class ObservationIngestCoordinator(
         }
 
         // Fall through to the committed deduplicator for cross-batch state.
-        return deduplicator.evaluate(normalized)
+        return deduplicator.evaluate(normalized, store)
     }
 
     /**

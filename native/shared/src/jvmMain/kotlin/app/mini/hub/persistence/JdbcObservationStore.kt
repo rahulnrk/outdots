@@ -5,14 +5,18 @@ import app.mini.hub.domain.ScopedId
 import app.mini.hub.domain.UtcInstant
 import app.mini.hub.observation.ConversationCoverage
 import app.mini.hub.observation.ConversationObservationSummary
+import app.mini.hub.observation.CommunicationKind
+import app.mini.hub.observation.CommunicationSource
 import app.mini.hub.observation.CorrelationConfidence
 import app.mini.hub.observation.IngestCursor
 import app.mini.hub.observation.NotificationCategory
+import app.mini.hub.observation.NotificationRawPayload
 import app.mini.hub.observation.ObservationProvenance
 import app.mini.hub.observation.ObservedNotification
 import app.mini.hub.observation.SourceAppNames
 import app.mini.hub.observation.TruncationState
 import app.mini.hub.observation.categoryForStoredObservation
+import app.mini.hub.observation.classifyCommunication
 import app.mini.hub.observation.coverageExplanationFor
 import app.mini.hub.observation.coverageFor
 import java.sql.Connection
@@ -51,15 +55,26 @@ class JdbcObservationStore(path: String) : ObservationStore {
     private fun migrate() {
         val current = schemaVersion()
         if (current >= ObservationSchema.VERSION) {
-            // Fresh databases created above still need later columns.
+            // Fresh databases still need FTS population if missing.
             ensureVersion3Columns()
             ensureVersion4Columns()
+            ensureVersion5Columns()
             return
         }
         transaction {
-            ensureVersion3Columns()
-            ensureVersion4Columns()
+            if (current < 3) ensureVersion3Columns()
+            if (current < 4) ensureVersion4Columns()
+            if (current < 5) ensureVersion5Columns()
             connection.createStatement().use { it.execute("PRAGMA user_version = ${ObservationSchema.VERSION}") }
+        }
+    }
+
+    private fun ensureVersion5Columns() {
+        connection.createStatement().use { s ->
+            // Version 5: Rebuild FTS with Unicode tokenization and idempotent population
+            s.execute("DROP TABLE IF EXISTS obs_fts")
+            s.execute(ObservationSchema.CREATE_FTS_OBSERVATIONS)
+            s.execute(ObservationSchema.POPULATE_FTS_FROM_EXISTING)
         }
     }
 
@@ -226,9 +241,6 @@ class JdbcObservationStore(path: String) : ObservationStore {
                         val cat = NotificationCategory.valueOf(rs.getString("category"))
                         val title = rs.getString("title")
                         val snippet = rs.getString("latest_snippet")
-                        // Reconcile stored summaries whose package or text indicates a non-communication alert/recommendation
-                        val isNonComm = pkg == "com.facebook.katana" && (snippet.contains("You might like", ignoreCase = true) || title.contains("Example Person", ignoreCase = true))
-                        if (isNonComm) continue
                         add(
                             ConversationObservationSummary(
                                 conversationId = ScopedId.parse(rs.getString("conversation_key")),
@@ -274,19 +286,35 @@ class JdbcObservationStore(path: String) : ObservationStore {
         }
 
     @Synchronized
-    override fun recoverFromRestart(): RestartRecoveryReport = RestartRecoveryReport(
-        totalObservations = count("SELECT COUNT(*) FROM notification_observations"),
-        totalConversations = count("SELECT COUNT(*) FROM conversation_summaries"),
-        lastCursor = null,
-    )
+    override fun recoverFromRestart(): RestartRecoveryReport {
+        val totalObs = count("SELECT COUNT(*) FROM notification_observations")
+        val totalConv = count("SELECT COUNT(*) FROM conversation_summaries")
+
+        // Ensure FTS is correctly populated on restart without duplicates.
+        // Dismissed notifications (is_removed=1 but key does NOT start with 'provider:') stay searchable.
+        // Provider-deleted messages (key starts with 'provider:') are removed from FTS.
+        transaction {
+            connection.createStatement().use { s ->
+                s.execute("DELETE FROM obs_fts WHERE obs_id NOT IN (SELECT id FROM notification_observations WHERE is_removed = 0 OR (is_removed = 1 AND notification_key NOT LIKE 'provider:%'))")
+                s.execute(ObservationSchema.POPULATE_FTS_FROM_EXISTING)
+            }
+        }
+
+        return RestartRecoveryReport(
+            totalObservations = totalObs,
+            totalConversations = totalConv,
+            lastCursor = null,
+        )
+    }
 
     @Synchronized
     override fun search(query: app.mini.hub.search.SearchQuery): List<app.mini.hub.search.SearchResult> {
         val q = query.queryText.trim()
         if (q.isBlank()) return emptyList()
 
-        // Clean user query for FTS5: split words, append wildcard to each
-        val ftsQuery = q.split(Regex("[^a-zA-Z0-9_]+"))
+        // Clean user query for FTS5: split words, append wildcard to each.
+        // Use a broader split that preserves Unicode word characters.
+        val ftsQuery = q.split(Regex("[\\s\\p{Punct}]+"))
             .filter { it.isNotBlank() }
             .joinToString(" ") { "\"$it\"*" }
 
@@ -295,41 +323,100 @@ class JdbcObservationStore(path: String) : ObservationStore {
         val filterClause = if (query.sourceFilter != null) " AND o.package_id = ?" else ""
         val args = if (query.sourceFilter != null) arrayOf(ftsQuery, query.sourceFilter, query.limit) else arrayOf(ftsQuery, query.limit)
 
+        // Find matches and then resolve eligibility using the shared policy.
+        // Dismissed notifications (is_removed=1) stay in FTS and are searchable if they are communications.
+        // Provider-deleted messages are removed from FTS and stay hidden.
         val sql = """
             SELECT o.conversation_key, o.account_key, o.package_id,
                    coalesce(s.title, o.title, o.sender_hint) AS conv_title,
                    o.sender_hint,
+                   o.title AS obs_title,
                    substr(f.body, 1, 120) AS match_snippet,
                    o.post_time,
-                   coalesce(s.observation_count, 1) AS msg_count
+                   coalesce(s.observation_count, 1) AS msg_count,
+                   o.notification_category,
+                   o.is_group_summary,
+                   o.id AS obs_id
             FROM obs_fts f
             JOIN notification_observations o ON o.id = f.obs_id
             LEFT JOIN conversation_summaries s ON s.conversation_key = o.conversation_key
-            WHERE obs_fts MATCH ? AND o.is_removed = 0 AND o.notification_category != 'GeneralNotification'$filterClause
-            GROUP BY o.conversation_key
+            WHERE obs_fts MATCH ? $filterClause
             ORDER BY o.post_time DESC
-            LIMIT ?
         """.trimIndent()
 
         return try {
-            prepare(sql, *args).use { ps ->
+            prepare(sql, *args.dropLast(1).toTypedArray()).use { ps ->
                 ps.executeQuery().use { rs ->
-                    buildList {
-                        while (rs.next()) {
-                            add(
-                                app.mini.hub.search.SearchResult(
-                                    conversationId = ScopedId.parse(rs.getString("conversation_key")),
-                                    accountId = AccountId.parse(rs.getString("account_key")),
-                                    packageId = rs.getString("package_id"),
-                                    conversationTitle = rs.getString("conv_title") ?: "",
-                                    senderHint = rs.getString("sender_hint") ?: "",
-                                    snippet = rs.getString("match_snippet") ?: "",
-                                    eventAt = UtcInstant(rs.getLong("post_time")),
-                                    messageCount = rs.getInt("msg_count"),
-                                )
-                            )
+                    val results = mutableListOf<app.mini.hub.search.SearchResult>()
+                    val seenConversations = mutableSetOf<String>()
+
+                    while (rs.next() && results.size < query.limit) {
+                        val convKey = rs.getString("conversation_key")
+                        if (convKey in seenConversations) continue
+
+                        // Apply eligibility: only DirectMessage/GroupMessage are inbox-eligible.
+                        // NULL category means legacy data that needs re-classification.
+                        val cat = ObservationSchema.decodeCategory(rs.getString("notification_category"))
+                        if (cat == NotificationCategory.GeneralNotification ||
+                            cat == NotificationCategory.SystemStatus ||
+                            cat == NotificationCategory.OngoingService ||
+                            cat == NotificationCategory.SocialUpdate
+                        ) {
+                           continue
                         }
+                        // NULL: must re-classify. If not a conversation message, skip.
+                        if (cat == null) {
+                            val pkg = rs.getString("package_id")
+                            val title = rs.getString("obs_title") ?: rs.getString("conv_title") ?: ""
+                            val snippet = rs.getString("match_snippet") ?: ""
+                            val probe = NotificationRawPayload(
+                                key = "legacy-search-probe",
+                                packageId = pkg,
+                                notificationId = 0,
+                                senderHint = title,
+                                title = title,
+                                text = snippet,
+                                postTimeMillis = 0L,
+                            )
+                            if (classifyCommunication(probe) != CommunicationKind.ConversationMessage) continue
+                        }
+
+                        // Social-platform rows can be stored with a DirectMessage category even
+                        // when the notification is a recommendation or activity update.
+                        if (cat == NotificationCategory.DirectMessage || cat == NotificationCategory.GroupMessage) {
+                            val source = CommunicationSource.forExactPackage(rs.getString("package_id"))
+                            if (source == CommunicationSource.Instagram ||
+                                source == CommunicationSource.FacebookMessenger ||
+                                source == CommunicationSource.X
+                            ) {
+                                val payload = NotificationRawPayload(
+                                    key = "search-probe",
+                                    packageId = rs.getString("package_id"),
+                                    notificationId = 0,
+                                    senderHint = rs.getString("sender_hint") ?: "",
+                                    title = rs.getString("obs_title") ?: rs.getString("conv_title") ?: "",
+                                    text = rs.getString("match_snippet") ?: "",
+                                    postTimeMillis = rs.getLong("post_time"),
+                                )
+                                if (classifyCommunication(payload) != CommunicationKind.ConversationMessage) continue
+                            }
+                        }
+
+                        seenConversations.add(convKey)
+                        results.add(
+                            app.mini.hub.search.SearchResult(
+                                conversationId = parseConversationId(convKey, rs.getString("account_key")),
+                                accountId = AccountId.parse(rs.getString("account_key")),
+                                packageId = rs.getString("package_id"),
+                                conversationTitle = rs.getString("conv_title") ?: "",
+                                senderHint = rs.getString("sender_hint") ?: "",
+                                snippet = rs.getString("match_snippet") ?: "",
+                                eventAt = UtcInstant(rs.getLong("post_time")),
+                                messageCount = rs.getInt("msg_count"),
+                            )
+                        )
                     }
+                    results
                 }
             }
         } catch (_: Throwable) {
@@ -339,6 +426,12 @@ class JdbcObservationStore(path: String) : ObservationStore {
 
     /** Exposed for future same-database features (search index) and tests. */
     internal fun connection(): Connection = connection
+
+    private fun parseConversationId(rawKey: String, accountKey: String): ScopedId =
+        runCatching { ScopedId.parse(rawKey) }.getOrElse {
+            val legacyValue = rawKey.substringAfter(":conversation:", rawKey.substringAfterLast(':'))
+            ScopedId(AccountId.parse(accountKey), ScopedId.Kind.CONVERSATION, legacyValue)
+        }
 
     private fun writeRow(obs: ObservedNotification) {
         prepare(
@@ -354,10 +447,13 @@ class JdbcObservationStore(path: String) : ObservationStore {
             ObservationSchema.encodeCategory(obs.notificationCategory ?: categoryForStoredObservation(obs)),
         ).use { it.executeUpdate() }
 
-        // Keep FTS index in sync
+        // Keep FTS index in sync.
+        // Logic: inserts/updates add to FTS if not removed.
+        // Removals: if provider-deleted, remove from FTS. If dismissed, keep in FTS.
         runCatching {
             prepare("DELETE FROM obs_fts WHERE obs_id = ?", obs.id.key).use { it.executeUpdate() }
-            if (!obs.isRemoved) {
+            val shouldBeInFts = !obs.isRemoved || (!obs.notificationKey.startsWith("provider:") && obs.isRemoved)
+            if (shouldBeInFts) {
                 prepare(
                     "INSERT INTO obs_fts(obs_id, conversation_key, account_key, package_id, title, body) VALUES (?,?,?,?,?,?)",
                     obs.id.key, obs.conversationId.key, obs.accountId.key, obs.packageId,
@@ -381,10 +477,13 @@ class JdbcObservationStore(path: String) : ObservationStore {
     }
 
     private fun removeRows(notificationKey: String): Int {
-        // Also remove from FTS
-        runCatching {
-            prepare("DELETE FROM obs_fts WHERE obs_id IN (SELECT id FROM notification_observations WHERE notification_key = ?)", notificationKey)
-                .use { it.executeUpdate() }
+        // Dismissal from Android notification listener: keep in FTS for history search.
+        // Only API-deleted or user-deleted items should be removed from FTS.
+        if (notificationKey.startsWith("provider:")) {
+            runCatching {
+                prepare("DELETE FROM obs_fts WHERE obs_id IN (SELECT id FROM notification_observations WHERE notification_key = ?)", notificationKey)
+                    .use { it.executeUpdate() }
+            }
         }
         return prepare("UPDATE notification_observations SET is_removed = 1, revision = revision + 1 WHERE notification_key = ? AND is_removed = 0", notificationKey)
             .use { it.executeUpdate() }

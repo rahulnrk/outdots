@@ -7,6 +7,7 @@ import app.mini.hub.domain.IdGenerator
 import app.mini.hub.domain.Provider
 import app.mini.hub.domain.ScopedId
 import app.mini.hub.domain.UtcInstant
+import app.mini.hub.persistence.ObservationStore
 
 enum class IngestOfferResult {
     Accepted,
@@ -301,13 +302,15 @@ class NotificationDeduplicator(
      * Evaluate a normalized notification and return the appropriate action.
      * Does NOT cache the entry. The caller must call [confirmPersisted] after a successful write.
      */
-    fun evaluate(normalized: ObservedNotification): DedupeAction = synchronized(lock) {
+    fun evaluate(normalized: ObservedNotification, store: ObservationStore? = null): DedupeAction = synchronized(lock) {
         if (normalized.isRemoved) {
             recentNotifications.remove(normalized.notificationKey)
             return DedupeAction.Remove(normalized.notificationKey)
         }
 
         val existing = recentNotifications[normalized.notificationKey]
+            ?: store?.getObservationByNotificationKeyIncludingRemoved(normalized.notificationKey)
+
         if (existing == null) {
             // Do NOT cache here -- wait for confirmPersisted
             return DedupeAction.Insert(normalized)

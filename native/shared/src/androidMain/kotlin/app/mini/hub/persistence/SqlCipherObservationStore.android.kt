@@ -10,12 +10,16 @@ import app.mini.hub.domain.ScopedId
 import app.mini.hub.domain.UtcInstant
 import app.mini.hub.observation.ConversationCoverage
 import app.mini.hub.observation.ConversationObservationSummary
+import app.mini.hub.observation.CommunicationKind
+import app.mini.hub.observation.CommunicationSource
 import app.mini.hub.observation.CorrelationConfidence
 import app.mini.hub.observation.IngestCursor
 import app.mini.hub.observation.NotificationCategory
+import app.mini.hub.observation.NotificationRawPayload
 import app.mini.hub.observation.ObservationProvenance
 import app.mini.hub.observation.ObservedNotification
 import app.mini.hub.observation.categoryForStoredObservation
+import app.mini.hub.observation.classifyCommunication
 import app.mini.hub.observation.coverageExplanationFor
 import app.mini.hub.observation.coverageFor
 import app.mini.hub.observation.TruncationState
@@ -126,15 +130,10 @@ class SqlCipherObservationStore(
         if (currentVersion < DATABASE_VERSION) {
             db.beginTransaction()
             try {
-                if (currentVersion < 2) {
-                    migrateToVersion2(db)
-                }
-                if (currentVersion < 3) {
-                    migrateToVersion3(db)
-                }
-                if (currentVersion < 4) {
-                    migrateToVersion4(db)
-                }
+                if (currentVersion < 2) migrateToVersion2(db)
+                if (currentVersion < 3) migrateToVersion3(db)
+                if (currentVersion < 4) migrateToVersion4(db)
+                if (currentVersion < 5) migrateToVersion5(db)
                 db.version = DATABASE_VERSION
                 db.setTransactionSuccessful()
             } finally {
@@ -145,10 +144,12 @@ class SqlCipherObservationStore(
         // Fresh databases skip the migration block above; make sure later columns exist either way.
         migrateToVersion3(db)
         migrateToVersion4(db)
+        migrateToVersion5(db)
 
         // Probe FTS5 capability safely
         isFts5Supported = try {
             db.execSQL(ObservationSchema.CREATE_FTS_OBSERVATIONS)
+            // Idempotent population: insert only what's missing
             db.execSQL(ObservationSchema.POPULATE_FTS_FROM_EXISTING)
             true
         } catch (t: Throwable) {
@@ -177,6 +178,13 @@ class SqlCipherObservationStore(
         ObservationSchema.version4Statements(columns).forEach { db.execSQL(it) }
     }
 
+    private fun migrateToVersion5(db: SQLiteDatabase) {
+        // Rebuild FTS table with Unicode tokenization
+        db.execSQL("DROP TABLE IF EXISTS obs_fts")
+        db.execSQL(ObservationSchema.CREATE_FTS_OBSERVATIONS)
+        db.execSQL(ObservationSchema.POPULATE_FTS_FROM_EXISTING)
+    }
+
     private fun migrateToVersion2(db: SQLiteDatabase) {
         val existingColumns = mutableSetOf<String>()
         db.rawQuery("PRAGMA table_info(conversation_summaries)", null).use { cursor ->
@@ -193,8 +201,8 @@ class SqlCipherObservationStore(
         }
 
         db.execSQL("""
-            UPDATE conversation_summaries 
-            SET app_name = CASE 
+            UPDATE conversation_summaries
+            SET app_name = CASE
                 WHEN package_id LIKE '%twitter%' THEN 'X'
                 WHEN package_id LIKE '%whoop%' THEN 'WHOOP'
                 WHEN package_id LIKE '%whatsapp%' THEN 'WhatsApp'
@@ -413,11 +421,13 @@ class SqlCipherObservationStore(
         }
         db.insertWithOnConflict("notification_observations", null, values, SQLiteDatabase.CONFLICT_REPLACE)
 
-        // Keep FTS5 in sync if supported
+        // Keep FTS5 in sync if supported.
+        // Removals: if provider-deleted, remove from FTS. If dismissed, keep in FTS.
         if (isFts5Supported) {
             runCatching {
                 db.delete("obs_fts", "obs_id = ?", arrayOf(obs.id.key))
-                if (!obs.isRemoved) {
+                val shouldBeInFts = !obs.isRemoved || (!obs.notificationKey.startsWith("provider:") && obs.isRemoved)
+                if (shouldBeInFts) {
                     val ftsValues = ContentValues().apply {
                         put("obs_id", obs.id.key)
                         put("conversation_key", obs.conversationId.key)
@@ -541,10 +551,6 @@ class SqlCipherObservationStore(
                     val title = cursor.getString(cursor.getColumnIndexOrThrow("title"))
                     val snippet = cursor.getString(cursor.getColumnIndexOrThrow("latest_snippet"))
                     val cat = NotificationCategory.valueOf(cursor.getString(cursor.getColumnIndexOrThrow("category")))
-                    // Reconcile stored summaries whose package or text indicates a non-communication alert/recommendation
-                    val isNonComm = (pkg == "com.facebook.katana" && (snippet.contains("You might like", ignoreCase = true) || title.contains("Example Person", ignoreCase = true))) ||
-                        cat == NotificationCategory.GeneralNotification
-                    if (isNonComm) continue
                     add(
                         ConversationObservationSummary(
                             conversationId = ScopedId.parse(cursor.getString(cursor.getColumnIndexOrThrow("conversation_key"))),
@@ -579,7 +585,9 @@ class SqlCipherObservationStore(
         notificationKey: String,
         removedAt: UtcInstant,
     ): Int {
-        if (isFts5Supported) {
+        // Dismissal from Android notification listener: keep in FTS for history search.
+        // Only API-deleted items (which have 'provider:' keys) should be removed from FTS.
+        if (notificationKey.startsWith("provider:")) {
             runCatching {
                 db.execSQL("DELETE FROM obs_fts WHERE obs_id IN (SELECT id FROM notification_observations WHERE notification_key = ?)", arrayOf(notificationKey))
             }
@@ -640,6 +648,19 @@ class SqlCipherObservationStore(
         database.rawQuery("SELECT COUNT(*) FROM conversation_summaries", null).use {
             if (it.moveToFirst()) convCount = it.getInt(0)
         }
+
+        // Ensure FTS is correctly populated on restart without duplicates
+        if (isFts5Supported) {
+            database.beginTransaction()
+            try {
+                database.execSQL("DELETE FROM obs_fts WHERE obs_id NOT IN (SELECT id FROM notification_observations WHERE is_removed = 0 OR (is_removed = 1 AND notification_key NOT LIKE 'provider:%'))")
+                database.execSQL(ObservationSchema.POPULATE_FTS_FROM_EXISTING)
+                database.setTransactionSuccessful()
+            } finally {
+                database.endTransaction()
+            }
+        }
+
         return RestartRecoveryReport(
             totalObservations = obsCount,
             totalConversations = convCount,
@@ -652,59 +673,107 @@ class SqlCipherObservationStore(
         val q = query.queryText.trim()
         if (q.isBlank()) return emptyList()
 
-        val ftsQuery = q.split(Regex("[^a-zA-Z0-9_]+"))
+        val ftsQuery = q.split(Regex("[\\s\\p{Punct}]+"))
             .filter { it.isNotBlank() }
             .joinToString(" ") { "\"$it\"*" }
         if (ftsQuery.isBlank()) return emptyList()
 
-        if (!isFts5Supported) {
-            // Like-based fallback
-            return emptyList()
-        }
+        if (!isFts5Supported) return emptyList()
 
         val filterClause = if (query.sourceFilter != null) " AND f.package_id = ?" else ""
-        val args = if (query.sourceFilter != null) arrayOf(ftsQuery, query.sourceFilter, query.limit.toString()) else arrayOf(ftsQuery, query.limit.toString())
+        val args = if (query.sourceFilter != null) arrayOf(ftsQuery, query.sourceFilter) else arrayOf(ftsQuery)
 
-        // snippet() cannot be used with GROUP BY (SQLite: "unable to use function snippet in the
-        // requested context"), which made every on-device search return nothing. max(post_time)
-        // makes SQLite take the bare columns from the newest matching message per conversation.
+        // Android search correction: apply shared eligibility and pick newest message snippet.
+        // Dismissed notifications stay searchable if they were communications.
         val sql = """
             SELECT o.conversation_key, o.account_key, o.package_id,
                    coalesce(s.title, o.title, o.sender_hint) AS conv_title,
                    o.sender_hint,
+                   o.title AS obs_title,
                    substr(f.body, 1, 160) AS match_snippet,
-                   max(o.post_time) AS post_time,
-                   coalesce(s.observation_count, 1) AS msg_count
+                   o.post_time,
+                   coalesce(s.observation_count, 1) AS msg_count,
+                   o.notification_category,
+                   o.is_group_summary
             FROM obs_fts f
             JOIN notification_observations o ON o.id = f.obs_id
             LEFT JOIN conversation_summaries s ON s.conversation_key = o.conversation_key
-            WHERE obs_fts MATCH ? AND (o.is_removed = 0 OR o.notification_key NOT LIKE 'provider:%') AND o.notification_category != 'GeneralNotification'$filterClause
-            GROUP BY o.conversation_key
-            ORDER BY post_time DESC
-            LIMIT ?
+            WHERE obs_fts MATCH ? $filterClause
+            ORDER BY o.post_time DESC
         """.trimIndent()
 
         return try {
             database.rawQuery(sql, args).use { cursor ->
-                buildList {
-                    while (cursor.moveToNext()) {
-                        add(
-                            app.mini.hub.search.SearchResult(
-                                conversationId = ScopedId.parse(cursor.getString(cursor.getColumnIndexOrThrow("conversation_key"))),
-                                accountId = AccountId.parse(cursor.getString(cursor.getColumnIndexOrThrow("account_key"))),
-                                packageId = cursor.getString(cursor.getColumnIndexOrThrow("package_id")),
-                                conversationTitle = cursor.getString(cursor.getColumnIndexOrThrow("conv_title")) ?: "",
-                                senderHint = cursor.getString(cursor.getColumnIndexOrThrow("sender_hint")) ?: "",
-                                snippet = cursor.getString(cursor.getColumnIndexOrThrow("match_snippet")) ?: "",
-                                eventAt = UtcInstant(cursor.getLong(cursor.getColumnIndexOrThrow("post_time"))),
-                                messageCount = cursor.getInt(cursor.getColumnIndexOrThrow("msg_count")),
-                            )
-                        )
+                val results = mutableListOf<app.mini.hub.search.SearchResult>()
+                val seenConversations = mutableSetOf<String>()
+
+                while (cursor.moveToNext() && results.size < query.limit) {
+                    val convKey = cursor.getString(cursor.getColumnIndexOrThrow("conversation_key"))
+                    if (convKey in seenConversations) continue
+
+                    val catStr = cursor.getString(cursor.getColumnIndexOrThrow("notification_category"))
+                    val cat = ObservationSchema.decodeCategory(catStr)
+                    if (cat == NotificationCategory.GeneralNotification ||
+                        cat == NotificationCategory.SystemStatus ||
+                        cat == NotificationCategory.OngoingService ||
+                        cat == NotificationCategory.SocialUpdate
+                    ) {
+                        continue
                     }
+                    if (cat == null) {
+                        val title = cursor.getString(cursor.getColumnIndexOrThrow("obs_title"))
+                            ?: cursor.getString(cursor.getColumnIndexOrThrow("conv_title"))
+                            ?: ""
+                        val payload = NotificationRawPayload(
+                            key = "search-probe",
+                            packageId = cursor.getString(cursor.getColumnIndexOrThrow("package_id")),
+                            notificationId = 0,
+                            senderHint = title,
+                            title = title,
+                            text = cursor.getString(cursor.getColumnIndexOrThrow("match_snippet")) ?: "",
+                            postTimeMillis = cursor.getLong(cursor.getColumnIndexOrThrow("post_time")),
+                        )
+                        if (classifyCommunication(payload) != CommunicationKind.ConversationMessage) continue
+                    }
+                    if (cat == NotificationCategory.DirectMessage || cat == NotificationCategory.GroupMessage) {
+                        val packageId = cursor.getString(cursor.getColumnIndexOrThrow("package_id"))
+                        val source = CommunicationSource.forExactPackage(packageId)
+                        if (source == CommunicationSource.Instagram ||
+                            source == CommunicationSource.FacebookMessenger ||
+                            source == CommunicationSource.X
+                        ) {
+                            val payload = NotificationRawPayload(
+                                key = "search-probe",
+                                packageId = packageId,
+                                notificationId = 0,
+                                senderHint = cursor.getString(cursor.getColumnIndexOrThrow("sender_hint")) ?: "",
+                                title = cursor.getString(cursor.getColumnIndexOrThrow("obs_title"))
+                                    ?: cursor.getString(cursor.getColumnIndexOrThrow("conv_title"))
+                                    ?: "",
+                                text = cursor.getString(cursor.getColumnIndexOrThrow("match_snippet")) ?: "",
+                                postTimeMillis = cursor.getLong(cursor.getColumnIndexOrThrow("post_time")),
+                            )
+                            if (classifyCommunication(payload) != CommunicationKind.ConversationMessage) continue
+                        }
+                    }
+
+                    seenConversations.add(convKey)
+                    results.add(
+                        app.mini.hub.search.SearchResult(
+                            conversationId = ScopedId.parse(convKey),
+                            accountId = AccountId.parse(cursor.getString(cursor.getColumnIndexOrThrow("account_key"))),
+                            packageId = cursor.getString(cursor.getColumnIndexOrThrow("package_id")),
+                            conversationTitle = cursor.getString(cursor.getColumnIndexOrThrow("conv_title")) ?: "",
+                            senderHint = cursor.getString(cursor.getColumnIndexOrThrow("sender_hint")) ?: "",
+                            snippet = cursor.getString(cursor.getColumnIndexOrThrow("match_snippet")) ?: "",
+                            eventAt = UtcInstant(cursor.getLong(cursor.getColumnIndexOrThrow("post_time"))),
+                            messageCount = cursor.getInt(cursor.getColumnIndexOrThrow("msg_count")),
+                        )
+                    )
                 }
+                results
             }
         } catch (t: Throwable) {
-            // Never log query text, content or the exception message: fixed label + class only.
             android.util.Log.w("MiniSearch", "search_failed class=${t.javaClass.simpleName}")
             emptyList()
         }

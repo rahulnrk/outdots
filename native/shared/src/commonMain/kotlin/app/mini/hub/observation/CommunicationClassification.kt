@@ -10,7 +10,10 @@ package app.mini.hub.observation
 enum class CommunicationKind {
     ConversationMessage,
     LinkedInActivity,
-    NotCommunication,
+    NotCommunication;
+
+    /** Whether this kind of content belongs in the primary Inbox. */
+    val isInboxEligible: Boolean get() = this == ConversationMessage
 }
 
 private val NON_MESSAGE_ANDROID_CATEGORIES = setOf(
@@ -45,7 +48,10 @@ fun classifyCommunication(payload: NotificationRawPayload): CommunicationKind {
         androidCat == "email"
 
     return when (source) {
-        CommunicationSource.LinkedIn -> classifyLinkedInKind(payload, messagingEvidence)
+        CommunicationSource.LinkedIn ->
+            if (messagingEvidence || isLinkedInMessageEvidence(payload)) CommunicationKind.ConversationMessage
+            else if (classifyLinkedInActivity(payload) != null) CommunicationKind.LinkedInActivity
+            else CommunicationKind.NotCommunication
         CommunicationSource.Gmail, CommunicationSource.Outlook ->
             if (messagingEvidence || hasPersonAndBody(payload)) CommunicationKind.ConversationMessage
             else CommunicationKind.NotCommunication
@@ -65,7 +71,6 @@ fun classifyCommunication(payload: NotificationRawPayload): CommunicationKind {
         }
         CommunicationSource.Instagram, CommunicationSource.FacebookMessenger, CommunicationSource.X -> when {
             messagingEvidence -> CommunicationKind.ConversationMessage
-            payload.packageId == "com.facebook.katana" && !messagingEvidence -> CommunicationKind.NotCommunication
             looksLikeSocialActivity(payload.title, payload.text, payload.subText) -> CommunicationKind.NotCommunication
             hasPersonAndBody(payload) -> CommunicationKind.ConversationMessage
             else -> CommunicationKind.NotCommunication
@@ -100,9 +105,9 @@ fun linkedInActivityConversationValue(title: String?, text: String): String {
 
 fun categoryForStoredObservation(obs: ObservedNotification): NotificationCategory {
     if (obs.isOngoing) return NotificationCategory.OngoingService
-    obs.notificationCategory?.let { category ->
-        return category
-    }
+    obs.notificationCategory?.let { return it }
+
+    // API-synced items are always messages (direct or group)
     if (obs.provenance == ObservationProvenance.OfficialProviderApi ||
         obs.provenance == ObservationProvenance.ThirdPartyBridge ||
         obs.provenance == ObservationProvenance.UserImport ||
@@ -110,7 +115,9 @@ fun categoryForStoredObservation(obs: ObservedNotification): NotificationCategor
     ) {
         return if (obs.isGroupSummary) NotificationCategory.GroupMessage else NotificationCategory.DirectMessage
     }
+
     if (obs.isGroupSummary) return NotificationCategory.GroupMessage
+
     val reconstructed = NotificationRawPayload(
         key = obs.notificationKey,
         packageId = obs.packageId,
@@ -124,6 +131,7 @@ fun categoryForStoredObservation(obs: ObservedNotification): NotificationCategor
         isGroupSummary = obs.isGroupSummary,
         isOngoing = obs.isOngoing,
     )
+
     return when (classifyCommunication(reconstructed)) {
         CommunicationKind.ConversationMessage ->
             if (obs.isGroupSummary) NotificationCategory.GroupMessage else NotificationCategory.DirectMessage
@@ -145,38 +153,44 @@ fun categoryForStoredObservation(obs: ObservedNotification): NotificationCategor
 }
 
 fun isConversationSummary(summary: ConversationObservationSummary): Boolean {
+    // Non-message categories are never in the Inbox.
     if (summary.category == NotificationCategory.GeneralNotification ||
         summary.category == NotificationCategory.OngoingService ||
-        summary.category == NotificationCategory.SystemStatus
+        summary.category == NotificationCategory.SystemStatus ||
+        summary.category == NotificationCategory.SocialUpdate
     ) return false
+
+    // API-sourced items are always genuine messages.
     if (summary.coverage != ConversationCoverage.NotificationOnly) return true
     if (summary.packageId.startsWith(CommunicationSource.API_PACKAGE_PREFIX)) return true
-    if (summary.category == NotificationCategory.OngoingService ||
-        summary.category == NotificationCategory.SystemStatus
-    ) return false
+
+    // Direct/Group messages from notification-only sources: verify via classification
+    // to catch misclassified recommendations and social activity stored as DirectMessage.
     if (summary.category == NotificationCategory.DirectMessage ||
         summary.category == NotificationCategory.GroupMessage
-    ) return true
-    if (isLinkedInActivitySummary(summary)) return false
-    if (looksLikeNonMessageActivity(summary)) return false
-    return when (CommunicationSource.forExactPackage(summary.packageId)) {
-        CommunicationSource.LinkedIn -> isLinkedInMessageSummary(summary)
-        CommunicationSource.Instagram, CommunicationSource.X, CommunicationSource.FacebookMessenger ->
-            summary.category == NotificationCategory.DirectMessage ||
-                summary.category == NotificationCategory.GroupMessage ||
-                classifyCommunication(summaryAsPayload(summary)) == CommunicationKind.ConversationMessage
-        CommunicationSource.Gmail, CommunicationSource.Outlook -> true
-        null -> summary.category == NotificationCategory.DirectMessage ||
-            summary.category == NotificationCategory.GroupMessage
-        else -> summary.category != NotificationCategory.SocialUpdate
+    ) {
+        val source = CommunicationSource.forExactPackage(summary.packageId)
+        // Social platforms may have wrongly-categorized recommendations.
+        if (source == CommunicationSource.Instagram || source == CommunicationSource.X ||
+            source == CommunicationSource.FacebookMessenger
+        ) {
+            if (looksLikeNonMessageActivity(summary)) return false
+            return classifyCommunication(summaryAsPayload(summary)) == CommunicationKind.ConversationMessage
+        }
+        if (source == CommunicationSource.LinkedIn) return isLinkedInMessageSummary(summary)
+        return true
     }
+
+    // NULL category: re-classify from stored text.
+    if (summary.category == null) {
+        return classifyCommunication(summaryAsPayload(summary)) == CommunicationKind.ConversationMessage
+    }
+
+    return false
 }
 
-fun isLinkedInActivitySummary(summary: ConversationObservationSummary): Boolean {
-    if (summary.packageId != "com.linkedin.android") return false
-    if (summary.coverage != ConversationCoverage.NotificationOnly) return false
-    return !isLinkedInMessageSummary(summary)
-}
+fun isLinkedInActivitySummary(summary: ConversationObservationSummary): Boolean =
+    summary.category == NotificationCategory.SocialUpdate && summary.packageId == "com.linkedin.android"
 
 fun isLinkedInMessageSummary(summary: ConversationObservationSummary): Boolean {
     if (summary.category == NotificationCategory.DirectMessage ||
@@ -196,11 +210,11 @@ private fun looksLikeNonMessageActivity(summary: ConversationObservationSummary)
     return false
 }
 
-private fun classifyLinkedInKind(payload: NotificationRawPayload, messagingEvidence: Boolean): CommunicationKind {
-    if (messagingEvidence || isLinkedInMessageEvidence(payload)) return CommunicationKind.ConversationMessage
-    if (classifyLinkedInActivity(payload) != null) return CommunicationKind.LinkedInActivity
-    return CommunicationKind.NotCommunication
-}
+    private fun classifyLinkedInKind(payload: NotificationRawPayload, messagingEvidence: Boolean): CommunicationKind {
+        if (messagingEvidence || isLinkedInMessageEvidence(payload)) return CommunicationKind.ConversationMessage
+        if (classifyLinkedInActivity(payload) != null) return CommunicationKind.LinkedInActivity
+        return CommunicationKind.NotCommunication
+    }
 
 private fun isLinkedInMessageEvidence(payload: NotificationRawPayload): Boolean {
     val androidCat = payload.category?.lowercase()
@@ -288,6 +302,11 @@ private fun looksLikeSocialActivity(title: String?, text: String, subText: Strin
             "people you may know",
             "suggested for you",
             "might know",
+            "you might like",
+            "you may like",
+            "people you might like",
+            "suggested friend",
+            "friend suggestion",
             "connection suggestion",
             "recommendation",
         ),
