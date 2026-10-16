@@ -220,6 +220,8 @@ enum class ProviderErrorKind {
     NotFound,
     /** The provider definitively rejected the request (validation, policy, window, recipient). */
     Rejected,
+    /** The provider returned a successful status with an invalid or missing required body. */
+    Protocol,
 }
 
 class ConnectorHttpException(

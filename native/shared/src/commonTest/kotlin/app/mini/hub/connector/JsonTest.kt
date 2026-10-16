@@ -61,4 +61,20 @@ class JsonTest {
         assertEquals(1_700_000_000_000L, Rfc3339.parseMillis("2023-11-15T03:43:20+05:30"))
         assertNull(Rfc3339.parseMillis("not-a-date"))
     }
+
+    @Test
+    fun rejectsMalformedNumbersControlsAndDeepInput() {
+        listOf("01", "1e", "--1", "{\"x\":\"bad\nline\"}").forEach {
+            assertNull(JsonValue.parseOrNull(it), "malformed JSON must not be accepted: $it")
+        }
+
+        val deeplyNested = (1..80).fold("0") { value, _ -> "[$value]" }
+        assertNull(JsonValue.parseOrNull(deeplyNested), "deep JSON must fail closed")
+    }
+
+    @Test
+    fun preservesValidSurrogatePairEscapes() {
+        val emoji = JsonValue.parse("""{"emoji":"\uD83D\uDE00"}""").str("emoji")
+        assertEquals("\uD83D\uDE00", emoji)
+    }
 }

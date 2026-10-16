@@ -36,6 +36,10 @@ sealed class JsonValue {
     }
 }
 
+private const val MAX_JSON_BYTES = 2 * 1024 * 1024
+private const val MAX_JSON_DEPTH = 64
+private const val MAX_CONTAINER_ITEMS = 100_000
+
 /** Minimal JSON writer for request bodies. Only the shapes MINI sends are supported. */
 object JsonWriter {
     fun write(value: Any?): String = buildString { writeJson(this, value) }
@@ -83,18 +87,20 @@ private class JsonReader(private val s: String) {
     private var i = 0
 
     fun readDocument(): JsonValue {
-        val v = read()
+        require(s.encodeToByteArray().size <= MAX_JSON_BYTES) { "JSON input exceeds size limit" }
+        val v = read(0)
         ws()
         require(i == s.length) { "Trailing JSON content at $i" }
         return v
     }
 
-    private fun read(): JsonValue {
+    private fun read(depth: Int): JsonValue {
+        require(depth <= MAX_JSON_DEPTH) { "JSON nesting exceeds depth limit" }
         ws()
         require(i < s.length) { "Unexpected end of JSON" }
         return when (val c = s[i]) {
-            '{' -> obj()
-            '[' -> arr()
+            '{' -> obj(depth + 1)
+            '[' -> arr(depth + 1)
             '"' -> JsonValue.Str(str())
             't' -> lit("true", JsonValue.Bool(true))
             'f' -> lit("false", JsonValue.Bool(false))
@@ -103,26 +109,28 @@ private class JsonReader(private val s: String) {
         }
     }
 
-    private fun obj(): JsonValue {
+    private fun obj(depth: Int): JsonValue {
         i++
         val fields = linkedMapOf<String, JsonValue>()
         ws()
         if (peek() == '}') { i++; return JsonValue.Obj(fields) }
         while (true) {
+            require(fields.size < MAX_CONTAINER_ITEMS) { "JSON object has too many fields" }
             ws(); require(peek() == '"') { "Expected key at $i" }
             val k = str(); ws(); require(peek() == ':') { "Expected ':' at $i" }; i++
-            fields[k] = read(); ws()
+            fields[k] = read(depth); ws()
             when (peek()) { ',' -> i++; '}' -> { i++; return JsonValue.Obj(fields) }; else -> throw IllegalArgumentException("Expected ',' or '}' at $i") }
         }
     }
 
-    private fun arr(): JsonValue {
+    private fun arr(depth: Int): JsonValue {
         i++
         val items = mutableListOf<JsonValue>()
         ws()
         if (peek() == ']') { i++; return JsonValue.Arr(items) }
         while (true) {
-            items += read(); ws()
+            require(items.size < MAX_CONTAINER_ITEMS) { "JSON array has too many items" }
+            items += read(depth); ws()
             when (peek()) { ',' -> i++; ']' -> { i++; return JsonValue.Arr(items) }; else -> throw IllegalArgumentException("Expected ',' or ']' at $i") }
         }
     }
@@ -148,14 +156,35 @@ private class JsonReader(private val s: String) {
                         else -> throw IllegalArgumentException("Bad escape '\\$e'")
                     }
                 }
-                else -> out.append(c)
+                else -> {
+                    require(c.code >= 0x20) { "Unescaped control character in JSON string" }
+                    out.append(c)
+                }
             }
         }
     }
 
     private fun num(): JsonValue {
         val start = i
-        while (i < s.length && (s[i].isDigit() || s[i] in "+-.eE")) i++
+        if (peek() == '-') i++
+        require(i < s.length) { "Incomplete JSON number" }
+        if (s[i] == '0') {
+            i++
+        } else {
+            require(s[i] in '1'..'9') { "Invalid JSON number" }
+            while (i < s.length && s[i].isDigit()) i++
+        }
+        if (peek() == '.') {
+            i++
+            require(i < s.length && s[i].isDigit()) { "Invalid JSON fraction" }
+            while (i < s.length && s[i].isDigit()) i++
+        }
+        if (peek() == 'e' || peek() == 'E') {
+            i++
+            if (peek() == '+' || peek() == '-') i++
+            require(i < s.length && s[i].isDigit()) { "Invalid JSON exponent" }
+            while (i < s.length && s[i].isDigit()) i++
+        }
         return JsonValue.Num(s.substring(start, i))
     }
 

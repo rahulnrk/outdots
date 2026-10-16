@@ -35,8 +35,20 @@ class ProviderApiClient(
             // Network failure: for a write the provider may or may not have acted.
             throw ConnectorHttpException(0, "$providerName unreachable (${e::class.simpleName})", null, ProviderErrorKind.Transient)
         }
-        val json = if (response.body.isBlank()) null else JsonValue.parseOrNull(response.body)
-        if (response.statusCode in 200..299) return json ?: JsonValue.Obj(emptyMap())
+        val successful = response.statusCode in 200..299
+        val emptyBodyAllowed = response.statusCode == 202 || response.statusCode == 204
+        val body = response.body.trim()
+        val json = if (body.isBlank()) null else JsonValue.parseOrNull(body)
+        if (successful) {
+            if (json != null) return json
+            if (body.isBlank() && emptyBodyAllowed) return JsonValue.Obj(emptyMap())
+            throw ConnectorHttpException(
+                statusCode = response.statusCode,
+                message = "$providerName ${request.redacted()} returned an invalid success body",
+                reason = "invalid_success_body",
+                kind = ProviderErrorKind.Protocol,
+            )
+        }
         val reason = reasonOf(json)
         throw ConnectorHttpException(
             statusCode = response.statusCode,
