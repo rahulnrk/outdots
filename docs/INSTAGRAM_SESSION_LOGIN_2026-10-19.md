@@ -12,7 +12,8 @@ The accepted prior milestone remains Android runtime compatibility only. WhatsAp
 - `mautrix/linkedin` tag `v0.2609.0`, commit `788444401499e504b81d50480ddb686cdb976281`.
 - The inspected `mautrix/meta` HEAD was `328376d7f551125ddc9cf53a9e3e65563b653db4`.
 - The inspected `mautrix/linkedin` HEAD was `1eec30ab980d19a7d0303c16e5701d787d564fcc`.
-- Both repositories carry AGPL-3.0 `LICENSE`, SHA-256 `E0EEDBA6...9F2E`, and `LICENSE.exceptions` limited to Beeper and Element. MINI is not named in the exceptions.
+- Both repositories carry AGPL-3.0 `LICENSE`, SHA-256 `e0eedba615d5cd1b986afb6c5b3a4b1ae33713e7e9dc74d19daec5e3221f9d2e`. `mautrix/meta/LICENSE.exceptions` SHA-256 is `e09a7610a4053bb779b6d524462bdc57e1c3bc3675c63af235c0f574008345f7`; `mautrix/linkedin/LICENSE.exceptions` SHA-256 is `3b40d512518a715fb47599474ff299e294e694b4132985265bc9e2dc0ebccb0a`.
+- Both exception files grant embedding/distribution exceptions only to Beeper and Element, subject to keeping modifications publicly available under AGPL-3. MINI is not named in either exception.
 
 The selected package is `go.mau.fi/mautrix-meta/pkg/instameow`. It is preferable to `pkg/messagix` for this phone-local slice because `instameow` has no `whatsmeow` import and exposes a native Instagram client. Messenger's `pkg/messagix` imports `whatsmeow` for Armadillo E2EE and would add a second WhatsApp-device-store compatibility problem.
 
