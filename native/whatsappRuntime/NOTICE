@@ -1,10 +1,38 @@
-This directory packages a phone-local WhatsApp companion runtime.
+This directory packages MINI's single phone-local gomobile runtime
+(one libgojni.so). Two gomobile AARs cannot coexist in one app.
 
-It depends on whatsmeow (https://github.com/tulir/whatsmeow), which is
-Mozilla Public License 2.0. Source of whatsmeow and modifications to it
-must remain under MPL-2.0. MINI application code outside this directory
-is separately licensed.
+1. waruntime: WhatsApp companion runtime.
+   Depends on whatsmeow (https://github.com/tulir/whatsmeow),
+   Mozilla Public License 2.0. Source of whatsmeow and modifications to it
+   must remain under MPL-2.0.
+   Pinned revision: c386243a72bacad080ba2938b37e1e4e0f1ca3b2
+   Module version: v0.0.0-20261007111105-c386243a72ba (held via go.mod replace;
+   mautrix-meta requests f16f9ca30d6a but instameow does not import whatsmeow)
+   License text: https://github.com/tulir/whatsmeow/blob/main/LICENSE
 
-Pinned revision: c386243a72bacad080ba2938b37e1e4e0f1ca3b2
-Module version: v0.0.0-20261007111105-c386243a72ba
-License text: https://github.com/tulir/whatsmeow/blob/main/LICENSE
+2. igruntime: Instagram DM protocol facade (debug feasibility only).
+   Depends on mautrix-meta (https://github.com/mautrix/meta), package
+   go.mau.fi/mautrix-meta/pkg/instameow and its messagix subpackages.
+   License: GNU Affero General Public License v3.0 or later.
+   LICENSE SHA-256: E0EEDBA615D5CD1B986AFB6C5B3A4B1AE33713E7E9DC74D19DAEC5E3221F9D2E
+   Pinned: tag v0.2610.0 = 3c16226686c71af64df294df0803791685064e0b
+   LICENSE.exceptions grants embedding rights only to Beeper and Element.
+   Those exceptions do not apply to MINI.
+   Also links github.com/beeper/req/v3 v3.0.0-20260925135712-b49593750e56
+   (replace for github.com/imroc/req/v3, MIT) and maunium.net/go/mautrix
+   v0.32.0 (MPL-2.0).
+
+AGPL distribution requirements (must be satisfied before any build that
+contains igruntime leaves the developer's machine, including testers):
+- The combined libgojni.so is a work based on mautrix-meta. Distributing it
+  requires offering the Corresponding Source of the whole linked runtime
+  (this module, go.mod/go.sum, build-android.ps1, and any modifications to
+  upstream) under AGPL-3.0-or-later.
+- AGPL s13: users interacting with it over a network must be offered source.
+  MINI has no server, but the offer must still accompany the app.
+- The Android app that loads the runtime is likely a combined work. Options
+  recorded in docs/CONNECTOR_ROADMAP.md: (a) license MINI under AGPL,
+  (b) obtain a commercial licence or exception from the mautrix-meta authors,
+  (c) write an independent client. No option has been chosen.
+- Until decided: debug builds only, not distributed. Release must not bind
+  ./igruntime.

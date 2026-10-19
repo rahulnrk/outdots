@@ -28,3 +28,19 @@ Output:
 - `native/whatsappRuntime/build/PACKAGING.md` (size + ELF LOAD headers)
 
 The debug Android app links the AAR when that file exists. Release still does not offer WhatsApp.
+
+## Coordinated runtime (one libgojni.so)
+
+The AAR binds `./waruntime` and `./igruntime` together. `igruntime` links the real
+`go.mau.fi/mautrix-meta/pkg/instameow` client (`v0.2610.0`, AGPL-3.0) and exposes no
+login, session or network surface. Instagram on-device stays unavailable. WhatsApp
+keeps whatsmeow `c386243` via a `go.mod` replace.
+
+Check WhatsApp's generated API is unchanged after any rebuild:
+
+```powershell
+powershell -File native/whatsappRuntime/dump-api.ps1 -Jar native/whatsappRuntime/build/aar-extract/classes.jar -Out api.txt
+```
+
+See `NOTICE` (AGPL distribution requirements) and
+`docs/PHONE_LOCAL_META_FEASIBILITY_2026-10-19.md`.

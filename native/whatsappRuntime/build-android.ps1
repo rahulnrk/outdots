@@ -1,4 +1,8 @@
 #Requires -Version 5.1
+# Builds the single coordinated gomobile runtime (one libgojni.so).
+# Packages: waruntime (WhatsApp, whatsmeow MPL-2.0) and igruntime
+# (Instagram, mautrix-meta AGPL-3.0, linked but login unavailable).
+param([string]$OutDir = "")
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = Resolve-Path (Join-Path $root "..\..")
@@ -7,7 +11,7 @@ $goBin = Join-Path $goRoot "bin\go.exe"
 $gopath = Join-Path $repo "tmp\gopath"
 $ndk = "C:\Users\nande\AppData\Local\Android\Sdk\ndk\26.1.10909125"
 $androidHome = "C:\Users\nande\AppData\Local\Android\Sdk"
-$outDir = Join-Path $root "build"
+$outDir = if ($OutDir) { $OutDir } else { Join-Path $root "build" }
 $aar = Join-Path $outDir "whatsapp.aar"
 $report = Join-Path $outDir "PACKAGING.md"
 
@@ -36,7 +40,8 @@ try {
         -javapkg app.mini.hub.wa `
         -ldflags "-extldflags=-Wl,-z,max-page-size=16384" `
         -o $aar `
-        ./waruntime
+        ./waruntime `
+        ./igruntime
 } finally {
     Pop-Location
 }
@@ -45,7 +50,9 @@ $lines = @()
 $lines += "# WhatsApp runtime packaging"
 $lines += ""
 $lines += "- Date: $(Get-Date -Format o)"
-$lines += "- whatsmeow: c386243a72bacad080ba2938b37e1e4e0f1ca3b2"
+$lines += "- whatsmeow: c386243a72bacad080ba2938b37e1e4e0f1ca3b2 (go.mod replace)"
+$lines += "- mautrix-meta: v0.2610.0 = 3c16226686c71af64df294df0803791685064e0b (AGPL-3.0, instameow only)"
+$lines += "- packages: ./waruntime ./igruntime"
 $lines += "- Go: $(& $goBin version)"
 $lines += "- NDK: $ndk"
 if (Test-Path $aar) {
