@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/rs/zerolog"
+	zlog "github.com/rs/zerolog/log"
 	"go.mau.fi/util/exhttp"
 
 	"go.mau.fi/mautrix-meta/pkg/instameow"
@@ -43,6 +44,21 @@ const (
 type Runtime struct {
 	mu     sync.Mutex
 	client *instameow.Client
+}
+
+// Upstream messagix/lightspeed and messagix/table log through the zerolog
+// global logger (imported as badGlobalLog), bypassing the per-client logger.
+// Some of those calls attach decoded payloads (e.g. "block_data"). Silence the
+// global logger and disable all levels so nothing content-bearing reaches
+// stderr or any other sink.
+func init() {
+	zlog.Logger = zerolog.Nop()
+	zerolog.SetGlobalLevel(zerolog.Disabled)
+}
+
+// GlobalLoggingDisabled reports whether the content-free logging guard holds.
+func GlobalLoggingDisabled() bool {
+	return zerolog.GlobalLevel() == zerolog.Disabled && zlog.Logger.GetLevel() == zerolog.Disabled
 }
 
 // NewRuntime constructs the real protocol client with empty Instagram cookies.

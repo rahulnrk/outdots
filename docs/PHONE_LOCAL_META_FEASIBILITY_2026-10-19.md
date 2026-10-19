@@ -48,7 +48,10 @@ Script: `probe.ps1`. Pins: `go.mau.fi/mautrix-meta v0.2610.0`, `replace github.c
 |---|---|---|
 | 1 | `GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -buildmode=archive ./igfacade` | exit 0 |
 | 2 | `CGO_ENABLED=1 CC=aarch64-linux-android26-clang go build -buildmode=c-shared -ldflags=-extldflags=-Wl,-z,max-page-size=16384 ./cmdlib` | exit 0, 21 825 656 B, AArch64, LOAD align 0x4000 x4 |
-| 3 | `gomobile bind -target android/arm64 -androidapi 26 -javapkg app.mini.hub.probe ./igfacade` | first run: `missing golang.org/x/mobile dependency` (needs `go get -tool .../gobind`). After adding tool directives: exit 0, 10 279 855 B AAR, `libgojni.so` 30 170 560 B |
+| 3 | `gomobile bind -target android/arm64 -androidapi 26 -javapkg app.mini.hub.probe ./igfacade` | first run: `missing golang.org/x/mobile dependency` (needs `go get -tool .../gobind`). After adding tool directives: exit 0, 10 279 854 B AAR, `libgojni.so` 30 170 560 B |
+
+Clean rerun of all three steps at 21:50 IST after fixing a probe-script bug that left the
+step-3 log from the failed first run in `RESULT.md`: 0 / 0 / 0.
 
 Generated Java (javap): `Probe { native boolean hasNativeSession(); native boolean isAuthenticated(); native String platform(); }`.
 
@@ -56,31 +59,57 @@ Generated Java (javap): `Probe { native boolean hasNativeSession(); native boole
 
 - New package `native/whatsappRuntime/igruntime` (constructs a real `instameow.Client`
   with empty cookies, `zerolog.Nop`, `DisableTyping`. Exposes `Platform`, `State`
-  = `unavailable`, `LoginAvailable` = false, `IsAuthenticated`).
+  = `unavailable`, `LoginAvailable` = false, `IsAuthenticated`, `GlobalLoggingDisabled`).
+- Content-free logging gap found and closed: upstream `messagix/lightspeed` and
+  `messagix/table` log via the zerolog global logger (`badGlobalLog`), bypassing the
+  per-client logger, and `lightspeed/decode.go:47` attaches `block_data`. `igruntime`
+  `init()` sets `log.Logger = Nop` and `SetGlobalLevel(Disabled)`. A test writes a
+  `block_data` warning to a real buffer and asserts 0 bytes. waruntime already uses `waLog.Noop`.
 - `go.mod`: adds `go.mau.fi/mautrix-meta v0.2610.0`, `replace` for beeper/req, and
   `replace go.mau.fi/whatsmeow => v0.0.0-20261007111105-c386243a72ba` (keeps WhatsApp's pin).
   `go list -m go.mau.fi/whatsmeow` confirms `=> c386243a72ba`.
 - `go vet ./...` and `go test ./...`: `igruntime ok`, `waruntime ok`.
 - `build-android.ps1` binds `./waruntime ./igruntime` into the one AAR.
-  Combined AAR 15 781 797 B, `libgojni.so` 48 576 832 B (was 35 995 912 B, +12.6 MB), LOAD align 0x4000.
+- Combined AAR (with logging guard) `libgojni.so` 48 582 152 B (was 35 995 912 B, +12.6 MB), LOAD align 0x4000.
 - WhatsApp generated API: `javap -public` of `waruntime.Runtime` + `Waruntime` before vs after,
-  `fc /b` no differences, SHA-256 `91a00f0c...b777d` both.
-- No Kotlin references `igruntime`. No connect UI added.
+  `fc /b` no differences, SHA-256 `91a00f0c...b777d` both (rechecked after the guard rebuild).
+- Search of `native/**/*.kt[s]` for `igruntime|instameow|mautrix-meta|app.mini.hub.wa.ig`: 0 matches.
+  No Kotlin loads the Instagram binding, so no connect UI is reachable.
+- Debug APK `assembleDebug` exit 0 (131 816 085 B). Its `lib/arm64-v8a/libgojni.so` contains
+  `igruntime.GlobalLoggingDisabled` and whatsmeow symbols. APK not installed.
+- Device evidence (Pixel 7 Pro, Android 16, arm64-v8a): `go test -c` for android/arm64 with
+  NDK clang, pushed to `/data/local/tmp`, run via `adb shell`, deleted after. Both igruntime
+  tests PASS, exit 0. The MINI app and its WhatsApp session were not touched. This proves
+  the protocol package initialises on the device. It is not provider or live qualification.
 
 ## Remaining authentication/session work (not started)
 
 1. Login: upstream flows are password-based (`android` native, `instagram-password` web,
-   CAA, 2FA, checkpoints, CAPTCHA via `bloks`) and return `bridgev2.LoginStep` structs.
-   A gomobile facade must translate steps to plain strings/JSON. Upstream marks some
-   checkpoints/CAPTCHA unsupported (`FI.MAU.META_WEB_CHECKPOINT_CAPTCHA`).
-   No cookie extraction is offered. If a WebView route is chosen, it needs
-   `CookieManager` reads of `sessionid`, `ds_user_id`, `csrftoken`, etc. inside the app's
-   own WebView, which is a separate decision (password entry into MINI vs WebView cookies).
+   CAA, 2FA) and return `bridgev2.LoginStep` structs. A gomobile facade must translate
+   steps to plain JSON. No Selenium/headless browser is used (`bloks/selenium.go` is a
+   pure-Go Bloks interpreter, 0 hits for webdriver/chromedp/exec.Command).
+   **Concrete Android dependency: an in-app `android.webkit.WebView`** for two upstream
+   step types, both `LoginStepTypeCookies`:
+   - Web challenge (`igconnector/login_native.go:377`): load `CookiesParams.URL`
+     (instagram.com challenge), wait until URL matches `instagramWebLoggedInURLPattern`
+     (`^https://www.instagram.com/(direct/...)?`), then read cookies `sessionid`,
+     `csrftoken`, `ds_user_id` (required) and `rur`, `shbid`, `shbts`, `mid`, `ig_did`
+     (optional) from `CookieManager` for `instagram.com`, and submit them.
+   - reCAPTCHA (`instameow/login_web_captcha.go:109`): load
+     `https://www.instagram.com/accounts/login/` with upstream `UserAgent`, inject
+     `ExtractJS` (`login_web_captcha.js`), which embeds the `fbsbx.com` iframe, checks
+     `event.origin`, and resolves `{captcha_token}`. Needs `evaluateJavascript` with
+     Promise results. Upstream says no password or session cookie enters this WebView.
+   Safe on Android only if the WebView is app-private, JS bridges are limited to this
+   step, cookies are cleared from `CookieManager` after extraction and moved into the
+   encrypted store, and URLs are never logged (they carry verification tokens).
+   The user has not chosen between in-app password entry and WebView.
 2. Session persistence: cookies + `InstagramNativeSession` + `InstagramLoginDevice`
    (contains an ECDSA private key) + `DumpState` blob + SeqID. Must use the existing
    SQLCipher/Keystore snapshot path per account, never plaintext files.
-3. Logging: upstream logs through zerolog. Keep `Nop` or a content-free sink. Never
-   enable `LogRedactedLoginResponses`.
+3. Logging: per-client logger is `Nop` and the global zerolog logger is disabled in
+   `igruntime`. Never enable `LogRedactedLoginResponses`. Recheck on every upstream bump
+   for new `badGlobalLog`, `fmt.Print` or `os.Stderr` sites.
 4. Events: `slidetypes.ClientEvent` to the observation pipeline, exact review for sends,
    qualification gates. No live qualification exists.
 5. AGPL decision before any distribution (see `native/whatsappRuntime/NOTICE`).
