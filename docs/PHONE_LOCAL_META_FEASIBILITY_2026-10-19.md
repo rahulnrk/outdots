@@ -1,5 +1,12 @@
 # Phone-local Meta/LinkedIn protocol feasibility (19 Oct 2026)
 
+> **Milestone accepted (19 Oct 2026): Android runtime compatibility only.**
+> Covered: real `instameow` compiles for android/arm64, binds via gomobile, ships in the one
+> coordinated `libgojni.so`, and initialises in an app process on a Pixel 7 Pro, with
+> WhatsApp's generated API unchanged. Not covered and not claimed: Instagram login, session
+> persistence, sync, send, account isolation, qualification, any provider/live evidence,
+> Messenger, LinkedIn, or distribution (AGPL undecided). Instagram on-device stays unavailable.
+
 Scope: real upstream protocol packages, Android arm64 compile, gomobile bind,
 and integration into the single coordinated runtime. No login, no network, no UI.
 Official Business/Creator routes (`InstagramApiConnector`, `InstagramAccountConnector`)
