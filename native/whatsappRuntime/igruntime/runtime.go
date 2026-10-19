@@ -16,7 +16,9 @@
 package igruntime
 
 import (
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 	zlog "github.com/rs/zerolog/log"
@@ -42,8 +44,11 @@ const (
 
 // Runtime holds one unauthenticated instameow client. One Runtime per account.
 type Runtime struct {
-	mu     sync.Mutex
-	client *instameow.Client
+	mu        sync.Mutex
+	client    *instameow.Client
+	accountID string
+	seqID     int64
+	seqIDTS   time.Time
 }
 
 // Upstream messagix/lightspeed and messagix/table log through the zerolog
@@ -64,14 +69,24 @@ func GlobalLoggingDisabled() bool {
 // NewRuntime constructs the real protocol client with empty Instagram cookies.
 // It performs no network I/O.
 func NewRuntime() *Runtime {
+	return &Runtime{client: newClient(nil, nil)}
+}
+
+func newClient(session *types.InstagramNativeSession, cookieValues map[string]string) *instameow.Client {
 	c := &cookies.Cookies{Platform: types.Instagram}
-	c.UpdateValues(nil)
-	return &Runtime{client: instameow.NewClient(instameow.ClientParams{
+	values := make(map[cookies.MetaCookieName]string, len(cookieValues))
+	for name, value := range cookieValues {
+		values[cookies.MetaCookieName(name)] = value
+	}
+	c.UpdateValues(values)
+	client := instameow.NewClient(instameow.ClientParams{
 		Cookies:       c,
 		Log:           zerolog.Nop(),
 		Settings:      exhttp.SensibleClientSettings,
 		DisableTyping: true,
-	})}
+		NativeSession: session,
+	})
+	return client
 }
 
 // Platform reports the upstream platform identifier ("instagram").
@@ -93,4 +108,103 @@ func (r *Runtime) IsAuthenticated() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.client.IsAuthenticated() || r.client.GetInstagramNativeSession() != nil
+}
+
+// ExportSessionEnvelope snapshots only authenticated post-login state. The
+// caller must hand the returned opaque bytes directly to the Android
+// SQLCipher/Keystore store and must not expose them to ordinary UI state.
+func (r *Runtime) ExportSessionEnvelope(accountID string) ([]byte, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.client == nil {
+		return nil, fmt.Errorf("Instagram runtime is not initialized")
+	}
+	nativeSession := r.client.GetInstagramNativeSession()
+	if nativeSession == nil {
+		return nil, fmt.Errorf("Instagram runtime has no authenticated native session")
+	}
+	if accountID == "" {
+		return nil, fmt.Errorf("Instagram account ID is empty")
+	}
+	if r.accountID != "" && r.accountID != accountID {
+		return nil, fmt.Errorf("Instagram runtime is bound to account %q", r.accountID)
+	}
+	cookieValues := make(map[string]string)
+	for name, value := range r.client.GetCookies().GetAll() {
+		if _, ok := allowedInstagramSessionCookies[string(name)]; ok && value != "" {
+			cookieValues[string(name)] = value
+		}
+	}
+	cachedState, err := r.client.DumpState()
+	if err != nil {
+		return nil, fmt.Errorf("dump Instagram cached state: %w", err)
+	}
+	envelope := &InstagramSessionEnvelope{
+		SchemaVersion: SessionEnvelopeSchemaVersion,
+		AccountID:     accountID,
+		Cookies:       cookieValues,
+		NativeSession: nativeSession,
+		CachedState:   cachedState,
+		SeqID:         r.seqID,
+		SeqIDTS:       r.seqIDTS,
+	}
+	return EncodeSessionEnvelope(envelope)
+}
+
+// RestoreSessionEnvelope replaces the in-memory client with a session restored
+// from the Android encrypted store. It performs no network I/O.
+func (r *Runtime) RestoreSessionEnvelope(accountID string, encoded []byte) error {
+	envelope, err := DecodeSessionEnvelope(encoded)
+	if err != nil {
+		return err
+	}
+	if envelope.AccountID != accountID {
+		return fmt.Errorf("Instagram session account mismatch")
+	}
+	client := newClient(envelope.NativeSession, envelope.Cookies)
+	if len(envelope.CachedState) > 0 {
+		if err := loadCachedState(client, envelope.CachedState); err != nil {
+			return fmt.Errorf("load Instagram cached state: %w", err)
+		}
+	}
+	client.SetSeqID(envelope.SeqID, envelope.SeqIDTS)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.client = client
+	r.accountID = accountID
+	r.seqID = envelope.SeqID
+	r.seqIDTS = envelope.SeqIDTS
+	return nil
+}
+
+func loadCachedState(client *instameow.Client, state []byte) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("cached state rejected: %v", recovered)
+		}
+	}()
+	return client.LoadState(state)
+}
+
+// SetSequence records the last protocol sequence that may be resumed. The
+// sequence is metadata only and is not a login secret.
+func (r *Runtime) SetSequence(seqID int64, timestampUnix int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seqID = seqID
+	r.seqIDTS = time.Unix(timestampUnix, 0).UTC()
+	if r.client != nil {
+		r.client.SetSeqID(r.seqID, r.seqIDTS)
+	}
+}
+
+// Logout removes the in-memory Instagram session. The Android store must call
+// its account-scoped clear method separately so another account is untouched.
+func (r *Runtime) Logout() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.client = newClient(nil, nil)
+	r.accountID = ""
+	r.seqID = 0
+	r.seqIDTS = time.Time{}
 }
