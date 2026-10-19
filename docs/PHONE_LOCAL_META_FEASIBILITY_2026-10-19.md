@@ -81,6 +81,24 @@ Generated Java (javap): `Probe { native boolean hasNativeSession(); native boole
   NDK clang, pushed to `/data/local/tmp`, run via `adb shell`, deleted after. Both igruntime
   tests PASS, exit 0. The MINI app and its WhatsApp session were not touched. This proves
   the protocol package initialises on the device. It is not provider or live qualification.
+- In-app evidence (same Pixel): instrumented test
+  `androidTest/.../connector/CoordinatedRuntimeDeviceTest.kt` run inside a real app
+  process from the packaged APK. Built with a scratch Gradle init script
+  (`applicationIdSuffix ".rtprobe"`, arm64-only because the device had 657 MB free), so
+  it installed as `app.mini.hub.rtprobe` next to, not over, `app.mini.hub`.
+  `am instrument -e class ...CoordinatedRuntimeDeviceTest`:
+  - Combined runtime: `OK (3 tests)`. Covers `GomobileWhatsAppClient.load()` (the
+    production WhatsApp load path) returning non-null, Instagram `platform=instagram`,
+    `state=unavailable`, `loginAvailable=false`, `isAuthenticated=false`, global logging
+    disabled, pin `3c16226`, exactly one `libgojni.so`, and WhatsApp loading after Instagram
+    in one process.
+  - Negative control, pre-integration runtime: `Tests run: 3, Failures: 2`, both with
+    `ClassNotFoundException: app.mini.hub.wa.igruntime.Igruntime`. The WhatsApp test still
+    passes. So the test can tell the two runtimes apart.
+  - Afterwards both rtprobe packages were uninstalled. `dumpsys package app.mini.hub`
+    (`versionCode=1`, `lastUpdateTime=2026-10-17 17:02:09`) is identical before and after.
+  The real `app.mini.hub` debug build with this runtime has still not been installed,
+  so WhatsApp pairing/sync in the installed app is not re-verified.
 
 ## Remaining authentication/session work (not started)
 
