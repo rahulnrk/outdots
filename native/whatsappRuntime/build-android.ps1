@@ -1,8 +1,9 @@
 #Requires -Version 5.1
 # Builds the single coordinated gomobile runtime (one libgojni.so).
 # Packages: waruntime (WhatsApp, whatsmeow MPL-2.0), igruntime
-# (Instagram, mautrix-meta AGPL-3.0), and liruntime (LinkedIn,
-# mautrix-linkedin AGPL-3.0). Login for LinkedIn stays unavailable.
+# (Instagram, mautrix-meta AGPL-3.0), liruntime (LinkedIn,
+# mautrix-linkedin AGPL-3.0), and msgruntime (Messenger, mautrix-meta
+# AGPL-3.0). LinkedIn login stays BLOCKED; Messenger Accounts stays unavailable.
 param([string]$OutDir = "")
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -43,7 +44,8 @@ try {
         -o $aar `
         ./waruntime `
         ./igruntime `
-        ./liruntime
+        ./liruntime `
+        ./msgruntime
 } finally {
     Pop-Location
 }
@@ -53,9 +55,9 @@ $lines += "# WhatsApp runtime packaging"
 $lines += ""
 $lines += "- Date: $(Get-Date -Format o)"
 $lines += "- whatsmeow: c386243a72bacad080ba2938b37e1e4e0f1ca3b2 (go.mod replace)"
-$lines += "- mautrix-meta: v0.2610.0 = 3c16226686c71af64df294df0803791685064e0b (AGPL-3.0, instameow only)"
+$lines += "- mautrix-meta: v0.2610.0 = 3c16226686c71af64df294df0803791685064e0b (AGPL-3.0, instameow + messagix)"
 $lines += "- mautrix-linkedin: v0.2609.0 = 788444401499e504b81d50480ddb686cdb976281 (AGPL-3.0, linkedingo only)"
-$lines += "- packages: ./waruntime ./igruntime ./liruntime"
+$lines += "- packages: ./waruntime ./igruntime ./liruntime ./msgruntime"
 $lines += "- Go: $(& $goBin version)"
 $lines += "- NDK: $ndk"
 if (Test-Path $aar) {

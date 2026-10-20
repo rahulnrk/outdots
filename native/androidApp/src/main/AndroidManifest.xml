@@ -67,12 +67,23 @@
         <!--
           Owner-operated LinkedIn cookie login for the rtprobe package. Dedicated
           process keeps the WebView profile isolated. Not Manage Accounts.
+          Status: BLOCKED by Cloudflare on embedded WebView; kept for tracking only.
         -->
         <activity
             android:name=".connector.LinkedInLoginActivity"
             android:exported="true"
             android:process=":lilogin"
             android:label="LinkedIn sign-in (probe)" />
+
+        <!--
+          Owner-operated Messenger cookie login for the rtprobe package. Dedicated
+          process keeps the WebView profile isolated. Not Manage Accounts. No sends.
+        -->
+        <activity
+            android:name=".connector.MessengerLoginActivity"
+            android:exported="false"
+            android:process=":mslogin"
+            android:label="Messenger sign-in (probe)" />
 
         <service
             android:name=".notification.MiniNotificationListenerService"

@@ -3,6 +3,11 @@
 > Isolated investigation only. Production `whatsappRuntime` still replaces
 > whatsmeow to `c386243a72ba`. No device sessions were opened or migrated.
 
+## Verdict: COMPATIBLE (shared runtime keeps production pin)
+
+Messenger messagix APIs and E2EE hooks work against the production whatsmeow
+replace. Do **not** bump WhatsApp solely to unblock Messenger.
+
 ## Pins compared
 
 | Role | Module version | Commit |
@@ -29,35 +34,38 @@ Changed paths between the two whatsmeow trees (**18 files**), including:
 
 - `client.go`, `send.go`, `group.go`, `connectionevents.go`, `errors.go`, `armadillomessage.go`, `appstate/keys.go`
 - Several `proto/wa*` generated files
-- `store/clientpayload.go` (**store package not fully identical**)
+- `store/clientpayload.go` (**only a WhatsApp web `waVersion` constant bump**)
 
 Unchanged for the compared pin pair (same SHA-256):
 
+- All `store/sqlstore/upgrades/*.sql` and `upgrades.go`
 - `store/store.go`
 - `store/sqlstore/container.go`
 - `store/sqlstore/store.go`
 
 Interpretation:
 
-- Core SQL store container/store entrypoints look stable between these two commits.
-- `store/clientpayload.go` **did** change, so a blind whatsmeow bump is still a
-  session/device-payload risk for existing WhatsApp phone-local snapshots.
-- Client API surface also changed (e.g. new `groupMetaCache.CanSend` in the newer pin).
+- SQL schema / migration chain is identical between these two commits.
+- Production pin already exposes `MessengerConfig`, `RefreshCAT`, `GetClientPayload`,
+  Armadillo decode, and `GenerateFacebookMessageID`.
+- `DecodeFBApplication` exists only on the newer pin and is used by the Matrix
+  bridge connector backfill path, **not** by phone-local messagix.
 
-## Recommendation (no production change)
+## Experiment results (no production change)
 
-1. Keep production replace on `c386243a72ba` until a dedicated WhatsApp
-   reconnect/regression plan exists.
-2. For Messenger, prefer an isolated facade that either:
-   - vendors/links messagix E2EE against the newer whatsmeow in a **separate**
-     gomobile package/process (hard: one `libgojni.so` constraint), or
-   - stages Messenger without Armadillo E2EE first if product allows, or
-   - plans an explicit dual-pin strategy with migration tests before lifting the
-     WhatsApp replace.
-3. Do not upgrade the shared runtime whatsmeow pin solely to unblock Messenger.
+1. `tmp/msgprobe` with `replace => c386243` + beeper/req replace:
+   - `TestSQLStoreUpgradeAndDeviceRoundTrip` PASS
+   - `TestMessagixMessengerClientAndE2EEHooks` PASS
+2. Shared runtime `msgruntime` offline cookie + encrypted device-store tests PASS
+   against the same production replace.
 
-## Not done
+## Recommendation (applied)
 
-- No production `go.mod` change
-- No AAR rebuild for Messenger
-- No device install / session open
+1. Keep production replace on `c386243a72ba`.
+2. Ship Messenger phone-local auth/E2EE scaffolding in the **same** Go runtime
+   (`msgruntime`) without lifting the WhatsApp pin.
+3. Owner-operated sign-in stays on rtprobe until live verification succeeds.
+
+## Follow-on
+
+See [MESSENGER_PHONE_LOCAL_FEASIBILITY_2026-10-20.md](MESSENGER_PHONE_LOCAL_FEASIBILITY_2026-10-20.md).
