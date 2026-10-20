@@ -347,10 +347,13 @@ class AndroidConnectorRegistry(
         val now = System.currentTimeMillis()
         when (result) {
             is InstagramReadIngestor.Result.Success -> {
-                val storedConversations = store.getConversationSummaries(account.id).size
+                val summaries = store.getConversationSummaries(account.id)
+                val summaryDiag = summaries.joinToString(";") { summary ->
+                    "pkg=${summary.packageId},cat=${summary.category},cov=${summary.coverage},msgs=${summary.observationCount},evidence=${summary.messagingEvidence},snippetBlank=${summary.latestSnippet.isBlank()}"
+                }
                 android.util.Log.i(
                     LOG_TAG,
-                    "instagram_phone_local_ingest persisted=${result.persistedCount} upstream_conversations=${result.view.conversations.size} stored_conversations=$storedConversations partial=${result.partial}",
+                    "instagram_phone_local_ingest persisted=${result.persistedCount} upstream_conversations=${result.view.conversations.size} stored_conversations=${summaries.size} partial=${result.partial} summaries=$summaryDiag",
                 )
                 accounts.upsert(
                     account.copy(
