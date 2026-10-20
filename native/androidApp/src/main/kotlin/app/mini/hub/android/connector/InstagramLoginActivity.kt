@@ -85,6 +85,16 @@ class InstagramLoginActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        model.onForeground()
+    }
+
+    override fun onStop() {
+        model.onBackground()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         model.shutdown()
         super.onDestroy()
@@ -105,7 +115,9 @@ class InstagramLoginViewModel : ViewModel() {
     val state: StateFlow<InstagramLoginUiState> = uiState.asStateFlow()
     val readState: StateFlow<InstagramReadUiState> = readUiState.asStateFlow()
     private var readIngestor: InstagramReadIngestor? = null
+    private var foregroundReceiver: InstagramForegroundReceiver? = null
     private var sessionContext: android.content.Context? = null
+    private var foreground = false
 
     fun bind(context: android.content.Context, slotKey: String) {
         if (session != null) return
@@ -120,6 +132,7 @@ class InstagramLoginViewModel : ViewModel() {
                 if (accountId != null) {
                     val ingestor = readIngestor ?: InstagramReadIngestor(context).also { readIngestor = it }
                     readUiState.value = InstagramReadUiState.Loaded(ingestor.loadPersisted(accountId))
+                    if (foreground) startForegroundReceive(accountId)
                 }
             }
         }
@@ -170,10 +183,36 @@ class InstagramLoginViewModel : ViewModel() {
     }
 
     fun shutdown() {
+        foregroundReceiver?.close()
+        foregroundReceiver = null
         webViewController?.cancel()
         webViewController = null
         session?.close()
         session = null
+    }
+
+    fun onForeground() {
+        foreground = true
+        val accountKey = uiState.value.verifiedAccountKey ?: return
+        val accountId = runCatching { AccountId.parse(accountKey) }.getOrNull() ?: return
+        startForegroundReceive(accountId)
+    }
+
+    fun onBackground() {
+        foreground = false
+        foregroundReceiver?.stop()
+    }
+
+    private fun startForegroundReceive(accountId: AccountId) {
+        val context = sessionContext ?: return
+        val ingestor = readIngestor ?: InstagramReadIngestor(context).also { readIngestor = it }
+        val receiver = foregroundReceiver ?: InstagramForegroundReceiver(ingestor) { result ->
+            when (result) {
+                is InstagramReadIngestor.Result.Success -> readUiState.value = InstagramReadUiState.Loaded(result.view)
+                is InstagramReadIngestor.Result.Failed -> readUiState.value = InstagramReadUiState.Failed(result.code)
+            }
+        }.also { foregroundReceiver = it }
+        receiver.start(accountId)
     }
 
     fun syncRecent() {

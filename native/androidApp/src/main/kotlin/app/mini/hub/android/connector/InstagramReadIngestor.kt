@@ -25,6 +25,7 @@ private const val INSTAGRAM_PACKAGE = "com.instagram.android"
 class InstagramReadIngestor(context: Context) {
     private val appContext = context.applicationContext
     private val store: ObservationStore = SqlCipherObservationStore(appContext, "mini-instagram-observations.db")
+    private val syncLock = Any()
 
     sealed interface Result {
         data class Success(
@@ -36,12 +37,14 @@ class InstagramReadIngestor(context: Context) {
     }
 
     fun sync(accountId: AccountId, maxThreads: Int = 20, maxMessages: Int = 20): Result {
-        if (accountId.provider != Provider.INSTAGRAM) return Result.Failed("account_provider_mismatch")
-        return when (val read = InstagramSessionRestore(appContext).readRecent(accountId, maxThreads, maxMessages)) {
-            is InstagramSessionRestore.Result.ReadJson -> ingest(accountId, read.json)
-            is InstagramSessionRestore.Result.NoSession -> Result.Failed("session_expired")
-            is InstagramSessionRestore.Result.Failed -> Result.Failed(read.reason)
-            is InstagramSessionRestore.Result.Verified -> Result.Failed("read_unavailable")
+        return synchronized(syncLock) {
+            if (accountId.provider != Provider.INSTAGRAM) return@synchronized Result.Failed("account_provider_mismatch")
+            when (val read = InstagramSessionRestore(appContext).readRecent(accountId, maxThreads, maxMessages)) {
+                is InstagramSessionRestore.Result.ReadJson -> ingest(accountId, read.json)
+                is InstagramSessionRestore.Result.NoSession -> Result.Failed("session_expired")
+                is InstagramSessionRestore.Result.Failed -> Result.Failed(read.reason)
+                is InstagramSessionRestore.Result.Verified -> Result.Failed("read_unavailable")
+            }
         }
     }
 

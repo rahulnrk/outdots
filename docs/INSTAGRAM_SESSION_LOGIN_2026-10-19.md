@@ -194,6 +194,28 @@ message, completed the repeated-sync uniqueness check, and recorded the safe
 arrival-latency bucket `over_60m` using manual refresh. After force-stop and
 reopen, the same read/deduplication test reported `OK (1 test)` again.
 
+### Foreground automatic receiving
+
+The next rtprobe package adds `InstagramForegroundReceiver`. While the
+authenticated probe Activity is visible, it performs an immediate bounded read
+and then polls at a 30-second success interval. A single-thread scheduler plus
+the ingestor lock prevents overlapping automatic and manual reads. Leaving the
+Activity stops scheduling and invalidates pending callbacks. Network and
+throttling failures back off to a five-minute maximum; session expiry stops the
+receiver until the owner restores authentication. This is foreground polling
+over the supported upstream `LoadIndex` behavior, not a new request protocol.
+
+Background receiving is not implemented or claimed. There is no background
+service, wake lock, push receiver, or realtime daemon in this package. The owner
+must keep the rtprobe screen visible for automatic receiving evidence.
+
+The foreground package compiled and the signature, mapping, isolation, and live
+read instrumentation checks reported `OK (4 tests)`. The installed rtprobe was
+updated with `adb install -r`, its existing session and observations were kept,
+and the screen was left open. A new owner-generated message still needs a
+known send timestamp and an observed automatic appearance to establish
+foreground arrival latency; no automatic-arrival claim is made yet.
+
 ## Tests and limitations
 
 Go `go test ./igruntime ./waruntime` passes. `igruntime` coverage includes:
