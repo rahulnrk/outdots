@@ -16,6 +16,7 @@
 package igruntime
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -36,6 +37,9 @@ const (
 	PinnedMautrixMetaVersion = "v0.2610.0"
 
 	StateUnavailable = "unavailable"
+	// StateAuthenticated is reported once an upstream-verified session is loaded
+	// in memory (after login or restore).
+	StateAuthenticated = "authenticated"
 
 	// UnavailableReason is shown verbatim by any caller that asks why the
 	// Instagram on-device route cannot be connected yet.
@@ -96,18 +100,59 @@ func (r *Runtime) Platform() string {
 	return r.client.GetPlatform().String()
 }
 
-// State is always StateUnavailable in this slice.
-func (r *Runtime) State() string { return StateUnavailable }
+// State reports authenticated once an upstream-verified native session is in
+// memory, otherwise unavailable. The in-memory session comes only from a real
+// login or an encrypted-store restore.
+func (r *Runtime) State() string {
+	if r.IsAuthenticated() {
+		return StateAuthenticated
+	}
+	return StateUnavailable
+}
 
-// LoginAvailable is false until a real Android login flow exists.
-func (r *Runtime) LoginAvailable() bool { return false }
+// LoginAvailable reports that the real owner-operated login flow exists. The
+// actual sign-in is driven through a LoginController on a dedicated process.
+func (r *Runtime) LoginAvailable() bool { return true }
 
-// IsAuthenticated reports the client's own view. Always false here because no
-// credential can be supplied through this facade.
+// NewLoginController starts a real upstream login attempt bound to accountID.
+func (r *Runtime) NewLoginController(accountID string) *LoginController {
+	return NewLoginController(accountID)
+}
+
+// IsAuthenticated reports whether a verified native session is loaded in memory.
 func (r *Runtime) IsAuthenticated() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.client.IsAuthenticated() || r.client.GetInstagramNativeSession() != nil
+	return r.client != nil && (r.client.IsAuthenticated() || r.client.GetInstagramNativeSession() != nil)
+}
+
+// VerifyAuthenticatedRead performs the harmless authenticated inbox read against
+// the restored session and returns the upstream-verified user ID. It binds the
+// in-memory client to that verified identity and fails if the restored session,
+// the inbox viewer, and the session cookie disagree. It performs network I/O.
+func (r *Runtime) VerifyAuthenticatedRead() (string, error) {
+	r.mu.Lock()
+	client := r.client
+	r.mu.Unlock()
+	if client == nil {
+		return "", fmt.Errorf("Instagram runtime is not initialized")
+	}
+	nativeSession := client.GetInstagramNativeSession()
+	if nativeSession == nil || nativeSession.UserID == "" {
+		return "", fmt.Errorf("Instagram runtime has no authenticated native session")
+	}
+	viewer, _, err := client.LoadIndex(context.Background())
+	if err != nil {
+		return "", fmt.Errorf("Instagram authenticated read failed: %w", err)
+	}
+	if viewer == nil || viewer.GetUserId() == "" {
+		return "", fmt.Errorf("Instagram authenticated read returned no viewer")
+	}
+	dsUserID := client.GetCookies().Get(cookies.IGCookieDSUserID)
+	if nativeSession.UserID != viewer.GetUserId() || nativeSession.UserID != dsUserID {
+		return "", fmt.Errorf("Instagram verified identity mismatch")
+	}
+	return viewer.GetUserId(), nil
 }
 
 // ExportSessionEnvelope snapshots only authenticated post-login state. The

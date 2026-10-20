@@ -12,26 +12,46 @@ import (
 const (
 	LoginStateCredentials   = "credentials"
 	LoginStateTwoFactor     = "2fa"
+	LoginStateSelect        = "select"
 	LoginStateWebChallenge  = "web_challenge"
 	LoginStateCaptcha       = "captcha"
+	LoginStateDisplayWait   = "display_wait"
 	LoginStateAuthenticated = "authenticated"
 	LoginStateCancelled     = "cancelled"
 	LoginStateFailed        = "failed"
 
+	// Pinned upstream step IDs (go.mau.fi/mautrix-meta/pkg/igconnector and
+	// pkg/instameow at v0.2610.0). They are carried through verbatim.
 	LoginStepCredentials  = "fi.mau.meta.instagram.credentials"
 	LoginStepWebTwoFactor = "fi.mau.meta.instagram.web_two_factor"
 	LoginStepWebChallenge = "fi.mau.meta.instagram.web_challenge"
+	LoginStepWebCaptcha   = "fi.mau.meta.instagram.web_captcha"
 
-	loginFailureTransportUnavailable = "login_transport_unavailable"
-	loginFailureInvalidStep          = "invalid_upstream_step"
-	loginFailureInvalidWebURL        = "invalid_webview_url"
-	loginWaitForInstagramURL         = `^https://www\.instagram\.com/(?:direct/(?:inbox/|t/[0-9]+/)?)?(?:\?.*)?$`
+	loginFailureInvalidStep   = "invalid_upstream_step"
+	loginFailureInvalidWebURL = "invalid_webview_url"
+
+	// loginWaitForInstagramURL mirrors upstream instagramWebLoggedInURLPattern.
+	loginWaitForInstagramURL = `^https://www\.instagram\.com/(?:direct/(?:inbox/|t/[0-9]+/)?)?(?:\?.*)?$`
 )
 
+// UpstreamStep is a sanitized projection of a pinned bridgev2.LoginStep. It
+// carries step metadata only. WebView material is kept separate from the
+// ordinary-UI snapshot so a URL, user-agent, token, cookie, or extraction
+// script never reaches saved state or logs.
+type UpstreamStep struct {
+	State              string
+	StepID             string
+	Instructions       string
+	FieldIDs           []string
+	WebViewURL         string
+	WebViewUserAgent   string
+	WebViewExtractJS   string
+	WebViewWaitPattern string
+}
+
 // LoginMachine is the narrow, gomobile-safe boundary around the pinned
-// mautrix-meta/igconnector login flow. It carries step metadata only. It does
-// not run credentials, cookies, CAPTCHA tokens, or challenge payloads through
-// ordinary UI state.
+// mautrix-meta login flow. It never runs credentials, cookies, CAPTCHA tokens,
+// or challenge payloads through ordinary UI state.
 type LoginMachine struct {
 	mu             sync.Mutex
 	state          string
@@ -40,6 +60,7 @@ type LoginMachine struct {
 	fieldIDs       []string
 	webViewURL     string
 	webViewUA      string
+	webViewExtract string
 	waitForURL     string
 	failureCode    string
 	webViewPending bool
@@ -50,6 +71,7 @@ type loginSnapshot struct {
 	StepID       string   `json:"step_id,omitempty"`
 	Instructions string   `json:"instructions,omitempty"`
 	FieldIDs     []string `json:"field_ids,omitempty"`
+	WebViewStep  bool     `json:"webview_step,omitempty"`
 	FailureCode  string   `json:"failure_code,omitempty"`
 }
 
@@ -69,8 +91,15 @@ func (m *LoginMachine) State() string {
 	return m.state
 }
 
+func (m *LoginMachine) StepID() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.stepID
+}
+
 // SnapshotJSON is safe for ordinary UI state. It intentionally omits any
-// WebView URL, user-agent, cookie name/value, token, or credential.
+// WebView URL, user-agent, extraction script, cookie name/value, token, or
+// credential.
 func (m *LoginMachine) SnapshotJSON() []byte {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -79,6 +108,7 @@ func (m *LoginMachine) SnapshotJSON() []byte {
 		StepID:       m.stepID,
 		Instructions: m.instructions,
 		FieldIDs:     append([]string(nil), m.fieldIDs...),
+		WebViewStep:  m.webViewPending,
 		FailureCode:  m.failureCode,
 	})
 	return value
@@ -105,75 +135,83 @@ func (m *LoginMachine) WebViewUserAgent() string {
 	return m.webViewUA
 }
 
+// WebViewExtractJS returns the pinned upstream extraction script for a CAPTCHA
+// step. It is handed only to the dedicated WebView controller.
+func (m *LoginMachine) WebViewExtractJS() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.webViewExtract
+}
+
 func (m *LoginMachine) WebViewWaitPattern() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.waitForURL
 }
 
-// ApplyUpstreamStep maps a sanitized bridgev2 LoginStep into this facade. The
-// real connector is responsible for obtaining the step. This method never
-// accepts a password or raw LoginStep JSON.
-func (m *LoginMachine) ApplyUpstreamStep(state, stepID, instructions string, fieldIDs []string, webViewURL, userAgent string) error {
-	if !validLoginState(state) || strings.TrimSpace(stepID) == "" {
+// Apply maps a sanitized upstream step into this facade. The caller (the login
+// controller) is responsible for obtaining the step from the real connector.
+// This method never accepts a password or raw LoginStep JSON.
+func (m *LoginMachine) Apply(step UpstreamStep) error {
+	if !validLoginState(step.State) || strings.TrimSpace(step.StepID) == "" && step.State != LoginStateAuthenticated {
 		m.fail(loginFailureInvalidStep)
 		return errors.New(loginFailureInvalidStep)
 	}
-	if state == LoginStateWebChallenge || state == LoginStateCaptcha {
-		if err := validateLoginWebURL(webViewURL); err != nil {
+	webView := step.State == LoginStateWebChallenge || step.State == LoginStateCaptcha
+	if webView {
+		if err := validateLoginWebURL(step.WebViewURL); err != nil {
 			m.fail(loginFailureInvalidWebURL)
 			return err
 		}
-	}
-	if state == LoginStateAuthenticated {
-		fieldIDs = nil
-		webViewURL = ""
-		userAgent = ""
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.state == LoginStateCancelled || m.state == LoginStateAuthenticated || m.state == LoginStateFailed {
 		return errors.New("Instagram login machine is terminal")
 	}
-	m.state = state
-	m.stepID = stepID
-	m.instructions = instructions
-	m.fieldIDs = sanitizeFieldIDs(fieldIDs)
-	m.webViewURL = webViewURL
-	m.webViewUA = userAgent
-	m.waitForURL = ""
-	m.webViewPending = state == LoginStateWebChallenge || state == LoginStateCaptcha
-	if m.webViewPending {
-		m.waitForURL = loginWaitForInstagramURL
+	m.state = step.State
+	m.stepID = step.StepID
+	m.instructions = step.Instructions
+	m.fieldIDs = sanitizeFieldIDs(step.FieldIDs)
+	m.webViewPending = webView
+	if webView {
+		m.webViewURL = step.WebViewURL
+		m.webViewUA = step.WebViewUserAgent
+		m.webViewExtract = step.WebViewExtractJS
+		m.waitForURL = step.WebViewWaitPattern
+		if m.waitForURL == "" {
+			m.waitForURL = loginWaitForInstagramURL
+		}
+	} else {
+		m.webViewURL = ""
+		m.webViewUA = ""
+		m.webViewExtract = ""
+		m.waitForURL = ""
+	}
+	if step.State == LoginStateAuthenticated {
+		m.fieldIDs = nil
+		m.instructions = ""
 	}
 	return nil
 }
 
-// SubmitCredentials accepts the values only for the duration of this call and
-// then discards them. The pinned upstream transport has not been connected to
-// this facade, so this deliberately fails instead of pretending to authenticate.
-func (m *LoginMachine) SubmitCredentials(username, password string) error {
-	if strings.TrimSpace(username) == "" || password == "" {
-		return errors.New("username and password are required")
-	}
-	return m.unavailableAfterSecret()
+// ApplyUpstreamStep is the narrow positional form retained for callers and
+// tests that predate the UpstreamStep struct.
+func (m *LoginMachine) ApplyUpstreamStep(state, stepID, instructions string, fieldIDs []string, webViewURL, userAgent string) error {
+	return m.Apply(UpstreamStep{
+		State:            state,
+		StepID:           stepID,
+		Instructions:     instructions,
+		FieldIDs:         fieldIDs,
+		WebViewURL:       webViewURL,
+		WebViewUserAgent: userAgent,
+	})
 }
 
-// SubmitTwoFactor has the same non-persistence guarantee as SubmitCredentials.
-func (m *LoginMachine) SubmitTwoFactor(code string) error {
-	if strings.TrimSpace(code) == "" {
-		return errors.New("two-factor code is required")
-	}
-	return m.unavailableAfterSecret()
-}
-
-// SubmitCaptchaResult reports only completion. The CAPTCHA token itself stays
-// in the dedicated WebView/connector handoff and never enters this object.
-func (m *LoginMachine) SubmitCaptchaResult(completed bool) error {
-	if !completed {
-		return errors.New("CAPTCHA was not completed")
-	}
-	return m.unavailableAfterSecret()
+// markFailed records a fixed, secret-free failure code. The underlying error
+// text from upstream is never stored here.
+func (m *LoginMachine) markFailed(code string) {
+	m.fail(code)
 }
 
 func (m *LoginMachine) Cancel() {
@@ -185,55 +223,65 @@ func (m *LoginMachine) Cancel() {
 	m.fieldIDs = nil
 	m.webViewURL = ""
 	m.webViewUA = ""
+	m.webViewExtract = ""
 	m.waitForURL = ""
 	m.webViewPending = false
-}
-
-func (m *LoginMachine) unavailableAfterSecret() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.state == LoginStateCancelled || m.state == LoginStateAuthenticated {
-		return errors.New("Instagram login machine is terminal")
-	}
-	m.state = LoginStateFailed
-	m.stepID = ""
-	m.instructions = ""
-	m.fieldIDs = nil
-	m.failureCode = loginFailureTransportUnavailable
-	m.webViewURL = ""
-	m.webViewUA = ""
-	m.waitForURL = ""
-	m.webViewPending = false
-	return errors.New(loginFailureTransportUnavailable)
 }
 
 func (m *LoginMachine) fail(code string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.state == LoginStateCancelled || m.state == LoginStateAuthenticated {
+		return
+	}
 	m.state = LoginStateFailed
 	m.failureCode = code
+	m.stepID = ""
+	m.instructions = ""
+	m.fieldIDs = nil
 	m.webViewURL = ""
 	m.webViewUA = ""
+	m.webViewExtract = ""
 	m.waitForURL = ""
 	m.webViewPending = false
 }
 
 func validLoginState(state string) bool {
 	switch state {
-	case LoginStateCredentials, LoginStateTwoFactor, LoginStateWebChallenge, LoginStateCaptcha, LoginStateAuthenticated, LoginStateCancelled, LoginStateFailed:
+	case LoginStateCredentials, LoginStateTwoFactor, LoginStateSelect, LoginStateWebChallenge,
+		LoginStateCaptcha, LoginStateDisplayWait, LoginStateAuthenticated, LoginStateCancelled, LoginStateFailed:
 		return true
 	default:
 		return false
 	}
 }
 
+// allowedFieldIDs are the ordinary-UI input identifiers upstream emits for
+// non-WebView steps. These are field labels, not values: a password value is
+// never stored or logged, but the "password" field ID tells the screen to show
+// a password input. Token-carrier fields (captcha_token, recaptcha_token) are
+// intentionally absent because their values flow only through the dedicated
+// WebView handoff, never ordinary UI state.
+var allowedFieldIDs = map[string]struct{}{
+	"username":          {},
+	"password":          {},
+	"verification_code": {},
+	"two_factor_code":   {},
+	"account":           {},
+	"select":            {},
+	"retry":             {},
+	"captcha_code":      {},
+}
+
 func sanitizeFieldIDs(fieldIDs []string) []string {
 	result := make([]string, 0, len(fieldIDs))
 	for _, fieldID := range fieldIDs {
-		switch fieldID {
-		case "username", "password", "two_factor_code", "select", "captcha_completion":
+		if _, ok := allowedFieldIDs[fieldID]; ok {
 			result = append(result, fieldID)
 		}
+	}
+	if len(result) == 0 {
+		return nil
 	}
 	return result
 }
