@@ -347,6 +347,11 @@ class AndroidConnectorRegistry(
         val now = System.currentTimeMillis()
         when (result) {
             is InstagramReadIngestor.Result.Success -> {
+                val storedConversations = store.getConversationSummaries(account.id).size
+                android.util.Log.i(
+                    LOG_TAG,
+                    "instagram_phone_local_ingest persisted=${result.persistedCount} upstream_conversations=${result.view.conversations.size} stored_conversations=$storedConversations partial=${result.partial}",
+                )
                 accounts.upsert(
                     account.copy(
                         state = ConnectionState.Healthy,
