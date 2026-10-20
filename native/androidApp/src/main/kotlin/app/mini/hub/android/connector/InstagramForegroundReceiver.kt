@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * receiving while the app is stopped or backgrounded.
  */
 class InstagramForegroundReceiver(
-    private val ingestor: InstagramReadIngestor,
+    private val sync: (AccountId) -> InstagramReadIngestor.Result,
     private val onResult: (InstagramReadIngestor.Result) -> Unit,
 ) {
     private val executor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { runnable ->
@@ -70,7 +70,7 @@ class InstagramForegroundReceiver(
         val result = try {
             val account = synchronized(this) { accountId }
             if (account == null) InstagramReadIngestor.Result.Failed("receiver_cancelled")
-            else ingestor.sync(account)
+            else sync(account)
         } finally {
             inFlight.set(false)
         }

@@ -314,7 +314,11 @@ class AndroidConnectorRegistry(
         val otherReports = syncEngine.syncAll(now).onEach { Log.i(LOG_TAG, it.logLine(trigger)) }
         runCatching { whatsappHost.persistIfDirty() }
         val needsAttention = gmailReports.count { it.state != app.mini.hub.connector.ConnectionState.Healthy && it.skippedReason != "disconnected" } +
-            otherReports.count { it.state != app.mini.hub.connector.ConnectionState.Healthy && it.skippedReason != "disconnected" }
+            otherReports.count {
+                it.state != app.mini.hub.connector.ConnectionState.Healthy &&
+                    it.skippedReason != "disconnected" &&
+                    it.skippedReason != "phone_local_instagram"
+            }
         return SyncSummary(
             accounts = gmailReports.size + otherReports.size,
             inserted = gmailReports.sumOf { it.inserted } + otherReports.sumOf { it.inserted },
@@ -339,7 +343,32 @@ class AndroidConnectorRegistry(
         val account = accounts.list().firstOrNull {
             it.id.provider == Provider.INSTAGRAM && it.route == app.mini.hub.connector.ConnectorRoute.PhoneLocalBridge
         } ?: return InstagramReadIngestor.Result.Failed("instagram_phone_local_not_connected")
-        return InstagramReadIngestor(appContext, store).sync(account.id)
+        val result = InstagramReadIngestor(appContext, store).sync(account.id)
+        val now = System.currentTimeMillis()
+        when (result) {
+            is InstagramReadIngestor.Result.Success -> {
+                accounts.upsert(
+                    account.copy(
+                        state = ConnectionState.Healthy,
+                        userActionRequired = if (result.partial) {
+                            "Partial history: only a bounded recent window is fetched while MINI is open."
+                        } else null,
+                        lastSuccessfulSyncMillis = now,
+                    ),
+                )
+            }
+            is InstagramReadIngestor.Result.Failed -> {
+                if (result.code == "session_expired") {
+                    accounts.upsert(
+                        account.copy(
+                            state = ConnectionState.Expired,
+                            userActionRequired = "Reconnect Instagram to resume this account. Local history is kept.",
+                        ),
+                    )
+                }
+            }
+        }
+        return result
     }
 
     fun completeInstagramPhoneLocal(

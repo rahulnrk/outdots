@@ -52,36 +52,33 @@ class ConnectorSyncEngine(
     private val pageSize: Int = 50,
     private val expirySkewMillis: Long = 60_000L,
     private val onMessagesFetched: (ConnectedAccount, List<ProviderMessage>) -> Unit = { _, _ -> },
-    private val operations: AccountOperationCoordinator = AccountOperationCoordinator(),
+    private val operations: AccountOperationCoordinator = AccountOperationCoordinator.Shared,
+    private val clock: app.mini.hub.domain.Clock? = null,
 ) {
-    private val inFlightAccounts = mutableSetOf<String>()
 
     fun syncAll(nowMillis: Long): List<AccountSyncReport> =
         accounts.list().filter { it.id.provider in connectors }.map { account ->
             try {
                 syncAccount(account, nowMillis)
             } catch (e: Exception) {
+                accounts.get(account.id)?.takeIf { it.state in setOf(ConnectionState.Healthy, ConnectionState.Authorized, ConnectionState.Syncing) }
+                    ?.let { mark(it, ConnectionState.Degraded, RETRY_NOTICE) }
                 AccountSyncReport(account.id.key, 0, 0, 0, accounts.get(account.id)?.state ?: account.state, false, skippedReason = e::class.simpleName)
             }
         }
 
-    fun syncAccount(account: ConnectedAccount, nowMillis: Long): AccountSyncReport {
-        val key = account.id.key
-        synchronized(inFlightAccounts) {
-            if (!inFlightAccounts.add(key)) return skip(account, "coalesced")
-        }
-        return try {
-            operations.withAccount(account.id) { syncAccountInternal(account, nowMillis) }
-        } finally {
-            synchronized(inFlightAccounts) { inFlightAccounts.remove(key) }
-        }
-    }
+    fun syncAccount(account: ConnectedAccount, nowMillis: Long): AccountSyncReport =
+        operations.withSync(account.id) { syncAccountInternal(account, clock?.now()?.epochMillis ?: nowMillis) } ?: skip(account, "coalesced")
 
     private fun syncAccountInternal(account: ConnectedAccount, nowMillis: Long): AccountSyncReport {
         val connector = connectors[account.id.provider] ?: error("No connector for ${account.id.provider}")
         val current = accounts.get(account.id) ?: error("Account is not registered")
         val key = current.id.key
         if (current.state == ConnectionState.Disconnected) return skip(current, "disconnected")
+        // Phone-local Instagram uses the dedicated ingest path, not the official Graph API connector.
+        if (current.route == ConnectorRoute.PhoneLocalBridge && current.id.provider == Provider.INSTAGRAM) {
+            return skip(current, "phone_local_instagram")
+        }
         // Admission is checked before refresh or any provider work. A notification, manual sync,
         // read, or restart must not turn a provider cooldown into another refresh request.
         val source = cursorSource(current)
@@ -162,7 +159,16 @@ class ConnectorSyncEngine(
 
     /** Same refresh-and-mark path sync uses; for callers that need a usable token now (send, reads). */
     fun refreshForUse(account: ConnectedAccount, token: StoredAccessToken, nowMillis: Long): StoredAccessToken? =
-        operations.withAccount(account.id) { refresh(account, token, nowMillis) }
+        operations.withAccount(account.id) {
+            val current = accounts.get(account.id) ?: return@withAccount null
+            if (current.state == ConnectionState.Disconnected) return@withAccount null
+            if ((store.getCursor(cursorSource(current))?.nextAllowedAtMillis ?: 0) > nowMillis) return@withAccount null
+            val credential = tokens.get(account.id) ?: return@withAccount null
+            // A reader may have captured a token before another caller rotated it. Never send the
+            // old refresh token or interpret its rejection as revocation of the newer credential.
+            if (credential != token && !credential.isExpired(nowMillis + expirySkewMillis)) credential
+            else refresh(current, credential, nowMillis)
+        }
 
     private fun refresh(account: ConnectedAccount, token: StoredAccessToken, nowMillis: Long): StoredAccessToken? {
         val refresher = refreshers[account.id.provider]
@@ -197,29 +203,7 @@ class ConnectorSyncEngine(
     }
 
     private fun persistRetryAdmission(source: String, previous: IngestCursor?, nowMillis: Long, error: ConnectorHttpException) {
-        if (error.kind != ProviderErrorKind.RateLimited && error.kind != ProviderErrorKind.Transient) return
-        val attempt = (previous?.retryAttempt ?: 0) + 1
-        val exponential = (1_000L shl (attempt - 1).coerceAtMost(13)).coerceAtMost(MAX_BACKOFF_MILLIS)
-        // The application's exponential delay is capped, but Retry-After is a provider minimum
-        // and must never be shortened. Bound multiplication only to avoid overflow/corrupt headers.
-        val requested = error.retryAfterSeconds?.let { seconds ->
-            seconds.takeIf { it in 1L..MAX_PROVIDER_DELAY_SECONDS }?.let { it * 1_000L }
-        }
-        val base = (requested ?: exponential).coerceAtLeast(1_000L)
-        val jitterBound = minOf(base / 4, MAX_JITTER_MILLIS)
-        val jitter = if (jitterBound == 0L) 0L else
-            (source.hashCode().toLong().and(Long.MAX_VALUE) % (jitterBound + 1L))
-        store.checkpointCursor(
-            IngestCursor(
-                source = source,
-                lastProcessedTimeMillis = nowMillis,
-                lastProcessedKey = previous?.lastProcessedKey,
-                processedCount = previous?.processedCount ?: 0L,
-                gapCount = previous?.gapCount ?: 0L,
-                nextAllowedAtMillis = nowMillis + base + jitter,
-                retryAttempt = attempt,
-            ),
-        )
+        AccountRetryAdmission.record(store, source, clock?.now()?.epochMillis ?: nowMillis, error)
     }
 
     private fun skip(account: ConnectedAccount, reason: String) =

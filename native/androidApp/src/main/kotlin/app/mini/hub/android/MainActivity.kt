@@ -362,10 +362,14 @@ class MainActivity : ComponentActivity() {
                             append(" Instagram +${ig.persistedCount}")
                             if (ig.partial) append(" (partial)")
                             append(".")
+                            startInstagramForegroundReceiveIfNeeded()
                         }
                         is InstagramReadIngestor.Result.Failed -> {
                             if (ig.code != "instagram_phone_local_not_connected") {
                                 append(" Instagram: ${ig.code}.")
+                            }
+                            if (ig.code == "session_expired") {
+                                stopInstagramForegroundReceive()
                             }
                         }
                         null -> Unit
@@ -453,20 +457,19 @@ class MainActivity : ComponentActivity() {
         val account = MiniHubRuntime.connectors.listAccounts().firstOrNull {
             it.id.provider == Provider.INSTAGRAM &&
                 it.route == app.mini.hub.connector.ConnectorRoute.PhoneLocalBridge &&
-                it.state != app.mini.hub.connector.ConnectionState.Disconnected
+                it.state == app.mini.hub.connector.ConnectionState.Healthy
         } ?: run {
             stopInstagramForegroundReceive()
             return
         }
         val receiver = instagramForegroundReceiver ?: InstagramForegroundReceiver(
-            InstagramReadIngestor(applicationContext, MiniHubRuntime.observationStore),
+            sync = { MiniHubRuntime.connectors.ingestInstagram() },
         ) { result ->
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
                 when (result) {
                     is InstagramReadIngestor.Result.Success -> {
-                        if (result.persistedCount > 0 || result.partial) refreshInbox()
-                        else refreshInbox()
+                        refreshInbox()
                     }
                     is InstagramReadIngestor.Result.Failed -> {
                         connectionStatus.value = "Instagram receive: ${result.code}"
