@@ -282,14 +282,19 @@ private fun InstagramLoginScreen(
             InstagramLoginStatus.LOADING -> Text("Preparing secure login...")
             InstagramLoginStatus.UNAVAILABLE -> Text("Instagram runtime is not available in this build.")
             InstagramLoginStatus.INPUT -> {
-                if (state.fieldIds.contains("password")) {
+                when {
+                    state.choices.isNotEmpty() -> SelectionForm(state.choices, onSubmitSelection)
+                    state.fieldIds.contains("password") -> {
                     CredentialsForm(onSubmitCredentials)
-                } else if (state.fieldIds.contains("verification_code")) {
+                    }
+                    state.fieldIds.any { it == "verification_code" || it == "two_factor_code" || it == "captcha_code" } ||
+                        state.state == "2fa" ||
+                        state.instructions.orEmpty().contains("code", ignoreCase = true) -> {
                     CodeForm(onSubmitCode)
-                } else if (state.state == "select") {
-                    SelectionForm(state.choices, onSubmitSelection)
-                } else {
+                    }
+                    else -> {
                     Text("Awaiting the next sign-in step.")
+                    }
                 }
             }
             InstagramLoginStatus.WEBVIEW -> {
@@ -388,11 +393,11 @@ private fun CodeForm(onSubmit: (String) -> Unit) {
     OutlinedTextField(
         value = code,
         onValueChange = { code = it },
-        label = { Text("Verification code") },
+        label = { Text("Email or SMS verification code") },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         modifier = Modifier.fillMaxWidth(),
     )
-    Button(onClick = { onSubmit(code) }, enabled = code.isNotBlank()) { Text("Continue") }
+    Button(onClick = { onSubmit(code.trim()) }, enabled = code.trim().length >= 5) { Text("Submit code") }
 }
 
 @androidx.compose.runtime.Composable

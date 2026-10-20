@@ -282,6 +282,8 @@ var allowedFieldIDs = map[string]struct{}{
 	"password":          {},
 	"verification_code": {},
 	"two_factor_code":   {},
+	"action":            {},
+	"method":            {},
 	"account":           {},
 	"select":            {},
 	"retry":             {},
