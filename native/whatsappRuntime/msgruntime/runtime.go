@@ -31,6 +31,7 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
@@ -52,8 +53,11 @@ const (
 	CookieCUser = string(cookies.FBCookieCUser)
 	CookieDatr  = string(cookies.MetaCookieDatr)
 
-	LoginURL           = "https://www.messenger.com/login"
-	LoginSuccessRegexp = `^https://www\.messenger\.com/(?:t/[0-9]+/?)?(?:\?.*)?$`
+	// messenger.com has no mobile web login and desktop UA is blocked in WebView,
+	// so owner login runs on m.facebook.com and messagix uses Facebook platform
+	// (same xs/c_user/datr cookies, Messenger inbox via facebook.com endpoints).
+	LoginURL = "https://m.facebook.com/login/"
+	LoginSuccessRegexp = `^https://(?:m|www)\.facebook\.com/(?:home\.php|messages(?:/.*)?)?/?(?:\?.*)?$`
 )
 
 // Runtime holds one Messenger client. One Runtime per account attempt.
@@ -67,6 +71,12 @@ type Runtime struct {
 	devicePath     string
 	device         *store.Device
 	e2ee           *whatsmeow.Client
+	threadCount    int
+	readDone       bool
+	e2eeConnected  bool
+	e2eeEvents     int
+	e2eeFBMessages int
+	e2eeLoggedOut  bool
 }
 
 type sessionSnapshot struct {
@@ -96,7 +106,7 @@ func GlobalLoggingDisabled() bool {
 
 // NewRuntime constructs an unauthenticated Messenger client. No network I/O.
 func NewRuntime() *Runtime {
-	jar := &cookies.Cookies{Platform: types.Messenger}
+	jar := &cookies.Cookies{Platform: types.Facebook}
 	jar.UpdateValues(map[cookies.MetaCookieName]string{})
 	return &Runtime{
 		client: messagix.NewClient(jar, zerolog.Nop(), &messagix.Config{}),
@@ -182,7 +192,7 @@ func parseCookieHeader(header string) (*cookies.Cookies, string) {
 		}
 		values[cookies.MetaCookieName(name)] = value
 	}
-	jar := &cookies.Cookies{Platform: types.Messenger}
+	jar := &cookies.Cookies{Platform: types.Facebook}
 	jar.UpdateValues(values)
 	if !jarHasRequiredCookies(jar) {
 		return nil, "missing_required_cookies"
@@ -220,9 +230,13 @@ func (r *Runtime) VerifyIdentity() string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	userInfo, _, err := client.LoadMessagesPage(ctx)
+	userInfo, table, err := client.LoadMessagesPage(ctx)
 	if err != nil {
 		return encodeVerify(verifyResult{OK: false, Code: classifyVerifyError(err)})
+	}
+	threads := 0
+	if table != nil {
+		threads = len(table.LSDeleteThenInsertThread)
 	}
 	userID := ""
 	if userInfo != nil {
@@ -240,8 +254,88 @@ func (r *Runtime) VerifyIdentity() string {
 	}
 	r.mu.Lock()
 	r.verifiedUserID = userID
+	r.threadCount = threads
+	r.readDone = true
 	r.mu.Unlock()
 	return encodeVerify(verifyResult{OK: true, UserID: userID})
+}
+
+// ConversationReadJSON reports the content-free authenticated inbox read from the
+// last VerifyIdentity: {"read":true,"threads":N}. No names, snippets, or IDs.
+func (r *Runtime) ConversationReadJSON() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	raw, _ := json.Marshal(map[string]any{"read": r.readDone, "threads": r.threadCount})
+	return string(raw)
+}
+
+// EncryptedDeviceRegistered is true once the E2EE device has a Messenger JID.
+func (r *Runtime) EncryptedDeviceRegistered() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.device != nil && r.device.ID != nil
+}
+
+// ListenEncrypted connects the prepared E2EE client and listens for up to
+// seconds. Receive-only: no sends, no read receipts are issued by MINI.
+// Returns content-free JSON with connection state and event counts.
+func (r *Runtime) ListenEncrypted(seconds int) string {
+	r.mu.Lock()
+	e2ee := r.e2ee
+	registered := r.device != nil && r.device.ID != nil
+	r.e2eeConnected, r.e2eeEvents, r.e2eeFBMessages, r.e2eeLoggedOut = false, 0, 0, false
+	r.mu.Unlock()
+	out := func(code string) string {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		raw, _ := json.Marshal(map[string]any{
+			"registered":  registered,
+			"connected":   r.e2eeConnected,
+			"events":      r.e2eeEvents,
+			"fb_messages": r.e2eeFBMessages,
+			"logged_out":  r.e2eeLoggedOut,
+			"code":        code,
+		})
+		return string(raw)
+	}
+	if e2ee == nil {
+		return out("encrypted_client_missing")
+	}
+	if !registered {
+		return out("encrypted_device_unregistered")
+	}
+	connected := make(chan struct{}, 1)
+	e2ee.AddEventHandler(func(evt any) {
+		r.mu.Lock()
+		r.e2eeEvents++
+		switch evt.(type) {
+		case *events.Connected:
+			r.e2eeConnected = true
+			select {
+			case connected <- struct{}{}:
+			default:
+			}
+		case *events.FBMessage:
+			r.e2eeFBMessages++
+		case *events.LoggedOut:
+			r.e2eeLoggedOut = true
+		}
+		r.mu.Unlock()
+	})
+	if err := e2ee.Connect(); err != nil {
+		return out("connect_failed")
+	}
+	if seconds < 1 {
+		seconds = 1
+	}
+	deadline := time.After(time.Duration(seconds) * time.Second)
+	select {
+	case <-connected:
+		<-deadline
+	case <-deadline:
+	}
+	e2ee.Disconnect()
+	return out("")
 }
 
 func classifyVerifyError(err error) string {
@@ -288,7 +382,7 @@ func (r *Runtime) ExportSessionJSON() string {
 	}
 	snap := sessionSnapshot{
 		SchemaVersion: 1,
-		Platform:      types.Messenger.String(),
+		Platform:      types.Facebook.String(),
 		Cookies:       cookieMap,
 		UserID:        r.verifiedUserID,
 		CachedState:   cached,
@@ -321,7 +415,7 @@ func (r *Runtime) ImportSessionJSON(sessionJSON string) string {
 	for k, v := range snap.Cookies {
 		values[cookies.MetaCookieName(k)] = v
 	}
-	jar := &cookies.Cookies{Platform: types.Messenger}
+	jar := &cookies.Cookies{Platform: types.Facebook}
 	jar.UpdateValues(values)
 	if !jarHasRequiredCookies(jar) {
 		return "missing_required_cookies"
@@ -349,7 +443,7 @@ func (r *Runtime) ClearSession() {
 		r.e2ee.Disconnect()
 		r.e2ee = nil
 	}
-	jar := &cookies.Cookies{Platform: types.Messenger}
+	jar := &cookies.Cookies{Platform: types.Facebook}
 	jar.UpdateValues(map[cookies.MetaCookieName]string{})
 	r.jar = jar
 	r.verifiedUserID = ""

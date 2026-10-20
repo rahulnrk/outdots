@@ -106,9 +106,29 @@ class MessengerLoginSession(private val appContext: Context) {
                 publish(MessengerLoginUiState.Failed(prepareCode))
                 return@execute
             }
+            val read = JSONObject(MessengerRuntimeFacade.conversationReadJson(rt))
+            val registered = MessengerRuntimeFacade.encryptedDeviceRegistered(rt)
+            evidence("restore", "identity_match=true device_registered=$registered")
+            evidence("restore_read", "read=${read.optBoolean("read")} threads=${read.optInt("threads")}")
+            if (registered) {
+                publish(MessengerLoginUiState.Verifying("e2ee_receive"))
+                evidence("restore_e2ee_listen", listenSummary(rt))
+            }
             runtime = rt
             publish(MessengerLoginUiState.Verified(accountId.key, restored = true))
         }
+    }
+
+    private fun evidence(key: String, value: String) {
+        appContext.getSharedPreferences(EVIDENCE_PREFS, Context.MODE_PRIVATE)
+            .edit().putString(key, value).putLong("$key.at", System.currentTimeMillis()).commit()
+    }
+
+    private fun listenSummary(rt: Any): String {
+        val r = JSONObject(MessengerRuntimeFacade.listenEncrypted(rt, LISTEN_SECONDS))
+        return "connected=${r.optBoolean("connected")} events=${r.optInt("events")} " +
+            "fb_messages=${r.optInt("fb_messages")} logged_out=${r.optBoolean("logged_out")} " +
+            "code=${r.optString("code").ifBlank { "ok" }}"
     }
 
     private fun completeWithSession(at: Long, cookieHeader: String) {
@@ -132,6 +152,9 @@ class MessengerLoginSession(private val appContext: Context) {
             return
         }
         val accountId = AccountId(Provider.FACEBOOK, userId)
+        evidence("identity", "verified=true provider=facebook")
+        val read = JSONObject(MessengerRuntimeFacade.conversationReadJson(rt))
+        evidence("read", "read=${read.optBoolean("read")} threads=${read.optInt("threads")}")
         publish(MessengerLoginUiState.Verifying("encrypted_device"))
         val deviceCode = MessengerRuntimeFacade.openEncryptedDeviceStore(rt, deviceDbPath(accountId).absolutePath)
         if (deviceCode.isNotEmpty()) {
@@ -156,9 +179,19 @@ class MessengerLoginSession(private val appContext: Context) {
                 .putString(PREF_LAST_ACCOUNT, accountId.key)
                 .commit(),
         ) { "could not persist Messenger probe account key" }
-        // Network RegisterE2EE completes encrypted-session enrollment. Cookie+local
-        // device stores are already saved; register failures are deferred (no sends).
-        MessengerRuntimeFacade.registerEncryptedDevice(rt)
+        val stored = SqlCipherMessengerSessionStore(appContext).load(accountId) != null
+        evidence("session_bind", "sqlcipher_saved=$stored bound_to_verified_identity=true")
+        // E2EE is checked separately: login/inbox success is not E2EE proof.
+        publish(MessengerLoginUiState.Verifying("e2ee_register"))
+        val registerCode = MessengerRuntimeFacade.registerEncryptedDevice(rt)
+        val registered = MessengerRuntimeFacade.encryptedDeviceRegistered(rt)
+        evidence("e2ee_register", "registered=$registered code=${registerCode.ifBlank { "ok" }}")
+        if (registered) {
+            publish(MessengerLoginUiState.Verifying("e2ee_receive"))
+            evidence("e2ee_listen", listenSummary(rt))
+        } else {
+            evidence("e2ee_listen", "skipped=device_unregistered")
+        }
         runtime = rt
         publish(MessengerLoginUiState.Verified(accountId.key, restored = false))
     }
@@ -211,6 +244,8 @@ class MessengerLoginSession(private val appContext: Context) {
 
     companion object {
         private const val PREFS = "mini_messenger_probe"
+        private const val EVIDENCE_PREFS = "mini_messenger_probe_evidence"
+        private const val LISTEN_SECONDS = 30L
         private const val PREF_LAST_ACCOUNT = "last_account_key"
     }
 }

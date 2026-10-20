@@ -2,7 +2,8 @@ package app.mini.hub.android.connector
 
 /**
  * Reflection wrapper over gomobile `app.mini.hub.wa.msgruntime`.
- * Keeps release builds compiling when the debug JNI jar is absent.
+ * Package-level funcs (including newRuntime) live on `Msgruntime`;
+ * instance methods live on `Runtime`.
  * Never logs cookies, headers, or identity payloads.
  */
 internal object MessengerRuntimeFacade {
@@ -16,37 +17,42 @@ internal object MessengerRuntimeFacade {
     fun loginSuccessUrlPattern(): String = invokeStaticString("loginSuccessURLPattern")
     fun requiredCookieNamesCsv(): String = invokeStaticString("requiredCookieNamesCSV")
 
-    fun newRuntime(): Any = runtimeClass.getMethod("newRuntime").invoke(null)
+    fun newRuntime(): Any = packageClass.getMethod("newRuntime").invoke(null)
         ?: error("messenger_runtime_unavailable")
 
     fun importOwnerSession(runtime: Any, cookieHeader: String): String =
-        runtimeClass.getMethod("importOwnerSession", String::class.java)
-            .invoke(runtime, cookieHeader) as? String ?: "import_failed"
+        call(runtime, "importOwnerSession", cookieHeader) ?: "import_failed"
 
     fun verifyIdentity(runtime: Any): String =
-        runtimeClass.getMethod("verifyIdentity").invoke(runtime) as? String
-            ?: """{"ok":false,"code":"verify_unavailable"}"""
+        call(runtime, "verifyIdentity") ?: """{"ok":false,"code":"verify_unavailable"}"""
 
-    fun exportSessionJson(runtime: Any): String =
-        runtimeClass.getMethod("exportSessionJSON").invoke(runtime) as? String ?: ""
+    fun conversationReadJson(runtime: Any): String =
+        call(runtime, "conversationReadJSON") ?: """{"read":false,"threads":0}"""
+
+    fun exportSessionJson(runtime: Any): String = call(runtime, "exportSessionJSON") ?: ""
 
     fun importSessionJson(runtime: Any, sessionJson: String): String =
-        runtimeClass.getMethod("importSessionJSON", String::class.java).invoke(runtime, sessionJson) as? String
-            ?: "import_failed"
+        call(runtime, "importSessionJSON", sessionJson) ?: "import_failed"
 
     fun clearSession(runtime: Any) {
         runtimeClass.getMethod("clearSession").invoke(runtime)
     }
 
     fun openEncryptedDeviceStore(runtime: Any, dbPath: String): String =
-        runtimeClass.getMethod("openEncryptedDeviceStore", String::class.java)
-            .invoke(runtime, dbPath) as? String ?: "device_store_open_failed"
+        call(runtime, "openEncryptedDeviceStore", dbPath) ?: "device_store_open_failed"
 
     fun prepareEncryptedClient(runtime: Any): String =
-        runtimeClass.getMethod("prepareEncryptedClient").invoke(runtime) as? String ?: "prepare_e2ee_failed"
+        call(runtime, "prepareEncryptedClient") ?: "prepare_e2ee_failed"
 
     fun registerEncryptedDevice(runtime: Any): String =
-        runtimeClass.getMethod("registerEncryptedDevice").invoke(runtime) as? String ?: "register_failed"
+        call(runtime, "registerEncryptedDevice") ?: "register_failed"
+
+    fun encryptedDeviceRegistered(runtime: Any): Boolean =
+        runtimeClass.getMethod("encryptedDeviceRegistered").invoke(runtime) as? Boolean ?: false
+
+    fun listenEncrypted(runtime: Any, seconds: Long): String =
+        runtimeClass.getMethod("listenEncrypted", java.lang.Long.TYPE).invoke(runtime, seconds) as? String
+            ?: """{"code":"listen_unavailable"}"""
 
     fun hasEncryptedDevice(runtime: Any): Boolean =
         runtimeClass.getMethod("hasEncryptedDevice").invoke(runtime) as? Boolean ?: false
@@ -57,12 +63,17 @@ internal object MessengerRuntimeFacade {
     fun isAuthenticated(runtime: Any): Boolean =
         runtimeClass.getMethod("isAuthenticated").invoke(runtime) as? Boolean ?: false
 
-    fun verifiedUserId(runtime: Any): String =
-        runtimeClass.getMethod("verifiedUserID").invoke(runtime) as? String ?: ""
+    fun verifiedUserId(runtime: Any): String = call(runtime, "verifiedUserID") ?: ""
 
     fun close(runtime: Any) {
         runtimeClass.getMethod("close").invoke(runtime)
     }
+
+    private fun call(runtime: Any, method: String): String? =
+        runtimeClass.getMethod(method).invoke(runtime) as? String
+
+    private fun call(runtime: Any, method: String, arg: String): String? =
+        runtimeClass.getMethod(method, String::class.java).invoke(runtime, arg) as? String
 
     private fun invokeStaticString(method: String): String =
         packageClass.getMethod(method).invoke(null) as? String ?: ""

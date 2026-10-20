@@ -68,7 +68,7 @@ func TestOwnerSessionRoundTripAndEncryptedDeviceStore(t *testing.T) {
 	if err := json.Unmarshal([]byte(exported), &snap); err != nil {
 		t.Fatal(err)
 	}
-	if snap["platform"] != "messenger" {
+	if snap["platform"] != "facebook" {
 		t.Fatalf("platform=%v", snap["platform"])
 	}
 
