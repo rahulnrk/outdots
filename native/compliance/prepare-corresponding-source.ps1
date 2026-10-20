@@ -18,7 +18,11 @@
 # A fail-closed scan rejects the archive if it finds key/credential/PII patterns.
 param(
   [string]$OutDir = "",
-  [switch]$IncludeGoModules = $true
+  [switch]$IncludeGoModules = $true,
+  # Head: committed HEAD only (git archive). WorkingTree: tracked + untracked-not-ignored
+  # files as they are on disk, i.e. exactly what a local build compiles. Use WorkingTree when
+  # the binary was built from uncommitted changes; the manifest records which paths differ.
+  [ValidateSet("Head", "WorkingTree")][string]$Source = "Head"
 )
 $ErrorActionPreference = "Stop"
 $native = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -29,27 +33,41 @@ $go = Join-Path $env:GOROOT "bin\go.exe"
 
 $commit = (& git -C $repo rev-parse HEAD).Trim()
 $short = $commit.Substring(0, 12)
-$dirty = (& git -C $repo status --porcelain -- native) | Where-Object { $_ }
+$dirtyLines = @(& git -C $repo status --porcelain --untracked-files=all -- native | Where-Object { $_ })
+$dirty = $dirtyLines.Count -gt 0
+$tag = if ($Source -eq "WorkingTree") { "$short-wt" } else { $short }
 if (-not $OutDir) { $OutDir = Join-Path $repo "tmp\corresponding-source" }
-$stage = Join-Path $OutDir "mini-native-src-$short"
+$stage = Join-Path $OutDir "mini-native-src-$tag"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
-# ---- 1. Tracked build inputs at HEAD (git archive => never includes untracked/ignored files) ----
-$excludeRe = '(^native/review-artifacts/)|(\.log$)|(\.png$)|(\.jpe?g$)|(\.webp$)|(-test-output\.txt$)|(^native/build/)|(/build/)|(\.task$)|(\.tflite$)|(\.litertlm$)|(\.jks$)|(\.keystore$)|(\.p12$)|(\.pem$)|(local\.properties$)|(\.env)|(^native/[^/]+\.md$)'
+# ---- 1. Build inputs (never untracked-ignored files, so local.properties/keys/build/ cannot enter) ----
+$excludeRe = '(^native/review-artifacts/)|(\.log$)|(\.png$)|(\.jpe?g$)|(\.webp$)|(-test-output\.txt$)|(^native/build/)|(/build/)|(\.task$)|(\.tflite$)|(\.litertlm$)|(\.jks$)|(\.keystore$)|(\.p12$)|(\.pem$)|(local\.properties$)|(\.env)|(^native/[^/]+\.md$)|(^native/\.gradle/)|(^native/\.kotlin/)'
 $keepDocsRe = '^native/whatsappRuntime/(NOTICE|README\.md|THIRD_PARTY_LICENSES\.md)$|^native/compliance/'
-$tracked = & git -C $repo ls-tree -r --name-only HEAD -- native
+if ($Source -eq "Head") {
+  $tracked = & git -C $repo ls-tree -r --name-only HEAD -- native
+} else {
+  $tracked = & git -C $repo ls-files --cached --others --exclude-standard -- native | Where-Object { Test-Path (Join-Path $repo $_) }
+}
 $selected = $tracked | Where-Object { ($_ -notmatch $excludeRe) -or ($_ -match $keepDocsRe) }
 $excluded = $tracked | Where-Object { $selected -notcontains $_ }
-$listFile = Join-Path $OutDir "selected-$short.txt"
+$listFile = Join-Path $OutDir "selected-$tag.txt"
 $selected | Set-Content -Path $listFile -Encoding ascii
-$tar = Join-Path $OutDir "tracked-$short.tar"
-Push-Location $repo
-& git archive --format=tar --prefix=src/ -o $tar HEAD -- @selected
-if ($LASTEXITCODE -ne 0) { throw "git archive failed" }
-Pop-Location
-& tar -xf $tar -C $stage
-Remove-Item $tar
+if ($Source -eq "Head") {
+  $tar = Join-Path $OutDir "tracked-$short.tar"
+  Push-Location $repo
+  & git archive --format=tar --prefix=src/ -o $tar HEAD -- @selected
+  if ($LASTEXITCODE -ne 0) { throw "git archive failed" }
+  Pop-Location
+  & tar -xf $tar -C $stage
+  Remove-Item $tar
+} else {
+  foreach ($rel in $selected) {
+    $dst = Join-Path $stage ("src\" + ($rel -replace '/', '\'))
+    New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
+    Copy-Item (Join-Path $repo $rel) $dst -Force
+  }
+}
 
 # ---- 2. Go module sources pinned by go.sum (vendor layout) ----
 $vendorNote = "not included"
@@ -57,7 +75,7 @@ if ($IncludeGoModules) {
   $vend = Join-Path $stage "src\native\whatsappRuntime\vendor"
   Push-Location (Join-Path $repo "native\whatsappRuntime")
   # go mod vendor writes into the module dir; do it in a temp copy so the working tree is untouched.
-  $tmpMod = Join-Path $OutDir "vendor-work-$short"
+  $tmpMod = Join-Path $OutDir "vendor-work-$tag"
   if (Test-Path $tmpMod) { Remove-Item $tmpMod -Recurse -Force }
   New-Item -ItemType Directory -Force -Path $tmpMod | Out-Null
   Copy-Item go.mod, go.sum $tmpMod
@@ -79,7 +97,7 @@ $gomob = (Get-ChildItem (Join-Path $env:GOPATH "pkg\mod\golang.org\x") -Director
 $catalog = Get-Content (Join-Path $repo "native\gradle\libs.versions.toml") -Raw
 $wrapper = (Get-Content (Join-Path $repo "native\gradle\wrapper\gradle-wrapper.properties") | Where-Object { $_ -match 'distributionUrl' }) -replace '.*distributionUrl=', ''
 $build = @"
-# Corresponding Source: MINI Android APK (build $short)
+# Corresponding Source: MINI Android APK (build $tag)
 
 Prepared locally on $(Get-Date -Format o). NOT published. Distribution of any build
 is blocked pending the owner's licensing decision. This archive is preparation
@@ -87,7 +105,8 @@ material only; it does not grant, change or assert any licence for MINI's own co
 and its existence is not evidence of compliance.
 
 - Git commit: $commit
-- Working tree for native/ at prep time: $(if ($dirty) { 'DIRTY (archive uses committed HEAD only)' } else { 'clean' })
+- Source mode: $Source $(if ($Source -eq 'WorkingTree') { '(on-disk tracked + untracked-not-ignored files; see "Uncommitted paths" below)' } else { '(committed HEAD only)' })
+- Working tree for native/ at prep time: $(if ($dirty) { "DIRTY ($($dirtyLines.Count) paths)" } else { 'clean' })
 - Go modules: $vendorNote
 
 ## Toolchain (exact)
@@ -145,6 +164,9 @@ signing keys are not part of Corresponding Source and are never included.
 
 ## Excluded tracked paths ($($excluded.Count))
 $(($excluded | ForEach-Object { "- $_" }) -join "`n")
+
+## Uncommitted paths at prep time ($($dirtyLines.Count))
+$(if ($dirtyLines.Count -eq 0) { '- none' } else { ($dirtyLines | ForEach-Object { "- ``$_``" }) -join "`n" })
 "@
 Set-Content -Path (Join-Path $stage "BUILD.md") -Value $build -Encoding utf8
 
@@ -224,14 +246,14 @@ $report = [ordered]@{
   forbidden_files = @($forbiddenFiles | ForEach-Object { $_.FullName.Substring($stage.Length + 1) })
   reviewed_exemptions = @($exempted)
 }
-$report | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $OutDir "scan-$short.json") -Encoding utf8
+$report | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $OutDir "scan-$tag.json") -Encoding utf8
 
 if ($hits.Count -gt 0 -or $forbiddenFiles.Count -gt 0 -or $vendorHits.Count -gt 0) {
-  Write-Host "SCAN FAILED: $($hits.Count) secret/PII hit(s), $($vendorHits.Count) vendor hit(s), $($forbiddenFiles.Count) forbidden file(s). Archive NOT created. See scan-$short.json"
+  Write-Host "SCAN FAILED: $($hits.Count) secret/PII hit(s), $($vendorHits.Count) vendor hit(s), $($forbiddenFiles.Count) forbidden file(s). Archive NOT created. See scan-$tag.json"
   $hits + $vendorHits | Group-Object kind | ForEach-Object { Write-Host ("  {0}: {1}" -f $_.Name, $_.Count) }
   exit 3
 }
-$zip = Join-Path $OutDir "mini-native-src-$short.zip"
+$zip = Join-Path $OutDir "mini-native-src-$tag.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Optimal
 $zh = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
