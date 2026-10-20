@@ -3,15 +3,37 @@ package igruntime
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/rs/zerolog"
 	"go.mau.fi/mautrix-meta/pkg/messagix/cookies"
+	"go.mau.fi/mautrix-meta/pkg/messagix/httpclient"
 	"go.mau.fi/mautrix-meta/pkg/messagix/types"
 	"maunium.net/go/mautrix/bridgev2"
 )
+
+func TestClassifyReadErrorIsContentFree(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "expired", err: httpclient.ErrTokenInvalidated, want: "class=session_expired"},
+		{name: "throttled", err: fmt.Errorf("%w 429", httpclient.ErrUnexpectedError), want: "status=429"},
+		{name: "network", err: httpclient.ErrRequestFailed, want: "class=network_failure"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := classifyReadError(tc.err).Error()
+			if !strings.Contains(got, tc.want) || strings.Contains(got, "secret") {
+				t.Fatalf("unsafe or incomplete diagnostic: %q", got)
+			}
+		})
+	}
+}
 
 func TestGlobalLoggingIsContentFree(t *testing.T) {
 	if !GlobalLoggingDisabled() {

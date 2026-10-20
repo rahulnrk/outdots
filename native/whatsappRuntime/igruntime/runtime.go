@@ -143,7 +143,7 @@ func (r *Runtime) VerifyAuthenticatedRead() (string, error) {
 	}
 	viewer, _, err := client.LoadIndex(context.Background())
 	if err != nil {
-		return "", fmt.Errorf("Instagram authenticated read failed: %w", err)
+		return "", fmt.Errorf("Instagram authenticated read failed: %w", classifyReadError(err))
 	}
 	if viewer == nil || viewer.GetUserId() == "" {
 		return "", fmt.Errorf("Instagram authenticated read returned no viewer")

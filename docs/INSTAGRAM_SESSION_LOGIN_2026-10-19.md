@@ -172,6 +172,28 @@ upstream window contains no incoming message. Session restart restoration was
 previously confirmed by `LiveInstagramRestoreDeviceTest`; read synchronization
 is currently manual from the authenticated rtprobe screen.
 
+### READ_FAILED investigation
+
+The owner-reported refresh failure reproduced on the preserved session as
+`read_failed_upstream_read_nosuchmethodexception`. This identified an application
+defect, not authentication expiry, throttling, network failure, unsupported
+response data, or encrypted persistence: the Go mobile binding exposes Go
+`int` parameters as Java `long`, while the Kotlin reflection bridge requested
+Java `int` parameters. The upstream read was therefore never invoked.
+
+The fix requests the generated Java `long,long` signature and passes bounded
+values as longs. The adapter now also classifies upstream failures using only
+fixed stage/class/status diagnostics such as `session_expired`, `throttled`,
+`network_error`, `response_decode_failed`, and `upstream_http_status`; raw
+exceptions, URLs, response bodies, cookies, headers, message text, and account
+identifiers are not exposed.
+
+After an in-place `adb install -r` preserving the current session and encrypted
+observations, the pending read passed. The bounded test observed an inbound
+message, completed the repeated-sync uniqueness check, and recorded the safe
+arrival-latency bucket `over_60m` using manual refresh. After force-stop and
+reopen, the same read/deduplication test reported `OK (1 test)` again.
+
 ## Tests and limitations
 
 Go `go test ./igruntime ./waruntime` passes. `igruntime` coverage includes:

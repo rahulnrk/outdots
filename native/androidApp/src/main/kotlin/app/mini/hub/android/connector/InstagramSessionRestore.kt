@@ -35,7 +35,7 @@ class InstagramSessionRestore(context: Context) {
             val userId = verifyRead(runtime)
             if (userId.isEmpty()) Result.Failed("empty_verified_identity") else Result.Verified(userId)
         } catch (error: Throwable) {
-            Result.Failed(safeRestoreError(error))
+            Result.Failed(safeRestoreError(error, "identity_validation"))
         }
     }
 
@@ -44,34 +44,62 @@ class InstagramSessionRestore(context: Context) {
         require(accountId.provider == Provider.INSTAGRAM) { "not an Instagram account" }
         val envelope = store.load(accountId) ?: return Result.NoSession
         val runtime = createRuntime() ?: return Result.Failed("runtime_unavailable")
+        var stage = "session_restore"
         return try {
             restore(runtime, accountId.key, envelope.ciphertext)
+            stage = "identity_validation"
             val userId = verifyRead(runtime)
             if (userId.isEmpty()) Result.Failed("empty_verified_identity")
-            else Result.ReadJson(readInbox(runtime, maxThreads, maxMessages))
+            else {
+                stage = "upstream_read"
+                Result.ReadJson(readInbox(runtime, maxThreads, maxMessages))
+            }
         } catch (error: Throwable) {
-            Result.Failed(safeRestoreError(error))
+            Result.Failed(safeRestoreError(error, stage))
         }
     }
 
     private fun readInbox(runtime: Any, maxThreads: Int, maxMessages: Int): String =
         try {
             val bytes = runtime.javaClass
-                .getMethod("readRecentInboxJSON", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
-                .invoke(runtime, maxThreads, maxMessages) as ByteArray
+                .getMethod("readRecentInboxJSON", Long::class.javaPrimitiveType, Long::class.javaPrimitiveType)
+                .invoke(runtime, maxThreads.toLong(), maxMessages.toLong()) as ByteArray
             bytes.toString(Charsets.UTF_8)
         } catch (error: java.lang.reflect.InvocationTargetException) {
             throw error.cause ?: error
         }
 
-    private fun safeRestoreError(error: Throwable): String {
-        val message = error.message.orEmpty().lowercase()
+    private fun safeRestoreError(error: Throwable, fallbackStage: String): String {
+        val chain = generateSequence(error) { it.cause }.toList()
+        val messages = chain.map { it.message.orEmpty().lowercase() }
+        val message = messages.firstOrNull { it.isNotBlank() }.orEmpty()
+        if (messages.any { "stage=response_decode" in it }) {
+            return when {
+                messages.any { "mailbox_missing" in it } -> "response_decode_mailbox_missing"
+                else -> "response_decode_failed"
+            }
+        }
+        if (messages.any { "stage=upstream_request" in it }) {
+            return when {
+                messages.any { "class=session_expired" in it } -> "session_expired"
+                messages.any { "class=throttled" in it || "status=429" in it } -> "throttled"
+                messages.any { "class=network_failure" in it } -> "network_error"
+                messages.any { "class=http_status" in it } -> "upstream_http_status"
+                else -> "upstream_error"
+            }
+        }
         return when {
             "token" in message || "expired" in message || "invalid" in message -> "session_expired"
             "network" in message || "timeout" in message -> "network_error"
-            else -> "read_failed"
+            else -> "read_failed_${fallbackStage}_${safeExceptionClass(error)}"
         }
     }
+
+    private fun safeExceptionClass(error: Throwable): String = error::class.java.simpleName
+        .lowercase()
+        .filter { it.isLetterOrDigit() }
+        .take(32)
+        .ifBlank { "unknown" }
 
     /** Restores the session in memory without the network read (for tests). */
     fun restoreInMemory(accountId: AccountId): Boolean {

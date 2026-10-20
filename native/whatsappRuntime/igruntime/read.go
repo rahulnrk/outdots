@@ -3,10 +3,12 @@ package igruntime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"go.mau.fi/mautrix-meta/pkg/instameow/slidetypes"
+	"go.mau.fi/mautrix-meta/pkg/messagix/httpclient"
 )
 
 type InstagramReadMessage struct {
@@ -59,7 +61,7 @@ func (r *Runtime) ReadRecentInboxJSON(maxThreads, maxMessages int) ([]byte, erro
 	}
 	viewer, mailbox, err := client.LoadIndex(context.Background())
 	if err != nil {
-		return nil, err
+		return nil, classifyReadError(err)
 	}
 	if viewer == nil || mailbox == nil || viewer.GetUserId() == "" {
 		return nil, fmt.Errorf("instagram inbox unavailable")
@@ -137,4 +139,32 @@ func (r *Runtime) ReadRecentInboxJSON(maxThreads, maxMessages int) ([]byte, erro
 		return nil, fmt.Errorf("encode Instagram inbox result: %w", err)
 	}
 	return encoded, nil
+}
+
+// classifyReadError intentionally exposes only a stage, fixed upstream error
+// class, and HTTP status. It must never expose upstream error text or response
+// data through the mobile binding.
+func classifyReadError(err error) error {
+	if errors.Is(err, httpclient.ErrTokenInvalidated) {
+		return fmt.Errorf("instagram_read stage=upstream_request class=session_expired")
+	}
+	if errors.Is(err, httpclient.ErrRateLimited) {
+		return fmt.Errorf("instagram_read stage=upstream_request class=throttled status=429")
+	}
+	if errors.Is(err, httpclient.ErrRequestFailed) || errors.Is(err, httpclient.ErrMaxRetriesReached) {
+		return fmt.Errorf("instagram_read stage=upstream_request class=network_failure")
+	}
+	if errors.Is(err, httpclient.ErrResponseReadFailed) {
+		return fmt.Errorf("instagram_read stage=response_decode class=response_read_failed")
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "mailbox missing") {
+		return fmt.Errorf("instagram_read stage=response_decode class=mailbox_missing")
+	}
+	message := err.Error()
+	for _, status := range []string{"401", "403", "429", "500", "502", "503", "504"} {
+		if strings.Contains(message, " "+status) {
+			return fmt.Errorf("instagram_read stage=upstream_request class=http_status status=%s", status)
+		}
+	}
+	return fmt.Errorf("instagram_read stage=upstream_request class=upstream_error")
 }
