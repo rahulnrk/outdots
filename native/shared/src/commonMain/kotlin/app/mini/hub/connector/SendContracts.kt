@@ -50,6 +50,7 @@ class ConnectorProviderGateway(
     private val gates: GateEvidenceSource,
     private val transport: ProviderHttpTransport,
     private val nowMillis: () -> Long,
+    private val transportForAccount: ((ConnectedAccount) -> ProviderHttpTransport)? = null,
 ) : ProviderGateway {
     override fun execute(command: OutboxCommand, payload: ExactActionPayload): GatewayResult {
         val accountId = runCatching { AccountId.parse(payload.accountId) }.getOrNull()
@@ -57,6 +58,9 @@ class ConnectorProviderGateway(
         val account = accounts.get(accountId) ?: return GatewayResult.Rejected("account_not_connected")
         if (account.route == ConnectorRoute.ThirdPartyBridge && !PhoneLocalBridgePolicy.allowsRemoteHomeserverPlaintext()) {
             return GatewayResult.Rejected("remote_bridge_plaintext_forbidden")
+        }
+        if (accountId.provider == Provider.INSTAGRAM && account.route == ConnectorRoute.PhoneLocalBridge) {
+            return GatewayResult.Rejected("instagram_phone_local_send_disabled")
         }
         val descriptor = ConnectorCatalog.apiRouteFor(accountId.provider)
             ?: return GatewayResult.Rejected("no_api_route_for_provider")
@@ -83,7 +87,7 @@ class ConnectorProviderGateway(
             ?: return GatewayResult.Rejected("conversation_belongs_to_other_account")
         val providerPayload = payload.copy(conversationId = native)
         return when (val outcome = try {
-            sender.send(account, token, providerPayload, command.id, transport)
+            sender.send(account, token, providerPayload, command.id, transportForAccount?.invoke(account) ?: transport)
         } catch (e: ConnectorHttpException) {
             classify(e)
         } catch (_: UnsupportedOperationException) {
@@ -185,7 +189,8 @@ class GmailSender(
             val target = try {
                 api.get("$apiBase/messages/${urlEncode(targetId)}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=References&metadataHeaders=Subject")
             } catch (e: ConnectorHttpException) {
-                return if (e.kind == ProviderErrorKind.NotFound) SendOutcome.Rejected("reply_target_missing") else ConnectorProviderGateway.classify(e)
+                // This is a read before the write. No send request has been attempted.
+                return SendOutcome.Rejected(if (e.kind == ProviderErrorKind.NotFound) "reply_target_missing" else "reply_context_unavailable:${e.kind.name.lowercase()}")
             }
             if (target.str("threadId") != payload.conversationId) return SendOutcome.Rejected("reply_target_thread_mismatch")
             val headers = GmailApiConnector.headers(target)

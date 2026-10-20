@@ -1,5 +1,6 @@
 package app.mini.hub.android.connector
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.webkit.WebView
@@ -60,7 +61,9 @@ class InstagramLoginActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val slotKey = intent.getStringExtra(EXTRA_SLOT_KEY) ?: "instagram|pending"
+        val returnResult = intent.getBooleanExtra(EXTRA_RETURN_RESULT, false)
         model.bind(applicationContext, slotKey)
+        model.returnResultMode = returnResult
 
         setContent {
             MaterialTheme {
@@ -69,6 +72,7 @@ class InstagramLoginActivity : ComponentActivity() {
                     InstagramLoginScreen(
                         state = state,
                         readState = model.readState.collectAsStateCompat().value,
+                        returnResultMode = returnResult,
                         onSubmitCredentials = model::submitCredentials,
                         onSubmitCode = model::submitCode,
                         onSubmitSelection = model::submitSelection,
@@ -77,6 +81,14 @@ class InstagramLoginActivity : ComponentActivity() {
                             finish()
                         },
                         onDone = { finish() },
+                        onCompleteAccountsConnect = { accountKey, username ->
+                            setResult(
+                                RESULT_OK,
+                                Intent().putExtra(EXTRA_RESULT_ACCOUNT_KEY, accountKey)
+                                    .putExtra(EXTRA_RESULT_USERNAME, username),
+                            )
+                            finish()
+                        },
                         onSyncRecent = model::syncRecent,
                         webViewFactory = { webView -> model.attachWebView(webView) },
                     )
@@ -102,6 +114,9 @@ class InstagramLoginActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_SLOT_KEY = "ig_slot_key"
+        const val EXTRA_RETURN_RESULT = "ig_return_result"
+        const val EXTRA_RESULT_ACCOUNT_KEY = "ig_result_account_key"
+        const val EXTRA_RESULT_USERNAME = "ig_result_username"
         const val LOGIN_PROFILE_SUFFIX = "mini_ig_login"
     }
 }
@@ -118,6 +133,7 @@ class InstagramLoginViewModel : ViewModel() {
     private var foregroundReceiver: InstagramForegroundReceiver? = null
     private var sessionContext: android.content.Context? = null
     private var foreground = false
+    var returnResultMode: Boolean = false
 
     fun bind(context: android.content.Context, slotKey: String) {
         if (session != null) return
@@ -245,11 +261,13 @@ private fun <T> StateFlow<T>.collectAsStateCompat(): androidx.compose.runtime.St
 private fun InstagramLoginScreen(
     state: InstagramLoginUiState,
     readState: InstagramReadUiState,
+    returnResultMode: Boolean = false,
     onSubmitCredentials: (String, String) -> Unit,
     onSubmitCode: (String) -> Unit,
     onSubmitSelection: (String, String) -> Unit,
     onCancel: () -> Unit,
     onDone: () -> Unit,
+    onCompleteAccountsConnect: (accountKey: String, username: String?) -> Unit = { _, _ -> },
     onSyncRecent: () -> Unit,
     webViewFactory: (WebView) -> Unit,
 ) {
@@ -289,10 +307,21 @@ private fun InstagramLoginScreen(
             }
             InstagramLoginStatus.AUTHENTICATED -> {
                 Text("Signed in and verified as @${state.verifiedUsername.orEmpty()} (id ${state.verifiedUserId.orEmpty()}).")
-                Text("The encrypted session is stored. This probe does not enable the account or send anything.")
-                Button(onClick = onSyncRecent) { Text("Sync recent conversations") }
-                InstagramReadPanel(readState)
-                Button(onClick = onDone) { Text("Done") }
+                if (returnResultMode) {
+                    Text("The encrypted session is stored for this MINI install. Tap Continue to add it under Manage Accounts. Sending stays disabled.")
+                    Button(
+                        onClick = {
+                            val key = state.verifiedAccountKey
+                            if (key != null) onCompleteAccountsConnect(key, state.verifiedUsername)
+                            else onDone()
+                        },
+                    ) { Text("Continue to Accounts") }
+                } else {
+                    Text("The encrypted session is stored. This probe does not enable the account or send anything.")
+                    Button(onClick = onSyncRecent) { Text("Sync recent conversations") }
+                    InstagramReadPanel(readState)
+                    Button(onClick = onDone) { Text("Done") }
+                }
             }
             InstagramLoginStatus.FAILED -> {
                 Text("Sign-in did not complete: ${state.failureCode ?: "unknown"}.")

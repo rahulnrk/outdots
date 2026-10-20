@@ -1207,7 +1207,9 @@ class InboxViewModel(
         }
 
         val apiAllowed = isApiAccount && apiReplyAllowed(connectedAccount!!) && (!isEmail || recipients.isNotEmpty()) &&
-            instagramWindowOpen(provider, live, connectedAccount)
+            instagramWindowOpen(provider, live, connectedAccount) &&
+            !(provider == app.mini.hub.domain.Provider.INSTAGRAM &&
+                connectedAccount.route == app.mini.hub.connector.ConnectorRoute.PhoneLocalBridge)
         val outsideIgWindow = provider == app.mini.hub.domain.Provider.INSTAGRAM && isApiAccount && !instagramWindowOpen(provider, live, connectedAccount)
         val route = if (apiAllowed) ActionRoute.Api else ActionRoute.NativeHandoff
         val subject = if (isEmail) selected.title.takeIf { it.isNotBlank() }?.let { s ->

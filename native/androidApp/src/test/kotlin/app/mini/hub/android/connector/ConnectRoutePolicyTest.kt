@@ -8,10 +8,18 @@ import kotlin.test.assertTrue
 
 /** T6: only qualified routes are offered; the Matrix bridge is unreachable from any UI. */
 class ConnectRoutePolicyTest {
-    private fun route(p: Provider, matrix: Boolean = false, token: Boolean = false, phoneLocal: Boolean = false, notification: Boolean = false) =
+    private fun route(
+        p: Provider,
+        matrix: Boolean = false,
+        token: Boolean = false,
+        phoneLocal: Boolean = false,
+        instagramPhoneLocal: Boolean = false,
+        notification: Boolean = false,
+    ) =
         ConnectRouteInfo(
             p, p.name, "kinds", true, "status",
             usesTokenEntry = token, usesMatrixEntry = matrix, usesPhoneLocalPairing = phoneLocal,
+            usesInstagramPhoneLocalSignIn = instagramPhoneLocal,
             usesNotificationFallback = notification,
         )
 
@@ -19,6 +27,7 @@ class ConnectRoutePolicyTest {
         route(Provider.GMAIL), route(Provider.OUTLOOK), route(Provider.TEAMS), route(Provider.SLACK),
         route(Provider.GOOGLE_CHAT), route(Provider.TWITTER), route(Provider.TELEGRAM, token = true),
         route(Provider.WHATSAPP, phoneLocal = true),
+        route(Provider.INSTAGRAM, instagramPhoneLocal = true),
         route(Provider.WHATSAPP, matrix = true), route(Provider.WHATSAPP_BUSINESS, matrix = true),
         route(Provider.INSTAGRAM, matrix = true), route(Provider.LINKEDIN, matrix = true),
         route(Provider.LINKEDIN, notification = true),
@@ -35,7 +44,7 @@ class ConnectRoutePolicyTest {
     fun debugAddsChatRoutesLabelledNotLiveQualified() {
         val offered = ConnectRoutePolicy.visible(all, isDebugBuild = true)
         assertEquals(
-            listOf(Provider.GMAIL, Provider.OUTLOOK, Provider.TEAMS, Provider.SLACK, Provider.GOOGLE_CHAT, Provider.TWITTER, Provider.TELEGRAM, Provider.WHATSAPP, Provider.LINKEDIN),
+            listOf(Provider.GMAIL, Provider.OUTLOOK, Provider.TEAMS, Provider.SLACK, Provider.GOOGLE_CHAT, Provider.TWITTER, Provider.TELEGRAM, Provider.WHATSAPP, Provider.INSTAGRAM, Provider.LINKEDIN),
             offered.map { it.provider },
         )
         offered.filter { it.provider !in setOf(Provider.GMAIL, Provider.OUTLOOK) }.forEach {
@@ -45,6 +54,7 @@ class ConnectRoutePolicyTest {
             assertFalse(it.title.contains("not live-qualified"))
         }
         assertTrue(offered.any { it.provider == Provider.WHATSAPP && it.usesPhoneLocalPairing })
+        assertTrue(offered.any { it.provider == Provider.INSTAGRAM && it.usesInstagramPhoneLocalSignIn })
         assertTrue(offered.none { it.usesMatrixEntry })
     }
 

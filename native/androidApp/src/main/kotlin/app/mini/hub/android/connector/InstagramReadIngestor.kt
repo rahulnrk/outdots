@@ -22,9 +22,12 @@ import java.security.MessageDigest
 private const val INSTAGRAM_SOURCE = "instagram.read"
 private const val INSTAGRAM_PACKAGE = "com.instagram.android"
 
-class InstagramReadIngestor(context: Context) {
+class InstagramReadIngestor(
+    context: Context,
+    store: ObservationStore = SqlCipherObservationStore(context.applicationContext),
+) {
     private val appContext = context.applicationContext
-    private val store: ObservationStore = SqlCipherObservationStore(appContext, "mini-instagram-observations.db")
+    private val store: ObservationStore = store
     private val syncLock = Any()
 
     sealed interface Result {

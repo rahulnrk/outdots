@@ -130,4 +130,30 @@ class InstagramDispatchWindowTest {
         assertEquals(GatewayResult.Accepted("instagram:ok"), gateway.execute(command, payload(now)))
         assertEquals(1, sends)
     }
+
+    @Test
+    fun phoneLocalRouteRejectsSendBeforeProvider() {
+        val phoneLocal = account.copy(
+            route = ConnectorRoute.PhoneLocalBridge,
+            grantedScopes = setOf("instagram.phone-local-session"),
+        )
+        var sends = 0
+        val gateway = ConnectorProviderGateway(
+            accounts = InMemoryConnectedAccountStore().also { it.upsert(phoneLocal) },
+            tokens = InMemoryAccessTokenStore().also { it.put(phoneLocal.id, StoredAccessToken("phone-local-session", null)) },
+            senders = listOf(object : ProviderSender {
+                override val provider = Provider.INSTAGRAM
+                override fun send(account: ConnectedAccount, token: StoredAccessToken, payload: ExactActionPayload, clientRequestId: String, transport: ProviderHttpTransport): SendOutcome {
+                    sends++
+                    return SendOutcome.Accepted("unexpected")
+                }
+            }),
+            gates = GateEvidenceSource { listOf(GateEvidence(ReleaseGate.SendQualification, "Verified live")) },
+            transport = ProviderHttpTransport.of { error("provider must not be called") },
+            nowMillis = { now },
+        )
+
+        assertEquals(GatewayResult.Rejected("instagram_phone_local_send_disabled"), gateway.execute(command, payload(now)))
+        assertEquals(0, sends)
+    }
 }

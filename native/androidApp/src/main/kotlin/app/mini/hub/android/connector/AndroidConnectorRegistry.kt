@@ -8,11 +8,15 @@ import app.mini.hub.action.DigestProvider
 import app.mini.hub.android.BuildConfig
 import app.mini.hub.connector.AccountSyncReport
 import app.mini.hub.connector.AccountOperationCoordinator
+import app.mini.hub.connector.AccountConnectionManager
+import app.mini.hub.connector.AccountType
 import app.mini.hub.connector.Capability
 import app.mini.hub.connector.CapabilityResolver
 import app.mini.hub.connector.CapabilitySnapshot
 import app.mini.hub.connector.ConnectedAccount
+import app.mini.hub.connector.ConnectionState
 import app.mini.hub.connector.ConnectorCatalog
+import app.mini.hub.connector.ConnectorRoute
 import app.mini.hub.connector.ConnectorProviderGateway
 import app.mini.hub.connector.ConnectorSyncEngine
 import app.mini.hub.connector.GatePolicy
@@ -30,9 +34,11 @@ import app.mini.hub.connector.TeamsChatConnector
 import app.mini.hub.connector.TeamsChatSender
 import app.mini.hub.connector.TelegramBotConnector
 import app.mini.hub.connector.TelegramBotSender
+import app.mini.hub.connector.StoredAccessToken
 import app.mini.hub.connector.TokenRefresher
 import app.mini.hub.connector.XDirectMessageConnector
 import app.mini.hub.connector.XDirectMessageSender
+import app.mini.hub.domain.AccountId
 import app.mini.hub.domain.Provider
 import app.mini.hub.persistence.ObservationStore
 
@@ -49,6 +55,8 @@ data class ConnectRouteInfo(
     val usesMatrixEntry: Boolean = false,
     /** Debug WhatsApp companion QR pairing. Not Matrix. */
     val usesPhoneLocalPairing: Boolean = false,
+    /** Debug Instagram phone-local owner sign-in. Not Matrix and not the official token paste route. */
+    val usesInstagramPhoneLocalSignIn: Boolean = false,
     /** Instagram official API with a pasted long-lived token. */
     val usesInstagramToken: Boolean = false,
     /** Notification observer plus native-app handoff. This is not an authenticated account. */
@@ -225,6 +233,14 @@ class AndroidConnectorRegistry(
             usesInstagramToken = true,
         ),
         ConnectRouteInfo(
+            Provider.INSTAGRAM,
+            "Instagram personal",
+            "Phone-local sign-in on this device",
+            configured = true,
+            status = "Owner signs in on this phone. Bounded recent reads and foreground receiving only; sending stays disabled. Not live-qualified.",
+            usesInstagramPhoneLocalSignIn = true,
+        ),
+        ConnectRouteInfo(
             Provider.WHATSAPP, "WhatsApp personal", "Linked device on this phone", whatsappHost.packaged,
             if (whatsappHost.packaged) "On this phone: Connect, enter your number, then enter the code in WhatsApp > Linked devices > Link with phone number. Debug companion session; unofficial multi-device protocol."
             else "WhatsApp runtime is not packaged in this build. Run native/whatsappRuntime/build-android.ps1.",
@@ -316,6 +332,50 @@ class AndroidConnectorRegistry(
         val report = syncEngine.syncAccount(account, System.currentTimeMillis())
         runCatching { whatsappHost.persistIfDirty() }
         return report.inserted + report.updated
+    }
+
+    /** Drains the phone-local Instagram session into the canonical observation store. */
+    fun ingestInstagram(): InstagramReadIngestor.Result {
+        val account = accounts.list().firstOrNull {
+            it.id.provider == Provider.INSTAGRAM && it.route == app.mini.hub.connector.ConnectorRoute.PhoneLocalBridge
+        } ?: return InstagramReadIngestor.Result.Failed("instagram_phone_local_not_connected")
+        return InstagramReadIngestor(appContext, store).sync(account.id)
+    }
+
+    fun completeInstagramPhoneLocal(
+        accountKey: String,
+        username: String?,
+    ): ConnectOutcome {
+        val accountId = runCatching { AccountId.parse(accountKey) }.getOrNull()
+            ?: return ConnectOutcome.Blocked("Instagram account key was invalid.")
+        if (accountId.provider != Provider.INSTAGRAM) {
+            return ConnectOutcome.Blocked("Verified account is not Instagram.")
+        }
+        val session = SqlCipherInstagramSessionStore(appContext).load(accountId)
+            ?: return ConnectOutcome.Blocked("Sign in again. No encrypted Instagram session is stored for this account.")
+        // Touch the session object so a missing store cannot silently succeed.
+        if (session.ciphertext.isEmpty()) {
+            return ConnectOutcome.Blocked("Encrypted Instagram session was empty.")
+        }
+        val display = username?.takeIf { it.isNotBlank() }?.let { if (it.startsWith("@")) it else "@$it" }
+            ?: accountId.localId
+        val account = ConnectedAccount(
+            id = accountId,
+            providerAccountId = accountId.localId,
+            displayName = display,
+            accountType = AccountType.Unknown,
+            route = ConnectorRoute.PhoneLocalBridge,
+            state = ConnectionState.Healthy,
+            grantedScopes = setOf(PHONE_LOCAL_INSTAGRAM_SCOPE),
+            userActionRequired = "Partial history: only a bounded recent window is fetched while MINI is open.",
+        )
+        AccountConnectionManager.installCredential(
+            accounts,
+            tokens,
+            account,
+            StoredAccessToken("phone-local-session", expiresAtMillis = null),
+        )
+        return ConnectOutcome.Connected(account)
     }
 
     /**
@@ -443,6 +503,9 @@ class AndroidConnectorRegistry(
         if (account.id.provider == Provider.WHATSAPP && account.route == app.mini.hub.connector.ConnectorRoute.PhoneLocalBridge) {
             whatsappHost.logout(account.id)
         }
+        if (account.id.provider == Provider.INSTAGRAM && account.route == app.mini.hub.connector.ConnectorRoute.PhoneLocalBridge) {
+            SqlCipherInstagramSessionStore(appContext).clear(account.id)
+        }
         app.mini.hub.connector.AccountConnectionManager(
             accounts, tokens, app.mini.hub.domain.IdGenerator { "unused-$it" }, operations,
         ).disconnect(account.id)
@@ -480,5 +543,6 @@ class AndroidConnectorRegistry(
     companion object {
         const val LOG_TAG = "MiniUnifiedSync"
         const val REDIRECT_BASE = "app.mini.hub://oauth2redirect/"
+        const val PHONE_LOCAL_INSTAGRAM_SCOPE = "instagram.phone-local-session"
     }
 }

@@ -90,6 +90,7 @@ fun InboxScreen(
     },
     onCancelWhatsAppPairing: () -> Unit = {},
     onWhatsAppLinked: (app.mini.hub.connector.WhatsAppPairing.Linked) -> Unit = {},
+    onConnectInstagramPhoneLocal: () -> Unit = {},
     isFocusEnabled: (app.mini.hub.domain.AccountId) -> Boolean = { false },
     onFocusChanged: (app.mini.hub.domain.AccountId, Boolean) -> Unit = { _, _ -> },
     onDisconnectAccount: (ConnectedAccount) -> Unit = {},
@@ -502,6 +503,7 @@ fun InboxScreen(
             onPollWhatsAppPairing = onPollWhatsAppPairing,
             onCancelWhatsAppPairing = onCancelWhatsAppPairing,
             onWhatsAppLinked = onWhatsAppLinked,
+            onConnectInstagramPhoneLocal = onConnectInstagramPhoneLocal,
             isFocusEnabled = isFocusEnabled,
             onFocusChanged = onFocusChanged,
             onDisconnect = onDisconnectAccount,
@@ -654,6 +656,7 @@ private fun ConnectedAccountSettingsDialog(
     onPollWhatsAppPairing: () -> app.mini.hub.connector.WhatsAppPairing,
     onCancelWhatsAppPairing: () -> Unit,
     onWhatsAppLinked: (app.mini.hub.connector.WhatsAppPairing.Linked) -> Unit,
+    onConnectInstagramPhoneLocal: () -> Unit,
     isFocusEnabled: (app.mini.hub.domain.AccountId) -> Boolean,
     onFocusChanged: (app.mini.hub.domain.AccountId, Boolean) -> Unit,
     onDisconnect: (ConnectedAccount) -> Unit,
@@ -789,6 +792,7 @@ private fun ConnectedAccountSettingsDialog(
                             else if (route.usesNotificationFallback) onRequestPermission()
                             else if (route.usesInstagramToken) showInstagramEntry = true
                             else if (route.usesTokenEntry) showTelegramEntry = true
+                            else if (route.usesInstagramPhoneLocalSignIn) onConnectInstagramPhoneLocal()
                             else if (route.usesPhoneLocalPairing) showWhatsAppPairing = true
                             else onConnect(route.provider) 
                         },
@@ -799,7 +803,9 @@ private fun ConnectedAccountSettingsDialog(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    if (routes.any { it.usesPhoneLocalPairing }) {
+                    if (routes.any { it.usesInstagramPhoneLocalSignIn }) {
+                        "Instagram personal uses phone-local sign-in on this device for bounded reads while MINI is open. Sending stays disabled. Messenger, LinkedIn, Google Messages, Discord, LINE, Signal and personal Telegram still use notification observation plus handoff."
+                    } else if (routes.any { it.usesPhoneLocalPairing }) {
                         "Messenger, Instagram, LinkedIn, Google Messages, Discord, LINE, Signal and personal Telegram have no supported personal API. MINI reads their notifications and opens the app with your reviewed text."
                     } else {
                         "WhatsApp, Messenger, Instagram, LinkedIn, Google Messages, Discord, LINE, Signal and personal Telegram have no supported personal API. " +

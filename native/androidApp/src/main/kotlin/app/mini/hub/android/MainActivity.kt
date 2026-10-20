@@ -3,6 +3,7 @@ package app.mini.hub.android
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -14,6 +15,9 @@ import androidx.compose.ui.unit.dp
 import app.mini.hub.android.connector.AndroidConnectedAccountStore
 import app.mini.hub.android.connector.ConnectOutcome
 import app.mini.hub.android.connector.GmailSyncJobService
+import app.mini.hub.android.connector.InstagramForegroundReceiver
+import app.mini.hub.android.connector.InstagramLoginActivity
+import app.mini.hub.android.connector.InstagramReadIngestor
 import app.mini.hub.android.notification.MiniNotificationListenerService
 import app.mini.hub.android.ui.AndroidNativeHandoffLauncher
 import app.mini.hub.android.ui.InboxScreen
@@ -35,6 +39,50 @@ class MainActivity : ComponentActivity() {
     private val focusEnabledMap = mutableStateOf<Map<String, Boolean>>(emptyMap())
     private val focusGenerations = mutableMapOf<String, Long>()
     private val focusSerialExecutors = mutableMapOf<String, java.util.concurrent.ExecutorService>()
+    private var instagramForegroundReceiver: InstagramForegroundReceiver? = null
+    private val instagramConnectLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode != RESULT_OK) {
+            connectionStatus.value = "Instagram sign-in cancelled."
+            return@registerForActivityResult
+        }
+        val data = result.data
+        val accountKey = data?.getStringExtra(InstagramLoginActivity.EXTRA_RESULT_ACCOUNT_KEY)
+        if (accountKey.isNullOrBlank()) {
+            connectionStatus.value = "Instagram sign-in did not return an account."
+            return@registerForActivityResult
+        }
+        connectionStatus.value = "Finishing Instagram connection..."
+        Thread({
+            val outcome = MiniHubRuntime.connectors.completeInstagramPhoneLocal(
+                accountKey = accountKey,
+                username = data.getStringExtra(InstagramLoginActivity.EXTRA_RESULT_USERNAME),
+            )
+            val message = when (outcome) {
+                is ConnectOutcome.Connected -> {
+                    val ingest = MiniHubRuntime.connectors.ingestInstagram()
+                    when (ingest) {
+                        is InstagramReadIngestor.Result.Success ->
+                            "Instagram connected. Loaded ${ingest.persistedCount} recent message(s)" +
+                                if (ingest.partial) " (partial history)." else "."
+                        is InstagramReadIngestor.Result.Failed ->
+                            "Instagram connected, but first read failed: ${ingest.code}."
+                    }
+                }
+                is ConnectOutcome.Blocked -> outcome.reason
+                is ConnectOutcome.Started -> "Instagram connection in progress."
+            }
+            runOnUiThread {
+                if (!isDestroyed) {
+                    connectionStatus.value = message
+                    accountsVersion.value++
+                    refreshInbox()
+                    startInstagramForegroundReceiveIfNeeded()
+                }
+            }
+        }, "mini-instagram-connect").start()
+    }
 
     private fun loadFocusStates(accounts: List<app.mini.hub.connector.ConnectedAccount>) {
         if (!MiniHubRuntime.isStorageReady) return
@@ -169,6 +217,14 @@ class MainActivity : ComponentActivity() {
                         connectionStatus.value = message
                         accountsVersion.value++
                     },
+                    onConnectInstagramPhoneLocal = {
+                        connectionStatus.value = "Opening Instagram sign-in..."
+                        instagramConnectLauncher.launch(
+                            android.content.Intent(this, InstagramLoginActivity::class.java)
+                                .putExtra(InstagramLoginActivity.EXTRA_SLOT_KEY, "instagram|pending")
+                                .putExtra(InstagramLoginActivity.EXTRA_RETURN_RESULT, true),
+                        )
+                    },
                     isFocusEnabled = { accountId ->
                         focusEnabledMap.value[accountId.key] ?: false
                     },
@@ -212,6 +268,9 @@ class MainActivity : ComponentActivity() {
                         Thread({
                             val result = runCatching { MiniHubRuntime.connectors.disconnectAccount(account) }
                             if (result.isSuccess && account.id.provider == Provider.WHATSAPP) WhatsAppSyncService.stop(applicationContext)
+                            if (result.isSuccess && account.id.provider == Provider.INSTAGRAM) {
+                                runOnUiThread { stopInstagramForegroundReceive() }
+                            }
                             runOnUiThread {
                                 if (!isDestroyed) {
                                     connectionStatus.value = if (result.isSuccess) "Disconnected. Messages stay in MINI. Reconnect to resume."
@@ -294,9 +353,23 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread { if (!isDestroyed) connectionStatus.value = "Sync could not finish. Your history is kept; try again." }
                 return@Thread
             }
+            val ig = runCatching { MiniHubRuntime.connectors.ingestInstagram() }.getOrNull()
             runOnUiThread {
                 connectionStatus.value = buildString {
                     append("Sync finished: ${summary.inserted} new, ${summary.updated} updated across ${summary.accounts} account(s).")
+                    when (ig) {
+                        is InstagramReadIngestor.Result.Success -> {
+                            append(" Instagram +${ig.persistedCount}")
+                            if (ig.partial) append(" (partial)")
+                            append(".")
+                        }
+                        is InstagramReadIngestor.Result.Failed -> {
+                            if (ig.code != "instagram_phone_local_not_connected") {
+                                append(" Instagram: ${ig.code}.")
+                            }
+                        }
+                        null -> Unit
+                    }
                     if (summary.needsAttention > 0) append(" ${summary.needsAttention} account(s) need attention.")
                 }
                 accountsVersion.value++
@@ -332,6 +405,7 @@ class MainActivity : ComponentActivity() {
                         it.state != app.mini.hub.connector.ConnectionState.Disconnected
                 }
             ) WhatsAppSyncService.start(applicationContext)
+            startInstagramForegroundReceiveIfNeeded()
         }
     }
 
@@ -370,7 +444,44 @@ class MainActivity : ComponentActivity() {
             MiniHubRuntime.ingestCoordinator.setUiListener(null)
             MiniHubRuntime.inboxRefresh = null
             MiniHubRuntime.setWhatsAppForeground(false)
+            stopInstagramForegroundReceive()
         }
+    }
+
+    private fun startInstagramForegroundReceiveIfNeeded() {
+        if (!MiniHubRuntime.isStorageReady) return
+        val account = MiniHubRuntime.connectors.listAccounts().firstOrNull {
+            it.id.provider == Provider.INSTAGRAM &&
+                it.route == app.mini.hub.connector.ConnectorRoute.PhoneLocalBridge &&
+                it.state != app.mini.hub.connector.ConnectionState.Disconnected
+        } ?: run {
+            stopInstagramForegroundReceive()
+            return
+        }
+        val receiver = instagramForegroundReceiver ?: InstagramForegroundReceiver(
+            InstagramReadIngestor(applicationContext, MiniHubRuntime.observationStore),
+        ) { result ->
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                when (result) {
+                    is InstagramReadIngestor.Result.Success -> {
+                        if (result.persistedCount > 0 || result.partial) refreshInbox()
+                        else refreshInbox()
+                    }
+                    is InstagramReadIngestor.Result.Failed -> {
+                        connectionStatus.value = "Instagram receive: ${result.code}"
+                        if (result.code == "session_expired") {
+                            stopInstagramForegroundReceive()
+                        }
+                    }
+                }
+            }
+        }.also { instagramForegroundReceiver = it }
+        receiver.start(account.id)
+    }
+
+    private fun stopInstagramForegroundReceive() {
+        instagramForegroundReceiver?.stop()
     }
     companion object {
         private val BOOTSTRAP_EXECUTOR = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "mini-runtime-bootstrap") }
