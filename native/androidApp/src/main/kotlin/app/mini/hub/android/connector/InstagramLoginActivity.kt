@@ -32,6 +32,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.ViewModel
+import app.mini.hub.domain.AccountId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -67,6 +68,7 @@ class InstagramLoginActivity : ComponentActivity() {
                     val state by model.state.collectAsStateCompat()
                     InstagramLoginScreen(
                         state = state,
+                        readState = model.readState.collectAsStateCompat().value,
                         onSubmitCredentials = model::submitCredentials,
                         onSubmitCode = model::submitCode,
                         onSubmitSelection = model::submitSelection,
@@ -75,6 +77,7 @@ class InstagramLoginActivity : ComponentActivity() {
                             finish()
                         },
                         onDone = { finish() },
+                        onSyncRecent = model::syncRecent,
                         webViewFactory = { webView -> model.attachWebView(webView) },
                     )
                 }
@@ -98,13 +101,28 @@ class InstagramLoginViewModel : ViewModel() {
     private var session: InstagramLoginSession? = null
     private var webViewController: InstagramWebViewLoginController? = null
     private val uiState = MutableStateFlow(InstagramLoginUiState.initial())
+    private val readUiState = MutableStateFlow<InstagramReadUiState>(InstagramReadUiState.Idle)
     val state: StateFlow<InstagramLoginUiState> = uiState.asStateFlow()
+    val readState: StateFlow<InstagramReadUiState> = readUiState.asStateFlow()
+    private var readIngestor: InstagramReadIngestor? = null
+    private var sessionContext: android.content.Context? = null
 
     fun bind(context: android.content.Context, slotKey: String) {
         if (session != null) return
+        sessionContext = context.applicationContext
         val created = InstagramLoginSession(context, slotKey)
         session = created
-        created.observe { uiState.value = it }
+        created.observe {
+            uiState.value = it
+            val accountKey = it.verifiedAccountKey
+            if (it.status == InstagramLoginStatus.AUTHENTICATED && accountKey != null) {
+                val accountId = runCatching { AccountId.parse(accountKey) }.getOrNull()
+                if (accountId != null) {
+                    val ingestor = readIngestor ?: InstagramReadIngestor(context).also { readIngestor = it }
+                    readUiState.value = InstagramReadUiState.Loaded(ingestor.loadPersisted(accountId))
+                }
+            }
+        }
         val lastAccountKey = context.getSharedPreferences(
             InstagramLoginSession.PROBE_STATE_PREFS,
             android.content.Context.MODE_PRIVATE,
@@ -157,6 +175,20 @@ class InstagramLoginViewModel : ViewModel() {
         session?.close()
         session = null
     }
+
+    fun syncRecent() {
+        val accountKey = uiState.value.verifiedAccountKey ?: return
+        val accountId = runCatching { AccountId.parse(accountKey) }.getOrNull() ?: return
+        val context = sessionContext ?: return
+        val ingestor = readIngestor ?: InstagramReadIngestor(context).also { readIngestor = it }
+        readUiState.value = InstagramReadUiState.Syncing
+        Thread {
+            when (val result = ingestor.sync(accountId)) {
+                is InstagramReadIngestor.Result.Success -> readUiState.value = InstagramReadUiState.Loaded(result.view)
+                is InstagramReadIngestor.Result.Failed -> readUiState.value = InstagramReadUiState.Failed(result.code)
+            }
+        }.start()
+    }
 }
 
 // Small shim so the Activity does not need the full lifecycle-compose artifact.
@@ -173,11 +205,13 @@ private fun <T> StateFlow<T>.collectAsStateCompat(): androidx.compose.runtime.St
 @androidx.compose.runtime.Composable
 private fun InstagramLoginScreen(
     state: InstagramLoginUiState,
+    readState: InstagramReadUiState,
     onSubmitCredentials: (String, String) -> Unit,
     onSubmitCode: (String) -> Unit,
     onSubmitSelection: (String, String) -> Unit,
     onCancel: () -> Unit,
     onDone: () -> Unit,
+    onSyncRecent: () -> Unit,
     webViewFactory: (WebView) -> Unit,
 ) {
     Column(
@@ -217,6 +251,8 @@ private fun InstagramLoginScreen(
             InstagramLoginStatus.AUTHENTICATED -> {
                 Text("Signed in and verified as @${state.verifiedUsername.orEmpty()} (id ${state.verifiedUserId.orEmpty()}).")
                 Text("The encrypted session is stored. This probe does not enable the account or send anything.")
+                Button(onClick = onSyncRecent) { Text("Sync recent conversations") }
+                InstagramReadPanel(readState)
                 Button(onClick = onDone) { Text("Done") }
             }
             InstagramLoginStatus.FAILED -> {
@@ -234,6 +270,24 @@ private fun InstagramLoginScreen(
             state.status != InstagramLoginStatus.CANCELLED
         ) {
             TextButton(onClick = onCancel) { Text("Cancel") }
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun InstagramReadPanel(readState: InstagramReadUiState) {
+    when (readState) {
+        InstagramReadUiState.Idle -> Text("No Instagram messages loaded.")
+        InstagramReadUiState.Syncing -> Text("Reading recent conversations. Messages are not marked read.")
+        is InstagramReadUiState.Failed -> Text("Read failed: ${readState.code}.")
+        is InstagramReadUiState.Loaded -> {
+            Text(if (readState.view.partial) "Recent conversations (partial history)" else "Recent conversations")
+            readState.view.conversations.forEach { conversation ->
+                Text(conversation.title, style = MaterialTheme.typography.titleMedium)
+                conversation.messages.forEach { message ->
+                    Text("${message.direction}: ${message.text}")
+                }
+            }
         }
     }
 }

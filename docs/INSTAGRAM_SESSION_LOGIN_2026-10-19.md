@@ -8,10 +8,9 @@ owner-operated sign-in screen on the separate `app.mini.hub.rtprobe` application
 ID. The login machine no longer stops at `login_transport_unavailable`.
 
 What it still does not do: it does not enable Instagram in normal Accounts, does
-not perform any live send, and does not change any qualification gate. The first
-real sign-in must be performed by the owner; this agent does not obtain or submit
-the owner's credentials. No live account, message, or qualification evidence is
-produced by automated tests, which do not log in over the network.
+not perform any live send, does not mark messages read, and does not change any
+qualification gate. The first real sign-in must be performed by the owner; this
+agent does not obtain or submit the owner's credentials.
 
 The accepted prior milestone (Android runtime compatibility) still holds.
 WhatsApp accounts, the generated API, dependency pins, session files, and the
@@ -147,6 +146,32 @@ login client is built with `LogRedactedLoginResponses` false, so no login
 request/response, URL, or cookie is logged. This remains a shared-process guard
 that must be re-audited on every upstream bump.
 
+## Read-only Instagram ingestion
+
+`igruntime/read.go` uses the pinned `instameow.Client.LoadIndex` path after the
+encrypted session has been restored and the upstream viewer identity has been
+verified. It requests a bounded thread and message window, maps only upstream
+thread/message data, and does not call send, mark-read, or pagination-mutating
+operations. The Go result preserves verified account identity, upstream IDs,
+timestamps, sender IDs, and inbound/outbound direction.
+
+`InstagramReadIngestor` rejects a verified-identity mismatch, maps the result to
+the encrypted canonical observation store, and uses an account-scoped stable
+notification key for repeated-sync deduplication. It stores only a digest for
+raw message text in observation metadata; the rtprobe screen renders the
+bounded local timeline. Partial coverage is shown as partial rather than
+presented as complete history. Missing or expired accounts return the safe
+`session_expired` code. The read database is separate from the normal app and
+from the login session database.
+
+The current device test confirms synthetic mapping, direction, partial coverage,
+account isolation, live bounded sync, repeated-sync idempotency, and persisted
+observation IDs. The test does not print account names, message text, URLs,
+cookies, or page contents. It does not fabricate an inbound event if the bounded
+upstream window contains no incoming message. Session restart restoration was
+previously confirmed by `LiveInstagramRestoreDeviceTest`; read synchronization
+is currently manual from the authenticated rtprobe screen.
+
 ## Tests and limitations
 
 Go `go test ./igruntime ./waruntime` passes. `igruntime` coverage includes:
@@ -169,6 +194,15 @@ reopened, and `LiveInstagramRestoreDeviceTest` reported `OK (1 test)`. That test
 restored the encrypted session into a fresh runtime and completed the harmless
 authenticated inbox read. No message was sent and no qualification gate or
 normal Accounts binding changed.
+
+Fresh read-only validation after the ingestion build reported `OK (3 tests)`:
+synthetic mapping and account-isolation checks plus the live bounded-sync and
+repeated-sync idempotency check. The updated rtprobe and test APKs were again
+installed with `adb install -r` only. This run does not claim a newly-arrived
+incoming message was generated, because the owner-controlled inbox was not
+modified for testing. The live check avoids printing private content and the
+read screen remains manual-sync only. The existing Kotlin/AGP compatibility
+warning is non-fatal.
 
 ## First real sign-in (owner)
 
@@ -194,4 +228,3 @@ the first real sign-in on a phone with the rtprobe build installed:
 
 Do not install this build over `app.mini.hub`, and do not enable the account in
 Accounts; this probe is for verifying the real login path only.
-

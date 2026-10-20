@@ -75,7 +75,8 @@ class InstagramLoginSession(
                     )
                 }
                 is InstagramSessionRestore.Result.NoSession,
-                is InstagramSessionRestore.Result.Failed -> onMiss()
+                is InstagramSessionRestore.Result.Failed,
+                is InstagramSessionRestore.Result.ReadJson -> onMiss()
             }
         }
     }
