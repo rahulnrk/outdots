@@ -20,7 +20,9 @@ import org.json.JSONObject
 import java.security.MessageDigest
 
 private const val INSTAGRAM_SOURCE = "instagram.read"
-private const val INSTAGRAM_PACKAGE = "com.instagram.android"
+// Connected phone-local Instagram rows use the provider. prefix so Inbox shows them without
+// requiring the Instagram notification-source toggle (same rule as other connected providers).
+private val INSTAGRAM_PACKAGE = app.mini.hub.connector.ConnectorObservationFactory.packageFor(Provider.INSTAGRAM)
 
 class InstagramReadIngestor(
     context: Context,
