@@ -186,7 +186,18 @@ class InboxViewModel(
     /** Store reads and analysis; runs on the refresh worker. */
     private fun loadRefresh(previousRecords: Map<String, app.mini.hub.attention.ConversationAttention>): RefreshResult {
         val policy = CommunicationSourcePolicy(selectedSources = selectedSources)
-        val summaries = observationStore.getConversationSummaries()
+        val allSummaries = observationStore.getConversationSummaries()
+        val instagramCandidates = allSummaries.filter {
+            it.accountId.provider == app.mini.hub.domain.Provider.INSTAGRAM || it.packageId.contains("instagram", ignoreCase = true)
+        }
+        android.util.Log.i(
+            "MiniInboxRefresh",
+            "instagram_candidates=${instagramCandidates.size} total=${allSummaries.size} details=" +
+                instagramCandidates.joinToString(";") { summary ->
+                    "pkg=${summary.packageId},visible=${policy.isVisibleInInbox(summary.packageId) || summary.packageId in extraVisiblePackages},cat=${summary.category},cov=${summary.coverage},msgs=${summary.observationCount},evidence=${summary.messagingEvidence},snippetBlank=${summary.latestSnippet.isBlank()},isConversation=${app.mini.hub.observation.isConversationSummary(summary)}"
+                },
+        )
+        val summaries = allSummaries
             .filter { policy.isVisibleInInbox(it.packageId) || it.packageId in extraVisiblePackages }
             .filterNot { isHiddenWhatsAppChat(it.conversationId.value) }
             .let { all ->
