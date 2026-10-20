@@ -85,6 +85,14 @@
             android:process=":mslogin"
             android:label="Messenger sign-in (probe)" />
 
+        <!--
+          Read-only third-party notices (assets/licenses). Not exported.
+        -->
+        <activity
+            android:name=".ui.ThirdPartyNoticesActivity"
+            android:exported="false"
+            android:label="Third-party notices" />
+
         <service
             android:name=".notification.MiniNotificationListenerService"
             android:label="Mini Hub Notification Listener"

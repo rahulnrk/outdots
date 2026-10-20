@@ -671,6 +671,10 @@ internal fun MiniConsolePane(
         Spacer(Modifier.height(20.dp))
         Text("YOUR PREFERENCES", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         TextButton(onClick = onOpenLearning) { Text("Writing style") }
+        val noticesContext = LocalContext.current
+        TextButton(onClick = {
+            noticesContext.startActivity(android.content.Intent(noticesContext, ThirdPartyNoticesActivity::class.java))
+        }) { Text("Third-party notices") }
         Text(
             "Listener: ${
                 when {

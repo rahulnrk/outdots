@@ -103,6 +103,7 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3")
     implementation("androidx.core:core-ktx:1.13.1")
     testImplementation(kotlin("test"))
+    testImplementation("org.json:json:20240303")
     androidTestImplementation(kotlin("test"))
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test:runner:1.5.2")
@@ -146,3 +147,5 @@ val verifyReleaseRuntimeLicensing = tasks.register("verifyReleaseRuntimeLicensin
     }
 }
 tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(verifyReleaseRuntimeLicensing) }
+
+apply(from = "third-party-notices.gradle.kts")

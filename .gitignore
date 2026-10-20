@@ -14,4 +14,6 @@ tmp/go126root/
 tmp/go126.zip
 tmp/gopath/
 tmp/go.zip
+# Local, unpublished corresponding-source preparation output
+tmp/corresponding-source/
 native/whatsappRuntime/build/
