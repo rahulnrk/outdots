@@ -21,6 +21,7 @@ import app.mini.hub.connector.ConnectorProviderGateway
 import app.mini.hub.connector.ConnectorSyncEngine
 import app.mini.hub.connector.GatePolicy
 import app.mini.hub.connector.GmailSender
+import app.mini.hub.connector.InstagramPhoneLocalHealth
 import app.mini.hub.connector.GoogleChatConnector
 import app.mini.hub.connector.GoogleChatSender
 import app.mini.hub.connector.OAuthProviderSpecs
@@ -356,24 +357,24 @@ class AndroidConnectorRegistry(
                     "instagram_phone_local_ingest persisted=${result.persistedCount} upstream_conversations=${result.view.conversations.size} stored_conversations=${summaries.size} partial=${result.partial} summaries=$summaryDiag",
                 )
                 accounts.upsert(
-                    account.copy(
-                        state = ConnectionState.Healthy,
-                        userActionRequired = if (result.partial) {
-                            "Partial history: only a bounded recent window is fetched while MINI is open."
-                        } else null,
-                        lastSuccessfulSyncMillis = now,
+                    InstagramPhoneLocalHealth.applyIngestResult(
+                        account = account,
+                        success = true,
+                        partial = result.partial,
+                        failureCode = null,
+                        nowMillis = now,
                     ),
                 )
             }
             is InstagramReadIngestor.Result.Failed -> {
-                if (result.code == "session_expired") {
-                    accounts.upsert(
-                        account.copy(
-                            state = ConnectionState.Expired,
-                            userActionRequired = "Reconnect Instagram to resume this account. Local history is kept.",
-                        ),
-                    )
-                }
+                val updated = InstagramPhoneLocalHealth.applyIngestResult(
+                    account = account,
+                    success = false,
+                    partial = false,
+                    failureCode = result.code,
+                    nowMillis = now,
+                )
+                if (updated !== account) accounts.upsert(updated)
             }
         }
         return result

@@ -1,5 +1,12 @@
 # Instagram phone-local production wiring (20 Oct 2026)
 
+## Milestone status: READ CLOSED (foreground)
+
+Phone-local Instagram **owner sign-in, bounded read ingest, Inbox visibility, and
+foreground receive** are wired into `app.mini.hub` and device-verified on a Pixel 7 Pro.
+This closes the Instagram **read** milestone. It does **not** close sending or
+background receiving.
+
 ## Scope
 
 This package connects the tested phone-local Instagram login/read/foreground-receive
@@ -11,7 +18,51 @@ It does **not**:
 - silently import credentials or observations from `app.mini.hub.rtprobe`
 - enable Instagram sending or change qualification gates
 - claim background receiving
-- install over `app.mini.hub` by itself
+- require uninstall/clear of `app.mini.hub` data
+
+## Build / commits (read close-out)
+
+Representative production wiring and defect fixes:
+
+| Commit | Role |
+|---|---|
+| `9bb52dc` | Wire Instagram phone-local into Accounts and Inbox |
+| `251c8ae` | Keep phone-local Instagram out of Graph API sync (false Expiry root cause) |
+| `432ca82` | Adapt login Activity to foreground sync lambda |
+| `3269629` | Serialize phone-local ingest and share session DB |
+| `81515d4` | Show phone-local DMs under `provider.instagram` (Inbox without notification-source toggle) |
+| OTP sequence `35a7c2a`…`bdce0b6` | OTP UI / field key / stale selection fixes for owner sign-in |
+
+Installed verification used `adb install -r` only over `app.mini.hub` (no clear/uninstall).
+
+## Device evidence (content-free)
+
+Observed on the owner Pixel after the false-expiry fix:
+
+| Check | Result |
+|---|---|
+| Accounts registry | `instagram=1` alongside preserved `gmail=2`, `whatsapp=1` |
+| Console | Instagram Connected / Healthy; Reply off |
+| Manual Sync | `MiniUnifiedSync ... skipped=phone_local_instagram` |
+| Ingest | `MiniInstagramIngest result=success persisted=5 conversations=2` (repeat syncs stay at 5) |
+| Store summaries | `pkg=provider.instagram,cat=DirectMessage,cov=PartialApiSync,evidence=true` |
+| Inbox | `MiniInboxRefresh after_filters ... instagram_conversations=2` |
+| Send | Reply off / `instagram_phone_local_send_disabled` path unchanged |
+| WhatsApp | Still present and Healthy |
+
+## Failures fixed during production wiring
+
+1. **False Expiry on Sync**  
+   Official `ConnectorSyncEngine` treated the placeholder `phone-local-session` token as a Graph credential and marked the account Expired. Fix: skip `PhoneLocalBridge` Instagram in the API sync engine; restore Healthy/Expired only from dedicated ingest outcomes (`InstagramPhoneLocalHealth`).
+
+2. **Inbox hidden despite successful ingest**  
+   Observations used `com.instagram.android`, so visibility required the Instagram notification-source toggle. Fix: store connected phone-local rows as `provider.instagram` (same connected-account rule as other providers).
+
+3. **Concurrent session-store opens**  
+   Foreground receive and manual sync opened separate SQLCipher handles. Fix: process-wide ingest lock + shared session DB handle.
+
+4. **OTP / sign-in blockers** (earlier in the same arc)  
+   Missing OTP UI fields, wrong OTP key (`verification_code` → `otp_code`), and stale method selection races.
 
 ## Entry points
 
@@ -41,39 +92,43 @@ It does **not**:
 
 ## Receiving and send policy
 
-- Foreground receiving starts when MainActivity resumes with a connected
+- Foreground receiving starts when MainActivity resumes with a **Healthy**
   Instagram phone-local account and stops on pause. Interval/backoff match the
-  tested rtprobe receiver. Overlapping reads are locked.
+  tested rtprobe receiver. Overlapping reads are process-locked.
 - Background receiving remains unimplemented and unqualified.
 - Gateway rejects phone-local Instagram sends with
   `instagram_phone_local_send_disabled`. Inbox forces native handoff for that
   route. Qualification gates are unchanged.
 
-## Focused checks already expected
+## Focused regression coverage
 
-- `ConnectRoutePolicyTest` includes Instagram phone-local in debug visibility.
-- `InstagramDispatchWindowTest.phoneLocalRouteRejectsSendBeforeProvider`.
-- Existing Instagram read/signature device tests remain valid for the runtime.
+- `InstagramDispatchWindowTest.phoneLocalRouteRejectsSendBeforeProvider`
+- `InstagramPhoneLocalSyncHealthTest`
+  - official API sync skips phone-local Instagram
+  - transient ingest failures do not expire a Healthy session
+  - `session_expired` requires reconnect
+  - successful ingest restores Healthy
+  - `provider.instagram` stays Inbox-visible without the notification-source toggle
+- `ConnectRoutePolicyTest` includes Instagram phone-local in debug visibility
 
-## Device verification before installing over app.mini.hub
+## Remaining gaps (tracked, not closed)
 
-Build only:
+- Instagram **sending** (qualification unchanged; phone-local send stays disabled)
+- Instagram **background receiving**
+- Optional: reduce content-free diagnostic log verbosity after the LinkedIn arc
+- Distribution / AGPL packaging for the combined Go runtime remains a release gate
+
+## Verification commands
 
 ```bat
 cd native
-gradlew.bat :androidApp:assembleDebug :androidApp:testDebugUnitTest :shared:jvmTest --tests app.mini.hub.connector.InstagramDispatchWindowTest --tests app.mini.hub.android.connector.ConnectRoutePolicyTest
+gradlew.bat :shared:compileDebugKotlinAndroid :androidApp:compileDebugKotlin :shared:cleanJvmTest :shared:jvmTest --tests app.mini.hub.connector.InstagramPhoneLocalSyncHealthTest --tests app.mini.hub.connector.InstagramDispatchWindowTest
 ```
 
-Do **not** run `adb install` over `app.mini.hub` until the owner accepts the APK.
+Owner device checks after `adb install -r` (no clear):
 
-Owner verification after a deliberate install:
-
-1. Confirm existing Gmail/Outlook/WhatsApp accounts, drafts and observations still open.
-2. Manage Accounts shows **Instagram personal (not live-qualified)**.
-3. Connect, complete owner sign-in, tap Continue.
-4. Inbox shows recent Instagram conversations/message text for that account.
-5. Keep MINI foregrounded, send a new Instagram message from another device, wait
-   up to ~30s, confirm it appears without tapping Sync.
-6. Tap Sync again: no duplicates.
-7. Force-stop/reopen MINI: messages remain, no duplicates, send still disabled.
-8. Background receiving is not claimed if the app is not visible.
+1. Existing Gmail/WhatsApp accounts and observations still open.
+2. Console shows Instagram Connected/Healthy with Reply off.
+3. Sync logs `skipped=phone_local_instagram` and Instagram ingest success without Expiry.
+4. Inbox includes Instagram conversations (account chip / `instagram_conversations` log).
+5. Foreground receive remains the only automatic arrival claim.

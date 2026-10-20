@@ -22,9 +22,19 @@ This directory packages MINI's single phone-local gomobile runtime
    (replace for github.com/imroc/req/v3, MIT) and maunium.net/go/mautrix
    v0.32.0 (MPL-2.0).
 
+3. liruntime: LinkedIn messaging protocol facade (debug feasibility only).
+   Depends on mautrix-linkedin (https://github.com/mautrix/linkedin), package
+   go.mau.fi/mautrix-linkedin/pkg/linkedingo.
+   License: GNU Affero General Public License v3.0 or later.
+   LICENSE SHA-256: 0D96A4FF68AD6D4B6F1F30F713B18D5184912BA8DD389F86AA7710DB079ABCB0
+   Pinned: tag v0.2609.0 = 788444401499e504b81d50480ddb686cdb976281
+   LICENSE.exceptions grants embedding rights only to Beeper and Element.
+   Those exceptions do not apply to MINI. Upstream auth is browser cookie based;
+   login remains unavailable in this facade until an isolated probe lands.
+
 AGPL distribution requirements (must be satisfied before any build that
-contains igruntime leaves the developer's machine, including testers):
-- The combined libgojni.so is a work based on mautrix-meta. Distributing it
+contains igruntime or liruntime leaves the developer's machine, including testers):
+- The combined libgojni.so is a work based on AGPL protocol packages. Distributing it
   requires offering the Corresponding Source of the whole linked runtime
   (this module, go.mod/go.sum, build-android.ps1, and any modifications to
   upstream) under AGPL-3.0-or-later.
@@ -32,7 +42,7 @@ contains igruntime leaves the developer's machine, including testers):
   MINI has no server, but the offer must still accompany the app.
 - The Android app that loads the runtime is likely a combined work. Options
   recorded in docs/CONNECTOR_ROADMAP.md: (a) license MINI under AGPL,
-  (b) obtain a commercial licence or exception from the mautrix-meta authors,
+  (b) obtain a commercial licence or exception from the upstream authors,
   (c) write an independent client. No option has been chosen.
 - Until decided: debug builds only, not distributed. Release must not bind
-  ./igruntime.
+  ./igruntime or ./liruntime.
