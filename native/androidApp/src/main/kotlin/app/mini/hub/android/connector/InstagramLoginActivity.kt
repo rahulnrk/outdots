@@ -305,6 +305,7 @@ private fun InstagramLoginScreen(
                     CredentialsForm(onSubmitCredentials)
                     }
                     state.fieldIds.any { it == "verification_code" || it == "two_factor_code" || it == "captcha_code" } ||
+                        state.fieldIds.any { it == "otp_code" || it == "backup_code" } ||
                         state.state == "2fa" -> {
                     CodeForm(onSubmitCode)
                     }

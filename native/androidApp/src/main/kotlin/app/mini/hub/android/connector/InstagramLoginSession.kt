@@ -98,10 +98,15 @@ class InstagramLoginSession(
         executor.execute {
             val current = latest.get()
             publish(current.copy(status = InstagramLoginStatus.LOADING, instructions = "Submitting verification code…"))
-            val needsEnterCodeAction = current.fieldIds.contains("action") ||
+            val hasExplicitCodeField = current.fieldIds.any {
+                it == "otp_code" || it == "verification_code" || it == "two_factor_code" || it == "backup_code"
+            }
+            val needsEnterCodeAction = !hasExplicitCodeField && (
+                current.fieldIds.contains("action") ||
                 current.choices.any { it.fieldId == "action" && it.value.equals("Enter code", ignoreCase = true) } ||
                 current.instructions.orEmpty().contains("Enter code", ignoreCase = true)
-            if (needsEnterCodeAction && !current.fieldIds.contains("verification_code")) {
+            )
+            if (needsEnterCodeAction) {
                 val selectEnter = JSONObject().put("action", "Enter code").toString().toByteArray(Charsets.UTF_8)
                 try {
                     lc.submitInput(selectEnter)
@@ -112,9 +117,14 @@ class InstagramLoginSession(
                 // Refresh snapshot after selecting Enter code; continue only if still interactive.
                 publishFromController(lc)
             }
+            val after = latest.get()
             val codeField = when {
-                latest.get().fieldIds.contains("two_factor_code") -> "two_factor_code"
-                else -> "verification_code"
+                after.fieldIds.contains("otp_code") -> "otp_code"
+                after.fieldIds.contains("backup_code") -> "backup_code"
+                after.fieldIds.contains("two_factor_code") -> "two_factor_code"
+                after.fieldIds.contains("verification_code") -> "verification_code"
+                // CAA/bloks email OTP uses otp_code even when the snapshot was previously stripped.
+                else -> "otp_code"
             }
             val input = JSONObject().put(codeField, trimmed).toString().toByteArray(Charsets.UTF_8)
             runUpstream(lc) { lc.submitInput(input) }

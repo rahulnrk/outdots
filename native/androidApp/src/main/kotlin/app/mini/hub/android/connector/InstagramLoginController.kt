@@ -42,12 +42,20 @@ class InstagramLoginController private constructor(private val native: Any) {
      * call and is never retained by Kotlin or Go.
      */
     fun submitCredentials(username: String, password: String) {
-        method("submitCredentials", String::class.java, String::class.java).invoke(native, username, password)
+        try {
+            method("submitCredentials", String::class.java, String::class.java).invoke(native, username, password)
+        } catch (error: java.lang.reflect.InvocationTargetException) {
+            throw error.cause ?: error
+        }
     }
 
     /** Continues a non-WebView upstream step (2FA code, account selection). */
     fun submitInput(inputJson: ByteArray) {
-        method("submitInput", ByteArray::class.java).invoke(native, inputJson)
+        try {
+            method("submitInput", ByteArray::class.java).invoke(native, inputJson)
+        } catch (error: java.lang.reflect.InvocationTargetException) {
+            throw error.cause ?: error
+        }
     }
 
     /**
