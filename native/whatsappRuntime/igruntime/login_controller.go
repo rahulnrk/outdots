@@ -274,19 +274,28 @@ func (lc *LoginController) applyStep(step *bridgev2.LoginStep) error {
 	case bridgev2.LoginStepTypeUserInput:
 		state := LoginStateTwoFactor
 		fieldIDs := make([]string, 0)
+		choices := make([]LoginChoice, 0)
 		if step.UserInputParams != nil {
 			for _, field := range step.UserInputParams.Fields {
 				fieldIDs = append(fieldIDs, field.ID)
 				if field.Type == bridgev2.LoginInputFieldTypeSelect {
 					state = LoginStateSelect
+					for _, option := range field.Options {
+						choices = append(choices, LoginChoice{FieldID: field.ID, Value: option, Label: option})
+					}
 				}
 			}
+		}
+		if state == LoginStateSelect && len(choices) == 0 {
+			lc.machine.markFailed("selection_options_missing")
+			return errors.New("selection_options_missing")
 		}
 		return lc.machine.Apply(UpstreamStep{
 			State:        state,
 			StepID:       step.StepID,
 			Instructions: step.Instructions,
 			FieldIDs:     fieldIDs,
+			Choices:      choices,
 		})
 
 	case bridgev2.LoginStepTypeCookies:

@@ -208,6 +208,31 @@ func TestLoginMachineStatesAndSecretBoundaries(t *testing.T) {
 	}
 }
 
+func TestLoginMachineSelectionChoicesPreserveLabelsAndValues(t *testing.T) {
+	machine := NewLoginMachine()
+	if err := machine.Apply(UpstreamStep{
+		State:        LoginStateSelect,
+		StepID:       "synthetic.select",
+		Instructions: "Choose a sign-in method",
+		FieldIDs:     []string{"choice"},
+		Choices: []LoginChoice{
+			{FieldID: "choice", Value: "profile-value-a", Label: "Profile A"},
+			{FieldID: "choice", Value: "mfa-sms-value", Label: "Text message"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := string(machine.SnapshotJSON())
+	for _, want := range []string{"Profile A", "profile-value-a", "Text message", "mfa-sms-value"} {
+		if !strings.Contains(snapshot, want) {
+			t.Fatalf("selection snapshot omitted %q: %s", want, snapshot)
+		}
+	}
+	if strings.Contains(snapshot, "password") {
+		t.Fatal("selection snapshot unexpectedly contained credential material")
+	}
+}
+
 // TestControllerStepTranslation exercises the real bridgev2.LoginStep mapping
 // without network I/O: a cookies CAPTCHA step, a web-challenge cookie step, and
 // a 2FA user-input step must map to the correct sanitized states and keep

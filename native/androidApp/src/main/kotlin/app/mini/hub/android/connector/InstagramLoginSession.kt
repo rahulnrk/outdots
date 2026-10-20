@@ -95,8 +95,18 @@ class InstagramLoginSession(
 
     fun submitSelection(fieldId: String, value: String) {
         val lc = controller.get() ?: return
-        val input = JSONObject().put(fieldId, value).toString().toByteArray(Charsets.UTF_8)
-        executor.execute { runUpstream(lc) { lc.submitInput(input) } }
+        if (!isCurrentSelection(fieldId, value)) {
+            publish(latest.get().copy(status = InstagramLoginStatus.FAILED, failureCode = "invalid_or_stale_selection"))
+            return
+        }
+        executor.execute {
+            if (!isCurrentSelection(fieldId, value)) {
+                publish(latest.get().copy(status = InstagramLoginStatus.FAILED, failureCode = "invalid_or_stale_selection"))
+                return@execute
+            }
+            val input = JSONObject().put(fieldId, value).toString().toByteArray(Charsets.UTF_8)
+            runUpstream(lc) { lc.submitInput(input) }
+        }
     }
 
     /** Called by the WebView controller with an attempt-tagged result. */
@@ -175,12 +185,22 @@ class InstagramLoginSession(
                     state = state,
                     instructions = snapshot?.optString("instructions"),
                     failureCode = null,
-                    fieldIds = snapshot?.optJSONArray("field_ids")?.let { arr ->
-                        buildList { for (i in 0 until arr.length()) add(arr.optString(i)) }
-                    } ?: emptyList(),
-                ),
-            )
+                        fieldIds = snapshot?.optJSONArray("field_ids")?.let { arr ->
+                            buildList { for (i in 0 until arr.length()) add(arr.optString(i)) }
+                        } ?: emptyList(),
+                        choices = parseChoices(snapshot),
+                    ),
+                )
         }
+    }
+
+    private fun isCurrentSelection(fieldId: String, value: String): Boolean {
+        return isValidInstagramSelection(latest.get(), fieldId, value)
+    }
+
+    private fun parseChoices(snapshot: JSONObject?): List<InstagramSelectionOption> {
+        val parsed = parseInstagramSelectionChoices(snapshot)
+        return parsed
     }
 
     private fun persistAndVerify(lc: InstagramLoginController) {
@@ -238,9 +258,39 @@ data class InstagramLoginUiState(
     val verifiedUserId: String? = null,
     val verifiedUsername: String? = null,
     val verifiedAccountKey: String? = null,
+    val choices: List<InstagramSelectionOption> = emptyList(),
 ) {
     companion object {
         fun initial() = InstagramLoginUiState(InstagramLoginStatus.LOADING, null, null, null)
         fun unavailable() = InstagramLoginUiState(InstagramLoginStatus.UNAVAILABLE, null, null, "runtime_unavailable")
     }
 }
+
+data class InstagramSelectionOption(
+    val fieldId: String,
+    val value: String,
+    val label: String,
+)
+
+internal fun parseInstagramSelectionChoices(snapshot: JSONObject?): List<InstagramSelectionOption> {
+    val choices = snapshot?.optJSONArray("choices") ?: return emptyList()
+    return buildList {
+        for (i in 0 until choices.length()) {
+            val item = choices.optJSONObject(i) ?: continue
+            val fieldId = item.optString("field_id")
+            val value = item.optString("value")
+            val label = item.optString("label")
+            if (fieldId.isNotBlank() && value.isNotBlank() && label.isNotBlank()) {
+                add(InstagramSelectionOption(fieldId, value, label))
+            }
+        }
+    }
+}
+
+internal fun isValidInstagramSelection(
+    state: InstagramLoginUiState,
+    fieldId: String,
+    value: String,
+): Boolean = fieldId.isNotBlank() && value.isNotBlank() &&
+    state.status == InstagramLoginStatus.INPUT && state.state == "select" &&
+    state.choices.any { it.fieldId == fieldId && it.value == value }

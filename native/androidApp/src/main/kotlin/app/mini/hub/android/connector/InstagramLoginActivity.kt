@@ -7,8 +7,10 @@ import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -16,6 +18,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -192,10 +195,8 @@ private fun InstagramLoginScreen(
                     CredentialsForm(onSubmitCredentials)
                 } else if (state.fieldIds.contains("verification_code")) {
                     CodeForm(onSubmitCode)
-                } else if (state.state == "select" && state.fieldIds.isNotEmpty()) {
-                    // Upstream account/MFA-method selection. The owner re-enters the
-                    // chosen value for the single select field upstream declared.
-                    SelectionForm(state.fieldIds.first(), onSubmitSelection)
+                } else if (state.state == "select") {
+                    SelectionForm(state.choices, onSubmitSelection)
                 } else {
                     Text("Awaiting the next sign-in step.")
                 }
@@ -273,13 +274,27 @@ private fun CodeForm(onSubmit: (String) -> Unit) {
 }
 
 @androidx.compose.runtime.Composable
-private fun SelectionForm(fieldId: String, onSubmit: (String, String) -> Unit) {
-    var value by remember { mutableStateOf("") }
-    OutlinedTextField(
-        value = value,
-        onValueChange = { value = it },
-        label = { Text("Enter the option shown above") },
-        modifier = Modifier.fillMaxWidth(),
-    )
-    Button(onClick = { onSubmit(fieldId, value) }, enabled = value.isNotBlank()) { Text("Continue") }
+private fun SelectionForm(
+    options: List<InstagramSelectionOption>,
+    onSubmit: (String, String) -> Unit,
+) {
+    if (options.isEmpty()) {
+        Text("Instagram did not provide any selectable options. Cancel and retry the sign-in.")
+        return
+    }
+    var selected by remember(options) { mutableStateOf<InstagramSelectionOption?>(null) }
+    options.forEach { option ->
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { selected = option },
+        ) {
+            RadioButton(selected = selected == option, onClick = { selected = option })
+            Text(option.label, modifier = Modifier.padding(top = 12.dp))
+        }
+    }
+    Button(
+        onClick = { selected?.let { onSubmit(it.fieldId, it.value) } },
+        enabled = selected != null,
+    ) { Text("Continue") }
 }

@@ -43,10 +43,19 @@ type UpstreamStep struct {
 	StepID             string
 	Instructions       string
 	FieldIDs           []string
+	Choices            []LoginChoice
 	WebViewURL         string
 	WebViewUserAgent   string
 	WebViewExtractJS   string
 	WebViewWaitPattern string
+}
+
+// LoginChoice preserves the upstream submission value and display label.
+// The pinned bridge currently supplies the same string for both.
+type LoginChoice struct {
+	FieldID string `json:"field_id"`
+	Value   string `json:"value"`
+	Label   string `json:"label"`
 }
 
 // LoginMachine is the narrow, gomobile-safe boundary around the pinned
@@ -58,6 +67,7 @@ type LoginMachine struct {
 	stepID         string
 	instructions   string
 	fieldIDs       []string
+	choices        []LoginChoice
 	webViewURL     string
 	webViewUA      string
 	webViewExtract string
@@ -67,12 +77,13 @@ type LoginMachine struct {
 }
 
 type loginSnapshot struct {
-	State        string   `json:"state"`
-	StepID       string   `json:"step_id,omitempty"`
-	Instructions string   `json:"instructions,omitempty"`
-	FieldIDs     []string `json:"field_ids,omitempty"`
-	WebViewStep  bool     `json:"webview_step,omitempty"`
-	FailureCode  string   `json:"failure_code,omitempty"`
+	State        string        `json:"state"`
+	StepID       string        `json:"step_id,omitempty"`
+	Instructions string        `json:"instructions,omitempty"`
+	FieldIDs     []string      `json:"field_ids,omitempty"`
+	Choices      []LoginChoice `json:"choices,omitempty"`
+	WebViewStep  bool          `json:"webview_step,omitempty"`
+	FailureCode  string        `json:"failure_code,omitempty"`
 }
 
 // NewLoginMachine starts at the exact upstream credentials step. No device,
@@ -108,6 +119,7 @@ func (m *LoginMachine) SnapshotJSON() []byte {
 		StepID:       m.stepID,
 		Instructions: m.instructions,
 		FieldIDs:     append([]string(nil), m.fieldIDs...),
+		Choices:      append([]LoginChoice(nil), m.choices...),
 		WebViewStep:  m.webViewPending,
 		FailureCode:  m.failureCode,
 	})
@@ -173,6 +185,7 @@ func (m *LoginMachine) Apply(step UpstreamStep) error {
 	m.stepID = step.StepID
 	m.instructions = step.Instructions
 	m.fieldIDs = sanitizeFieldIDs(step.FieldIDs)
+	m.choices = sanitizeChoices(step.Choices)
 	m.webViewPending = webView
 	if webView {
 		m.webViewURL = step.WebViewURL
@@ -221,6 +234,7 @@ func (m *LoginMachine) Cancel() {
 	m.stepID = ""
 	m.instructions = ""
 	m.fieldIDs = nil
+	m.choices = nil
 	m.webViewURL = ""
 	m.webViewUA = ""
 	m.webViewExtract = ""
@@ -239,6 +253,7 @@ func (m *LoginMachine) fail(code string) {
 	m.stepID = ""
 	m.instructions = ""
 	m.fieldIDs = nil
+	m.choices = nil
 	m.webViewURL = ""
 	m.webViewUA = ""
 	m.webViewExtract = ""
@@ -279,6 +294,20 @@ func sanitizeFieldIDs(fieldIDs []string) []string {
 		if _, ok := allowedFieldIDs[fieldID]; ok {
 			result = append(result, fieldID)
 		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func sanitizeChoices(choices []LoginChoice) []LoginChoice {
+	result := make([]LoginChoice, 0, len(choices))
+	for _, choice := range choices {
+		if strings.TrimSpace(choice.FieldID) == "" || choice.Value == "" || choice.Label == "" {
+			continue
+		}
+		result = append(result, choice)
 	}
 	if len(result) == 0 {
 		return nil

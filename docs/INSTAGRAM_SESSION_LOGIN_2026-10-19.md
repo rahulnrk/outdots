@@ -55,8 +55,9 @@ The envelope rejects unknown cookie names, account/user mismatches, missing nati
 `igruntime/login.go` defines the sanitized states `credentials`, `2fa`,
 `select`, `web_challenge`, `captcha`, `display_wait`, `authenticated`,
 `cancelled`, and `failed`. Its JSON snapshot contains only state, pinned step
-ID, instructions, safe field IDs, a `webview_step` flag, and a fixed failure
-code. It omits WebView URLs, user-agents, extraction scripts, cookies, CAPTCHA
+ID, instructions, safe field IDs, and for a select step the upstream option
+value and display label. It also carries a `webview_step` flag, and a fixed
+failure code. It omits WebView URLs, user-agents, extraction scripts, cookies, CAPTCHA
 results, challenge payloads, and credentials. Separate `WebViewURL`,
 `WebViewUserAgent`, `WebViewExtractJS`, and `WebViewWaitPattern` accessors form a
 narrow handoff for the dedicated WebView controller only. HTTPS Instagram origin
@@ -75,10 +76,14 @@ controller makes is a genuine upstream request; no authentication is invented an
 no cookie extraction is reproduced by hand.
 
 Upstream `bridgev2.LoginStep` results are translated into the sanitized machine:
-user-input steps become `2fa`/`select`, cookies steps with a wait pattern become
-`web_challenge`, cookies steps with a special-source token field become
-`captcha`, and a complete step triggers the finalizer. Upstream errors map to
-fixed, secret-free failure codes (`credentials_rejected`, `checkpoint_unsupported`,
+user-input steps become `2fa`/`select`, and select fields carry their exact
+upstream values plus labels into the JSON snapshot. The rtprobe renders those
+choices as radio rows and submits the selected upstream value unchanged. Empty
+choice lists fail with `selection_options_missing`; empty, invalid, or stale
+selections fail with `invalid_or_stale_selection`. Cookies steps with a wait
+pattern become `web_challenge`, cookies steps with a special-source token field
+become `captcha`, and a complete step triggers the finalizer. Upstream errors
+map to fixed, secret-free failure codes (`credentials_rejected`, `checkpoint_unsupported`,
 `rate_limited`, `account_suspended`, `network_error`, `upstream_error`); the raw
 error text, which can carry URLs or account detail, is dropped. `context.Canceled`
 is preserved as `cancelled`.
@@ -144,33 +149,26 @@ that must be re-audited on every upstream bump.
 
 ## Tests and limitations
 
-Go `go test ./igruntime ./waruntime` passes (both `ok`). `igruntime` coverage
-includes: envelope round-trip and checksum corruption, forbidden challenge data
-rejection, account-bound restore/export with cross-account and truncated-fixture
-rejection (a rejected restore leaves no authenticated account), logout, all login
-machine states and secret-free snapshots, WebView origin rejection, real
+Go `go test ./igruntime ./waruntime` passes. `igruntime` coverage includes:
+envelope round-trip and checksum corruption, forbidden challenge data rejection,
+account-bound restore/export with cross-account and truncated-fixture rejection
+(a rejected restore leaves no authenticated account), logout, all login machine
+states and secret-free snapshots, synthetic multi-choice selection snapshots
+preserving labels and values, WebView origin rejection, real
 `bridgev2.LoginStep` translation (CAPTCHA vs challenge vs 2FA), cancellation
-cleanliness (no verified session, stale WebView callback rejected, further
-submission rejected), and upstream-error-to-fixed-failure-code mapping that never
-surfaces raw error text.
+cleanliness, and fixed upstream failure-code mapping that never surfaces raw
+error text.
 
-Android instrumentation ran on the Pixel 7 Pro through the `app.mini.hub.rtprobe`
-build: `am instrument` reported `OK (6 tests)`. The three coordinated-runtime
-tests confirm the WhatsApp production load path, one shared `libgojni.so`, the
-pinned `3c16226` commit, `loginAvailable=true`, and that the real
-`LoginController` is constructible without network I/O. The three login-support
-tests confirm the WebView HTTPS/Instagram origin allowlist, CAPTCHA-vs-challenge
-request parsing, and encrypted-store save/reopen with per-account isolation. Both
-rtprobe packages were uninstalled afterward; `dumpsys package app.mini.hub` still
-shows `versionCode=1, lastUpdateTime=2026-10-17 17:02:09`, unchanged.
-
-Limitation: the automated tests do not sign in over the network, so they prove
-the adapter, isolation, storage, and verification wiring but not a live
-authenticated session. The real end-to-end login, the verified-identity store,
-the restart restore, and the harmless authenticated read are exercised only when
-the owner performs the first sign-in (below). Normal Accounts has no Instagram
-binding. AGPL notices remain a distribution checkpoint before any combined
-artifact is shared.
+Android instrumentation reported `OK (4 tests)` for the synthetic selection test
+plus encrypted-store, WebView-origin, and request-parsing checks. The APK and
+test APK were updated in place with `adb install -r`; `app.mini.hub` was not
+modified. The owner was blocked at the old text-entry selection step. That
+attempt was necessarily interrupted by the APK/runtime replacement and cold
+restart. After reopening rtprobe, safe artifact checks reported
+`VERIFIED_ACCOUNT_MARKER_ABSENT` and `ENCRYPTED_SESSION_DB_ABSENT`, so no
+authenticated identity or session had been stored to restore. Live restart
+verification and the harmless authenticated inbox read remain pending until the
+owner completes sign-in again.
 
 ## First real sign-in (owner)
 
