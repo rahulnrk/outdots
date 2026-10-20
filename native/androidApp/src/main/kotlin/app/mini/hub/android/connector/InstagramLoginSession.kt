@@ -51,6 +51,35 @@ class InstagramLoginSession(
         }
     }
 
+    /** Restores the last verified account after process/activity restart. */
+    fun restoreExisting(accountKey: String, onMiss: () -> Unit) {
+        executor.execute {
+            val accountId = runCatching { AccountId.parse(accountKey) }.getOrNull()
+            if (accountId == null || accountId.provider != Provider.INSTAGRAM) {
+                onMiss()
+                return@execute
+            }
+            when (val result = InstagramSessionRestore(appContext).restoreAndVerify(accountId)) {
+                is InstagramSessionRestore.Result.Verified -> {
+                    verifiedAccountKey = accountKey
+                    publish(
+                        InstagramLoginUiState(
+                            status = InstagramLoginStatus.AUTHENTICATED,
+                            state = "authenticated",
+                            instructions = null,
+                            failureCode = null,
+                            verifiedUserId = result.userId,
+                            verifiedUsername = null,
+                            verifiedAccountKey = accountKey,
+                        ),
+                    )
+                }
+                is InstagramSessionRestore.Result.NoSession,
+                is InstagramSessionRestore.Result.Failed -> onMiss()
+            }
+        }
+    }
+
     fun submitCredentials(username: String, password: String) {
         val lc = controller.get() ?: return
         executor.execute {
@@ -169,6 +198,10 @@ class InstagramLoginSession(
             return
         }
         store.save(accountId, wrapped)
+        appContext.getSharedPreferences(PROBE_STATE_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(LAST_ACCOUNT_KEY, accountKey)
+            .apply()
         verifiedAccountKey = accountKey
         publish(
             InstagramLoginUiState(
@@ -186,6 +219,11 @@ class InstagramLoginSession(
     private fun publish(state: InstagramLoginUiState) {
         latest.set(state)
         listener.get()?.invoke(state)
+    }
+
+    companion object {
+        const val PROBE_STATE_PREFS = "mini_instagram_probe_state"
+        const val LAST_ACCOUNT_KEY = "last_verified_account_key"
     }
 }
 

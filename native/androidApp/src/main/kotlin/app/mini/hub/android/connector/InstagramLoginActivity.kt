@@ -102,7 +102,15 @@ class InstagramLoginViewModel : ViewModel() {
         val created = InstagramLoginSession(context, slotKey)
         session = created
         created.observe { uiState.value = it }
-        created.start()
+        val lastAccountKey = context.getSharedPreferences(
+            InstagramLoginSession.PROBE_STATE_PREFS,
+            android.content.Context.MODE_PRIVATE,
+        ).getString(InstagramLoginSession.LAST_ACCOUNT_KEY, null)
+        if (lastAccountKey == null) {
+            created.start()
+        } else {
+            created.restoreExisting(lastAccountKey) { created.start() }
+        }
     }
 
     fun submitCredentials(username: String, password: String) {
