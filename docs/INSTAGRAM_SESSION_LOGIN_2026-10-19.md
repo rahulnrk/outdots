@@ -204,6 +204,10 @@ modified for testing. The live check avoids printing private content and the
 read screen remains manual-sync only. The existing Kotlin/AGP compatibility
 warning is non-fatal.
 
+After that run, rtprobe was force-stopped and relaunched. The live read test
+again reported `OK (1 test)`, demonstrating that the encrypted session and
+persisted observation state remained available after process restart.
+
 ## First real sign-in (owner)
 
 The agent does not have and will not submit the owner's credentials. To perform
