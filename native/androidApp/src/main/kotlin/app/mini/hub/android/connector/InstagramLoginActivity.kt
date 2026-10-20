@@ -222,7 +222,9 @@ class InstagramLoginViewModel : ViewModel() {
     private fun startForegroundReceive(accountId: AccountId) {
         val context = sessionContext ?: return
         val ingestor = readIngestor ?: InstagramReadIngestor(context).also { readIngestor = it }
-        val receiver = foregroundReceiver ?: InstagramForegroundReceiver(ingestor) { result ->
+        val receiver = foregroundReceiver ?: InstagramForegroundReceiver(
+            sync = { account -> ingestor.sync(account) },
+        ) { result ->
             when (result) {
                 is InstagramReadIngestor.Result.Success -> readUiState.value = InstagramReadUiState.Loaded(result.view)
                 is InstagramReadIngestor.Result.Failed -> readUiState.value = InstagramReadUiState.Failed(result.code)
