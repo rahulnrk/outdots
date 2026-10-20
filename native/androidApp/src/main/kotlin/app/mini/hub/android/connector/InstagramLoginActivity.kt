@@ -184,6 +184,10 @@ private fun InstagramLoginScreen(
                     CredentialsForm(onSubmitCredentials)
                 } else if (state.fieldIds.contains("verification_code")) {
                     CodeForm(onSubmitCode)
+                } else if (state.state == "select" && state.fieldIds.isNotEmpty()) {
+                    // Upstream account/MFA-method selection. The owner re-enters the
+                    // chosen value for the single select field upstream declared.
+                    SelectionForm(state.fieldIds.first(), onSubmitSelection)
                 } else {
                     Text("Awaiting the next sign-in step.")
                 }
@@ -258,4 +262,16 @@ private fun CodeForm(onSubmit: (String) -> Unit) {
         modifier = Modifier.fillMaxWidth(),
     )
     Button(onClick = { onSubmit(code) }, enabled = code.isNotBlank()) { Text("Continue") }
+}
+
+@androidx.compose.runtime.Composable
+private fun SelectionForm(fieldId: String, onSubmit: (String, String) -> Unit) {
+    var value by remember { mutableStateOf("") }
+    OutlinedTextField(
+        value = value,
+        onValueChange = { value = it },
+        label = { Text("Enter the option shown above") },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Button(onClick = { onSubmit(fieldId, value) }, enabled = value.isNotBlank()) { Text("Continue") }
 }

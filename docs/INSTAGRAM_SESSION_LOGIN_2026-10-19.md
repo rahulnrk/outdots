@@ -2,9 +2,22 @@
 
 ## Scope and non-claims
 
-This slice adds encrypted-session storage plumbing and a login-step boundary. It does not sign in to Instagram, does not extract cookies from a browser, does not enable Instagram in normal Accounts, and does not claim provider qualification. The owner must perform the first real sign-in after the WebView and upstream transport handoff are implemented.
+This slice adds the real upstream Instagram login adapter, wires a successful
+upstream authentication into the encrypted-session store, and adds an isolated
+owner-operated sign-in screen on the separate `app.mini.hub.rtprobe` application
+ID. The login machine no longer stops at `login_transport_unavailable`.
 
-The accepted prior milestone remains Android runtime compatibility only. WhatsApp accounts, generated API, dependency pin, session files, and normal application ID are untouched. Device checks for this slice must use the separate `app.mini.hub.rtprobe` application ID. No combined build is published or installed over `app.mini.hub`.
+What it still does not do: it does not enable Instagram in normal Accounts, does
+not perform any live send, and does not change any qualification gate. The first
+real sign-in must be performed by the owner; this agent does not obtain or submit
+the owner's credentials. No live account, message, or qualification evidence is
+produced by automated tests, which do not log in over the network.
+
+The accepted prior milestone (Android runtime compatibility) still holds.
+WhatsApp accounts, the generated API, dependency pins, session files, and the
+normal `app.mini.hub` application ID are untouched. All device checks for this
+slice use the separate `app.mini.hub.rtprobe` application ID. No combined build
+is published or installed over `app.mini.hub`.
 
 ## Pinned upstream evidence
 
@@ -37,36 +50,150 @@ The envelope rejects unknown cookie names, account/user mismatches, missing nati
 
 `SqlCipherInstagramSessionStore.kt` uses a separate `mini-instagram-session.db`, `ig_session` table, and Keystore alias `mini.hub.sqlcipher.instagram-session`. The SQLCipher database key is random and wrapped with Android Keystore AES-GCM. The account key is the primary key, so one account cannot load another account's snapshot. Invalid or checksum-corrupt blobs are rejected before becoming session objects.
 
-## Implemented login boundary
+## Implemented login adapter
 
-`igruntime/login.go` defines the explicit states `credentials`, `2fa`, `web_challenge`, `captcha`, `authenticated`, `cancelled`, and `failed`. Its JSON snapshot contains only state, pinned step ID, instructions, safe field IDs, and a fixed failure code. It omits WebView URLs, user-agents, cookies, CAPTCHA results, challenge payloads, and credentials. `WebViewPending` plus the separate `WebViewURL`, `WebViewUserAgent`, and `WebViewWaitPattern` accessors form a narrow handoff for a dedicated WebView controller. This shape is gomobile-compatible. HTTPS Instagram origin validation is applied before accepting a WebView step.
+`igruntime/login.go` defines the sanitized states `credentials`, `2fa`,
+`select`, `web_challenge`, `captcha`, `display_wait`, `authenticated`,
+`cancelled`, and `failed`. Its JSON snapshot contains only state, pinned step
+ID, instructions, safe field IDs, a `webview_step` flag, and a fixed failure
+code. It omits WebView URLs, user-agents, extraction scripts, cookies, CAPTCHA
+results, challenge payloads, and credentials. Separate `WebViewURL`,
+`WebViewUserAgent`, `WebViewExtractJS`, and `WebViewWaitPattern` accessors form a
+narrow handoff for the dedicated WebView controller only. HTTPS Instagram origin
+validation is applied before accepting a WebView step.
 
-The machine deliberately fails with `login_transport_unavailable` after transient credential, 2FA, or CAPTCHA completion because the upstream network login process has not yet been wired into this facade. It never treats supplied credentials as authentication. This keeps the eventual credential-entry screen independent and avoids inventing cookie extraction.
+`igruntime/login_controller.go` is the real adapter. It drives the pinned
+`mautrix-meta` native (`android`) Instagram login against the exported
+`instameow.Client` methods (`DoInstagramCAALoginSteps`, `LoadIndex`,
+`CancelInstagramCAALoginStep`, `ClearInstagramCAALoginState`,
+`GetInstagramNativeSession`), reproducing the logic of
+`pkg/igconnector/login_native.go` without importing `pkg/igconnector`.
+`go list -deps` confirms the reason: `pkg/instameow` and `bridgev2` pull in zero
+whatsmeow packages, but `pkg/igconnector` pulls 22 (Messenger Armadillo E2EE),
+which would contaminate the single coordinated runtime. Every request the
+controller makes is a genuine upstream request; no authentication is invented and
+no cookie extraction is reproduced by hand.
 
-## WebView-first investigation and required Android design
+Upstream `bridgev2.LoginStep` results are translated into the sanitized machine:
+user-input steps become `2fa`/`select`, cookies steps with a wait pattern become
+`web_challenge`, cookies steps with a special-source token field become
+`captcha`, and a complete step triggers the finalizer. Upstream errors map to
+fixed, secret-free failure codes (`credentials_rejected`, `checkpoint_unsupported`,
+`rate_limited`, `account_suspended`, `network_error`, `upstream_error`); the raw
+error text, which can carry URLs or account detail, is dropped. `context.Canceled`
+is preserved as `cancelled`.
 
-Upstream supports two WebView-assisted entry points, not one complete flow:
+Success is only reached after a harmless authenticated read. `complete()`
+requires a native session with authorization and user ID, runs `LoadIndex`
+(the inbox-index read), and binds the stored account to the upstream-verified
+identity: the native session user ID, the inbox viewer ID, and the `ds_user_id`
+cookie must all agree, or it fails with `verified_identity_mismatch`. The stored
+account key is derived from the verified user ID (`instagram|<user_id>`), never
+from the provisional slot key or any screen-supplied username. Passwords are
+consumed only for the duration of the upstream call and never stored, logged, or
+placed in a snapshot.
 
-1. Web challenge: load the upstream Instagram URL, wait for the exact logged-in Instagram URL pattern, read only the required/optional Instagram cookie names, and submit them to the upstream step.
-2. CAPTCHA: load the upstream Instagram login URL with its user-agent and run the supplied JavaScript asynchronously. The script checks `event.origin` and uses the `fbsbx.com` iframe. The token must be handed directly to the upstream login process and must not enter ordinary UI state.
+A WebView-handoff generation counter (`attempt`) is incremented whenever a new
+challenge/CAPTCHA step is issued and again on cancellation. A WebView result
+tagged with a stale generation is rejected (`stale_callback`), and a result may
+only carry the exact field IDs the step declared.
 
-Before implementing either flow:
+## Dedicated-process WebView login (Android)
 
-- Call `WebView.setDataDirectorySuffix("mini_ig_<account_hash>")` before creating any WebView. Because the suffix is process-global, serialize profile initialization or use a dedicated login process. Do not clear the shared default `CookieManager`.
-- Allow only HTTPS Instagram top-level navigation. Treat `fbsbx.com` as an iframe origin required by the CAPTCHA script, not as a general navigation allowlist. Reject userinfo, unexpected hosts, and redirects outside the allowlist.
-- Use a temporary controller and narrow asynchronous `evaluateJavascript`/result handling. Set a timeout, support cancellation, destroy the WebView, remove callbacks, and clear only the account-specific profile after handoff.
-- Never log URLs, cookies, CAPTCHA tokens, credentials, challenge payloads, or WebView HTML.
+The owner sign-in runs in a dedicated `:iglogin` process declared in the
+manifest (`InstagramLoginActivity`, `exported=false`). The process sets
+`WebView.setDataDirectorySuffix("mini_ig_login")` once at process start. This is
+the correct design for a process-global API: the suffix cannot change after a
+WebView exists, so a per-account suffix is impossible; one fixed isolated profile
+with one active attempt is used instead. Because it is a separate process, its
+`CookieManager` is independent of every other MINI WebView, so cookie cleanup
+here cannot sign out another flow.
 
-CookieManager is shared within a WebView profile. Clearing it globally could sign out another MINI account or flow. Profile isolation is therefore a prerequisite, not an implementation detail.
+`InstagramWebViewLoginController` is created and destroyed per attempt. It:
 
-No non-zerolog output sink is reachable from the linked `instameow` package in the audit. The pinned source has only generated `var _ = fmt.Printf` references under `pkg/instameow/thrift`, not calls. `fmt.Print` and `os.Stdout` calls are in command-only packages (`cmd/dgwparse`, `cmd/lscli`, `pkg/messagix/bloks/cmd*`), which are not imported by the Android runtime. `pkg/connector/chatinfo.go` and the `messagix/lightspeed` and `messagix/table` files import global zerolog. The runtime sets the global logger to `zerolog.Nop` and disables all levels before constructing a client. This is a shared-process guard, not a substitute for auditing future upstream changes. No login response redaction option is enabled, and no content-bearing logger is attached to the client.
+- allows only HTTPS top-level navigation to `instagram.com`/`www.instagram.com`,
+  with `fbsbx.com` permitted solely as the CAPTCHA iframe origin the upstream
+  script uses; userinfo and any other host are rejected;
+- for a web challenge, harvests only the declared Instagram cookies once the
+  logged-in URL pattern matches, then submits them to the upstream step;
+- for a CAPTCHA, runs the pinned upstream `ExtractJS` asynchronously via
+  `evaluateJavascript` and forwards only the resulting token;
+- tags every result with the upstream attempt id so a result produced after
+  cancellation or step advance is rejected as stale by the Go controller;
+- scrubs this process's cookies after extraction and on cancellation;
+- never logs URLs, cookies, tokens, credentials, or page content.
+
+`InstagramLoginSession` serializes upstream turns on a single background thread,
+routes WebView steps to the controller, and on success saves the verified
+session into `SqlCipherInstagramSessionStore` (account-isolated, Keystore-wrapped
+SQLCipher) bound to the verified account key. `InstagramSessionRestore` restores
+a stored session into a fresh runtime and calls `Runtime.VerifyAuthenticatedRead`
+to prove a harmless authenticated read on restart.
+
+The rtprobe-only `InstagramLoginProbeLauncher` (present only in the debug source
+set) opens the flow with a fresh provisional slot key. Nothing is exported in a
+release build, Accounts is never enabled, and no send path is reachable.
+
+No non-zerolog output sink is reachable from the linked `instameow` package in
+the audit. `fmt.Print`/`os.Stdout` calls are in command-only packages not
+imported by the runtime. The runtime sets the global zerolog logger to
+`zerolog.Nop` and disables all levels before constructing any client, and the
+login client is built with `LogRedactedLoginResponses` false, so no login
+request/response, URL, or cookie is logged. This remains a shared-process guard
+that must be re-audited on every upstream bump.
 
 ## Tests and limitations
 
-Go `go test ./...` passes for `igruntime` and `waruntime`, covering envelope round-trip, checksum corruption, forbidden challenge data, account-bound restore/export, logout, all login states, WebView origin checks, and secret-free snapshots. Android instrumentation coverage has been added for SQLCipher/Keystore save/reopen, account isolation, logout clear, and invalid/corrupt envelope framing. It still needs to run on the Pixel through the rtprobe build.
+Go `go test ./igruntime ./waruntime` passes (both `ok`). `igruntime` coverage
+includes: envelope round-trip and checksum corruption, forbidden challenge data
+rejection, account-bound restore/export with cross-account and truncated-fixture
+rejection (a rejected restore leaves no authenticated account), logout, all login
+machine states and secret-free snapshots, WebView origin rejection, real
+`bridgev2.LoginStep` translation (CAPTCHA vs challenge vs 2FA), cancellation
+cleanliness (no verified session, stale WebView callback rejected, further
+submission rejected), and upstream-error-to-fixed-failure-code mapping that never
+surfaces raw error text.
 
-The current login facade does not call upstream authentication and does not persist anything by itself. Normal Accounts has no Instagram binding. No live account, challenge, CAPTCHA, session, message, or qualification evidence exists. AGPL notices remain a distribution checkpoint before any combined artifact is shared.
+Android instrumentation ran on the Pixel 7 Pro through the `app.mini.hub.rtprobe`
+build: `am instrument` reported `OK (6 tests)`. The three coordinated-runtime
+tests confirm the WhatsApp production load path, one shared `libgojni.so`, the
+pinned `3c16226` commit, `loginAvailable=true`, and that the real
+`LoginController` is constructible without network I/O. The three login-support
+tests confirm the WebView HTTPS/Instagram origin allowlist, CAPTCHA-vs-challenge
+request parsing, and encrypted-store save/reopen with per-account isolation. Both
+rtprobe packages were uninstalled afterward; `dumpsys package app.mini.hub` still
+shows `versionCode=1, lastUpdateTime=2026-10-17 17:02:09`, unchanged.
 
-## Concrete next step
+Limitation: the automated tests do not sign in over the network, so they prove
+the adapter, isolation, storage, and verification wiring but not a live
+authenticated session. The real end-to-end login, the verified-identity store,
+the restart restore, and the harmless authenticated read are exercised only when
+the owner performs the first sign-in (below). Normal Accounts has no Instagram
+binding. AGPL notices remain a distribution checkpoint before any combined
+artifact is shared.
 
-Implement the dedicated per-account WebView controller and a non-UI upstream `igconnector` adapter that consumes only the sanitized step boundary. Run it with the owner present on `app.mini.hub.rtprobe`; only after that evidence exists may the runtime transition from unavailable to an authenticated session for that account.
+## First real sign-in (owner)
+
+The agent does not have and will not submit the owner's credentials. To perform
+the first real sign-in on a phone with the rtprobe build installed:
+
+1. Build and install the probe (side-by-side, never over `app.mini.hub`):
+   - `powershell -File native/whatsappRuntime/build-android.ps1`
+   - `gradlew :androidApp:assembleDebug --init-script <rtprobe.init.gradle>`
+   - `adb install -r -t androidApp-debug.apk`
+2. Launch the isolated sign-in:
+   - `adb shell am start -n app.mini.hub.rtprobe/app.mini.hub.android.connector.InstagramLoginProbeLauncher`
+   - or tap "Mini IG Probe" on the device launcher.
+3. Enter the Instagram email/username and password in the screen. If Instagram
+   asks for a 2FA code, enter it. If Instagram shows a verification or CAPTCHA,
+   complete it in the embedded browser; the login continues automatically.
+4. On success the screen shows the verified `@username` and user ID and confirms
+   the encrypted session was stored. To confirm the restart path, kill and
+   relaunch; the restore+verify helper performs a harmless inbox read and reports
+   the same verified user ID.
+5. Cancelling at any step, or a failed login, leaves no authenticated account
+   stored.
+
+Do not install this build over `app.mini.hub`, and do not enable the account in
+Accounts; this probe is for verifying the real login path only.
+
