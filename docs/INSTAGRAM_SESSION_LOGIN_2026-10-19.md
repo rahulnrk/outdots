@@ -162,13 +162,13 @@ error text.
 Android instrumentation reported `OK (4 tests)` for the synthetic selection test
 plus encrypted-store, WebView-origin, and request-parsing checks. The APK and
 test APK were updated in place with `adb install -r`; `app.mini.hub` was not
-modified. The owner was blocked at the old text-entry selection step. That
-attempt was necessarily interrupted by the APK/runtime replacement and cold
-restart. After reopening rtprobe, safe artifact checks reported
-`VERIFIED_ACCOUNT_MARKER_ABSENT` and `ENCRYPTED_SESSION_DB_ABSENT`, so no
-authenticated identity or session had been stored to restore. Live restart
-verification and the harmless authenticated inbox read remain pending until the
-owner completes sign-in again.
+modified. The owner completed sign-in on the corrected selection screen. The current live
+verification passed without exposing identity data: the verified-account marker
+and encrypted SQLCipher session were present, rtprobe was force-stopped and
+reopened, and `LiveInstagramRestoreDeviceTest` reported `OK (1 test)`. That test
+restored the encrypted session into a fresh runtime and completed the harmless
+authenticated inbox read. No message was sent and no qualification gate or
+normal Accounts binding changed.
 
 ## First real sign-in (owner)
 
