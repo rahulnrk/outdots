@@ -1,10 +1,22 @@
 # LinkedIn phone-local feasibility (20 Oct 2026)
 
-> **Milestone progress: coordinated runtime compile + session scaffolding.**
-> Covered: `linkedingo` pinned, android/arm64 archive build, gomobile bind into the
-> one `libgojni.so` with WhatsApp + Instagram, cookie jar import/export, SQLCipher
-> per-account store scaffolding. Not covered: live LinkedIn login, message sync,
-> Accounts UI, send, qualification, or distribution (AGPL undecided).
+> **LinkedIn probe authentication: BLOCKED (not completed).**
+> Cloudflare blocked the embedded Android WebView before any LinkedIn login,
+> cookie harvest, identity verify, or encrypted session save could succeed.
+> Runtime compile/session scaffolding remains useful scaffolding only.
+> LinkedIn stays unavailable in Manage Accounts. Do not retry the embedded
+> WebView login path until a supported Android auth alternative exists.
+
+## Status summary
+
+| Area | Status |
+|---|---|
+| Coordinated Go compile (`linkedingo` in one `libgojni.so`) | Done |
+| Encrypted session store scaffolding | Done (unused by Accounts) |
+| Isolated probe UI packaging (`app.mini.hub.rtprobe`, `:lilogin`) | Done |
+| Owner authentication / verified session | **BLOCKED** |
+| Accounts / Inbox / send | Unavailable / disabled |
+| Qualification | Unchanged |
 
 ## Upstream pin
 
@@ -18,12 +30,25 @@
 | LICENSE SHA-256 | `0D96A4FF68AD6D4B6F1F30F713B18D5184912BA8DD389F86AA7710DB079ABCB0` |
 | LICENSE.exceptions | Beeper embed / Element server bundles only (not MINI) |
 
-Auth model (upstream docs + `linkedingo`): **browser session cookies**, not OAuth and
-not an official member inbox API. Logged-in proof is presence of `JSESSIONID`.
-Cookie reuse requires the desktop Chrome user agent from `linkedingo.UserAgent`.
-There is no `NewPasswordLoginClient` in `v0.2609.0`; earlier notes naming one are stale.
+## Upstream login flow (verified against pinned `pkg/connector/login.go`)
 
-## Compatibility results (20 Oct 2026)
+Auth model: **browser session cookies + browser-identity request headers**, not OAuth
+and not an official member-inbox API. There is no password login client in this pin.
+
+| Step | Upstream behavior | Our probe alignment |
+|---|---|---|
+| Start URL | `https://linkedin.com/login` with `linkedingo.UserAgent` | Opens login with the same UA |
+| Wait | Keep UI open through 2FA until `^https://www\.linkedin\.com/feed.*$` | Same wait pattern |
+| Cookie header | Captured from LinkedIn HTTPS requests after browsing; pattern requires `JSESSIONID=` | Harvest Cookie after feed; also require `li_at` (session validity) |
+| `X-LI-Track` | Captured from LinkedIn HTTPS **request headers** (not before sign-in) | Captured via `shouldInterceptRequest` during/after navigation; not required to open WebView |
+| `X-LI-Page-Instance` | Same: from request headers after activity | Same timing |
+| Proof | `GetCurrentUserProfile` after submit | Same; cookies alone do not mark authenticated |
+
+`JSESSIONID` alone is **not** proof of authentication. Upstream invalidates when `li_at`
+is deleted/`delete me`. Browser-identity headers are obtained from post-login traffic,
+not assumed before opening sign-in.
+
+## Compatibility results (compile; 20 Oct 2026)
 
 Toolchain: Go 1.26.0 (`tmp/go126root`), NDK 26.1.10909125, gomobile from module tools.
 
@@ -31,67 +56,49 @@ Toolchain: Go 1.26.0 (`tmp/go126root`), NDK 26.1.10909125, gomobile from module 
 |---|---|
 | `go get go.mau.fi/mautrix-linkedin@v0.2609.0` | ok; whatsmeow replace remains `c386243a72ba` |
 | `go test ./liruntime ./igruntime ./waruntime` | ok |
-| `GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -buildmode=archive ./liruntime` | ok (`tmp/liruntime-android-arm64.a`, 227696 B) |
+| `GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -buildmode=archive ./liruntime` | ok |
 | `build-android.ps1` bind `./waruntime ./igruntime ./liruntime` | ok |
-| AAR | `whatsappRuntime/build/whatsapp.aar` 16 951 666 B |
-| `libgojni.so` | one file, 52 442 208 B, LOAD align `0x4000` x4 |
-| WhatsApp Java API (`waruntime.Runtime` + `Waruntime`) | **unchanged** SHA-256 `6F2FF693…459DB` before/after |
-| New Java classes | `app.mini.hub.wa.liruntime.Runtime`, `Liruntime` |
-| Kotlin Accounts wiring | **none** (LinkedIn stays unavailable in Manage Accounts) |
+| WhatsApp Java API (`waruntime`) | unchanged across LinkedIn bind |
+| Kotlin Accounts wiring | none |
 
-## Facade (`whatsappRuntime/liruntime`)
+## Authentication attempt result: BLOCKED
 
-- Constructs real `linkedingo.NewClient` with empty jar (no network).
-- `LoginAvailable() == false` until an isolated cookie WebView probe is proven.
-- Cookie session helpers (no network): `ImportCookieHeader`, `ImportCookiesJSON`,
-  `ExportCookiesJSON`, `BrowserUserAgent`, `RequiredCookieName`.
-- Global zerolog silenced like `igruntime`.
+Device evidence (`app.mini.hub.rtprobe` only; production `app.mini.hub` untouched):
 
-## Encrypted session scaffolding (Android)
+1. Probe Activity launched on `:lilogin`.
+2. Owner Start opened the embedded WebView to LinkedIn login.
+3. LinkedIn/Cloudflare returned **Attention Required / Sorry, you have been blocked**
+   (`You are unable to access linkedin.com`) before feed/login completion.
+4. No cookie harvest, no `GetCurrentUserProfile`, no encrypted session write for a
+   verified account.
+5. Probe did not bypass the block, rotate proxies, or disable security checks.
+6. Blocked attempt was force-stopped and temporary WebView/prefs/session files under
+   `app.mini.hub.rtprobe` were cleared. Production account counts remained
+   `gmail=2`, `whatsapp=1`, `instagram=1`.
 
-- `LinkedInSessionEnvelope` / `LinkedInSessionEnvelopeCodec`
-- `SqlCipherLinkedInSessionStore` (`mini-linkedin-session.db`, Keystore-wrapped SQLCipher key)
-- Not referenced from Manage Accounts / Inbox
+## Upstream-supported alternatives investigated
 
-## Isolated owner login probe (implemented)
+| Alternative | What it is | Secure Android phone-local fit? |
+|---|---|---|
+| Embedded WebView cookie login (bridgev2 Cookies flow) | Upstream's in-app/manager WebView path | **Blocked here** by Cloudflare on this device/WebView |
+| mautrix-manager (Electron) | Desktop helper that uses correct UA and captures cURL/cookies for a **bridge provisioning API** | Not an Android SDK. Requires a Matrix bridge/host and paste/handoff of cookies to that bridge. Does **not** document a supported way to inject a session into a phone-local MINI client without a remote/local bridge service |
+| Bot `login cookies` + paste cURL | Same cookie submit as manager, via Matrix bot | Same bridge dependency; not phone-local Accounts |
+| Official LinkedIn member inbox API | Not established for broad personal inbox access | Still unavailable for this product route |
 
-Authentication requirements (pinned upstream `pkg/connector/login.go` + `linkedingo`):
+No supported Android phone-local login path is currently available without either
+clearing the Cloudflare block on an embedded WebView or accepting a bridge/manager
+architecture that MINI's phone-local decision rejects. Cookie import from the owner's
+ordinary browser is **not** implemented and will not be invented here.
 
-| Requirement | Role |
-|---|---|
-| `li_at` cookie | Session token; deleted/`delete me` invalidates access |
-| `JSESSIONID` cookie | CSRF token source; **not** sufficient alone |
-| `X-LI-Page-Instance` | Browser identity header (`urn:li:page…`) |
-| `X-LI-Track` | Browser identity JSON containing `clientVersion` |
-| Desktop `UserAgent` | Must match `linkedingo.UserAgent` |
-| `GetCurrentUserProfile` | Harmless authenticated proof; binds `AccountId` |
+## Demo requirements note
 
-Probe packaging:
+Keep LinkedIn on the unified demo requirements list with explicit blocker:
 
-- Build with `-Pmini.rtprobe=true` → `applicationIdSuffix=.rtprobe` (does not touch `app.mini.hub`)
-- `LinkedInLoginActivity` in process `:lilogin` with WebView data-dir suffix `mini_li_login`
-- HTTPS LinkedIn top-level allowlist; owner completes 2FA/challenges in-page
-- Cookies/headers never logged or shown; scrubbed after handoff
-- Stale attempt callbacks ignored; cancel clears in-memory session
+> **Blocker:** Embedded Android WebView LinkedIn login is Cloudflare-blocked before
+> session establishment. Upstream-supported alternatives depend on mautrix-manager /
+> bridge cookie paste, which is not a phone-local MINI Accounts path.
 
-Install/run (leaves sign-in screen open):
-
-```bat
-cd native\whatsappRuntime
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build-android.ps1
-cd ..
-gradlew.bat :androidApp:assembleDebug -Pmini.rtprobe=true
-adb install -r androidApp\build\outputs\apk\debug\androidApp-debug.apk
-adb shell am start -n app.mini.hub.rtprobe/app.mini.hub.android.connector.LinkedInLoginActivity
-```
-
-### Device result (20 Oct 2026)
-
-- `app.mini.hub.rtprobe` installed beside existing `app.mini.hub` (production package path unchanged).
-- LinkedIn probe Activity opened on `:lilogin` with Start/Restore UI.
-- After Start, LinkedIn served a **Cloudflare “Attention Required / Sorry, you have been blocked”** interstitial in the embedded WebView (`You are unable to access linkedin.com`).
-- Probe did **not** bypass the block. Owner challenge remains on-screen for manual handling/cancellation.
-- No cookies were displayed or logged by the probe UI.
+Avoid repeated embedded-login retries until the blocker changes.
 
 ## Instagram unfinished work (tracked)
 
@@ -100,5 +107,4 @@ adb shell am start -n app.mini.hub.rtprobe/app.mini.hub.android.connector.Linked
 
 ## Instagram read milestone
 
-Closed separately in `docs/INSTAGRAM_PHONE_LOCAL_PRODUCTION_2026-10-20.md` with device evidence
-and `InstagramPhoneLocalSyncHealthTest` regressions.
+Closed separately in `docs/INSTAGRAM_PHONE_LOCAL_PRODUCTION_2026-10-20.md`.

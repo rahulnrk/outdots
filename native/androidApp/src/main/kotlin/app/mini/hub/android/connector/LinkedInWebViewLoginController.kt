@@ -16,8 +16,12 @@ import java.util.concurrent.atomic.AtomicReference
  * - Runs only in the `:lilogin` process with a fixed WebView data-directory suffix.
  * - Top-level navigation is HTTPS LinkedIn hosts only. No cookie bypass if LinkedIn
  *   rejects the embedded browser; the owner sees the provider challenge as-is.
- * - Cookies and browser-identity headers are handed to [onSession] once, then scrubbed
- *   from this process. Nothing logs or displays cookies/headers.
+ * - Browser-identity headers (`X-LI-Track`, `X-LI-Page-Instance`) are captured from
+ *   LinkedIn HTTPS requests during/after navigation. They are not required before
+ *   opening sign-in.
+ * - Cookie header plus those headers are handed to [onSession] only after the feed
+ *   wait pattern and required cookies (`JSESSIONID`, `li_at`) are present, then
+ *   scrubbed from this process. Nothing logs or displays cookies/headers/URLs.
  * - Results are tagged with [attempt]; stale callbacks after cancel are ignored.
  */
 class LinkedInWebViewLoginController(

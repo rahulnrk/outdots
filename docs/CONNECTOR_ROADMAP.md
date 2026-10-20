@@ -1,5 +1,9 @@
 # Connector roadmap
 
+> **Latest 19 October decision:** WhatsApp, Facebook Messenger, Instagram and LinkedIn use phone-local Android protocol clients, following existing WhatsApp packaging/session architecture. This supersedes the earlier same-day Matrix-route target for those providers. Keep remote plaintext blocked; extend the shared native runtime with per-provider qualification. Slack route feasibility remains separate. See the [selected implementation sequence](BRIDGE_AND_AI_OPTIONS_2026-10-19.md).
+
+> **19 October 2026 direction:** [Unified demo roadmap](UNIFIED_DEMO_ROADMAP_2026-10-19.md) records the user's new selection: official Gmail/Outlook/Teams/Android SMS routes; Matrix bridges for WhatsApp/Messenger/Instagram/LinkedIn/Slack/iMessage. This supersedes conflicting route direction below. Bridge hosting/privacy and SMS versus RCS remain explicit decisions. Existing adapters and historical qualification are unchanged.
+
 > **Product scope update, 15 October 2026:** [Current requirements](PRODUCT_REQUIREMENTS.md) supersede conflicting work order and coverage claims here. Further Instagram, Facebook/Messenger and LinkedIn work is deferred. An official API is not a guarantee of full history, personal-inbox access, new-conversation support, all media types or live-qualified sending. WhatsApp personal currently uses an unofficial debug linked-device route. The register requires capability-by-capability evidence and treats the reported notification clutter as unresolved. No connector consolidation, protocol work, install, send or gate change is authorized by this documentation update.
 
 **Date:** 13 October 2026. Inputs: arch v1.2, [implementation status](IMPLEMENTATION_STATUS.md),
@@ -31,7 +35,7 @@ homeserver and no MINI server in the path. Everything else uses **official APIs*
 | Google Messages SMS/RCS | libgm (mautrix-gmessages) | **AGPL-3.0** | Pair as Messages for Web (QR or Google account) | Not started |
 | Instagram DMs | mautrix-meta (instagram mode) | **AGPL-3.0** | In-app login WebView, cookies kept on device | Not started |
 | Messenger | mautrix-meta (messenger mode) | **AGPL-3.0** | In-app login WebView, cookies kept on device | Not started |
-| LinkedIn messages | mautrix-linkedin | **AGPL-3.0** | In-app login WebView, cookies kept on device | Not started |
+| LinkedIn messages | mautrix-linkedin | **AGPL-3.0** | In-app login WebView, cookies kept on device | **BLOCKED** (20 Oct 2026): embedded Android WebView Cloudflare-blocked before session; manager/bot cookie paste needs a bridge host, not phone-local Accounts. See [LinkedIn feasibility](LINKEDIN_PHONE_LOCAL_FEASIBILITY_2026-10-20.md) |
 | iMessage | none viable | - | - | **Not possible** on Android or iOS; see below |
 
 Engineering constraints:
@@ -66,7 +70,7 @@ Engineering constraints:
 | 3 | **Google Messages on-device (libgm)** | C | Not started | Pair, sync history, receive, reviewed send, reconnect after process death | AGPL decision for release |
 | 4 | **Instagram on-device** | C | Official Pro adapter exists | mautrix-meta engine, in-app login, checkpoint handling | AGPL decision |
 | 5 | **Messenger on-device** | C | Notification-only | Same engine as #4 (messenger mode) | AGPL decision |
-| 6 | **LinkedIn on-device** | C | Notification conversations (`2a51f79`..`25ee51c`) | mautrix-linkedin engine, in-app login | AGPL decision |
+| 6 | **LinkedIn on-device** | C | Notification conversations (`2a51f79`..`25ee51c`); runtime/session scaffolding | mautrix-linkedin engine + verified phone-local login | **BLOCKED:** Cloudflare on embedded WebView; manager/bridge cookie paste not phone-local |
 | 7 | **Gmail** | A | Device-verified sync | Live send qualification, OAuth verification prep | Google verification |
 | 8 | **Outlook / M365** | A | Fixture-tested | Live run on device | Entra registration |
 | 9 | **Slack** | A | Fixture-tested, debug | Live workspace run | Slack app distribution |
