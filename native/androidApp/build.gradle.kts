@@ -41,6 +41,12 @@ android {
         versionName = "0.1.0-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["gmailRedirectScheme"] = googleOAuthRedirectScheme
+        val rtprobe = providers.gradleProperty("mini.rtprobe").orNull == "true"
+        if (rtprobe) {
+            applicationIdSuffix = ".rtprobe"
+            versionNameSuffix = "-rtprobe"
+        }
+        buildConfigField("boolean", "RTPROBE", if (rtprobe) "true" else "false")
     }
 
     buildFeatures {

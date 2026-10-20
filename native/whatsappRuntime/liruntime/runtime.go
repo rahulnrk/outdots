@@ -1,23 +1,21 @@
 // Package liruntime is the phone-local LinkedIn messaging protocol facade inside
 // the shared gomobile runtime. It wraps go.mau.fi/mautrix-linkedin/pkg/linkedingo.
 //
-// Scope of this slice: prove the real protocol client compiles into the one
-// coordinated libgojni.so and is constructible with an empty cookie jar.
-// No login, cookie import, session restore, network connection, message access,
-// or Accounts UI is exposed. Those stay unavailable until an isolated probe
-// implements the upstream cookie login and encrypted per-account storage.
+// Probe scope: owner-operated cookie login support (import/export + identity
+// verification). No Accounts UI, no send, no remote bridge.
 //
-// Content-free logging: construction uses context.Background() without a
-// zerolog logger attached; no disk writes.
+// Content-free logging: global zerolog is silenced. Methods never log cookies,
+// headers, names, or response bodies.
 //
-// License: mautrix-linkedin is AGPL-3.0-or-later. Its LICENSE.exceptions grant
-// rights only to Beeper and Element. Linking this package makes the combined
-// runtime AGPL. See ../NOTICE before any distribution.
+// License: mautrix-linkedin is AGPL-3.0-or-later. See ../NOTICE.
 package liruntime
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 	zlog "github.com/rs/zerolog/log"
@@ -34,20 +32,40 @@ const (
 	StateUnavailable   = "unavailable"
 	StateAuthenticated = "authenticated"
 
-	// UnavailableReason is shown verbatim by any caller that asks why the
-	// LinkedIn on-device route cannot be connected yet.
-	UnavailableReason = "LinkedIn on-device cookie login and encrypted session storage are not implemented"
+	// UnavailableReason is shown when Accounts asks why LinkedIn is hidden.
+	UnavailableReason = "LinkedIn on-device cookie login is only available in the isolated probe"
+
+	CookieJSESSIONID = "JSESSIONID"
+	CookieLiAt       = "li_at"
+
+	LoginURL         = "https://www.linkedin.com/login"
+	FeedURLPattern   = `^https://www\.linkedin\.com/feed.*$`
 )
 
-// Runtime holds one unauthenticated linkedingo client. One Runtime per account.
+// Runtime holds one LinkedIn client. One Runtime per account attempt.
 type Runtime struct {
-	mu     sync.Mutex
-	client *linkedingo.Client
-	jar    *linkedingo.StringCookieJar
+	mu             sync.Mutex
+	client         *linkedingo.Client
+	jar            *linkedingo.StringCookieJar
+	pageInstance   string
+	xLiTrack       string
+	verifiedUserID string
+}
+
+type sessionSnapshot struct {
+	CookiesJSON  string `json:"cookies_json"`
+	PageInstance string `json:"x_li_page_instance"`
+	XLITrack     string `json:"x_li_track"`
+	UserID       string `json:"user_id,omitempty"`
+}
+
+type verifyResult struct {
+	OK     bool   `json:"ok"`
+	Code   string `json:"code,omitempty"`
+	UserID string `json:"user_id,omitempty"`
 }
 
 func init() {
-	// Match igruntime: keep global zerolog silent so no content-bearing fields leak.
 	zlog.Logger = zerolog.Nop()
 	zerolog.SetGlobalLevel(zerolog.Disabled)
 }
@@ -61,112 +79,237 @@ func GlobalLoggingDisabled() bool {
 // It performs no network I/O.
 func NewRuntime() *Runtime {
 	jar := linkedingo.NewEmptyStringCookieJar()
-	client := linkedingo.NewClient(
+	return &Runtime{client: newClient("", "", jar), jar: jar}
+}
+
+func newClient(pageInstance, xLiTrack string, jar *linkedingo.StringCookieJar) *linkedingo.Client {
+	return linkedingo.NewClient(
 		context.Background(),
 		linkedingo.NewURN(""),
 		jar,
-		"",
-		"",
+		pageInstance,
+		xLiTrack,
 		"",
 		linkedingo.Handlers{},
 	)
-	return &Runtime{client: client, jar: jar}
 }
 
 // Platform reports the upstream platform identifier ("linkedin").
 func (r *Runtime) Platform() string { return "linkedin" }
 
-// State reports authenticated once a cookie jar with JSESSIONID is loaded.
+// State reports authenticated once identity has been verified upstream.
 func (r *Runtime) State() string {
-	if r.IsAuthenticated() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.verifiedUserID != "" {
 		return StateAuthenticated
 	}
 	return StateUnavailable
 }
 
-// LoginAvailable is false until the isolated cookie-login probe lands.
+// LoginAvailable stays false for normal Accounts. The probe launches its own UI.
 func (r *Runtime) LoginAvailable() bool { return false }
 
-// IsAuthenticated is false without a restored cookie jar containing JSESSIONID.
+// IsAuthenticated is true only after a successful VerifyIdentity call.
 func (r *Runtime) IsAuthenticated() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.client != nil && r.client.IsLoggedIn()
+	return r.verifiedUserID != ""
 }
 
-// UnavailableDetail returns the fixed reason LinkedIn stays hidden from Accounts.
+// HasSessionCookies is true when both JSESSIONID and li_at are present.
+// This is necessary but not sufficient proof of authentication.
+func (r *Runtime) HasSessionCookies() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return jarHasRequiredCookies(r.jar)
+}
+
+// UnavailableDetail returns the fixed Accounts-hidden reason.
 func (r *Runtime) UnavailableDetail() string { return UnavailableReason }
 
-// RequiredCookieName is the LinkedIn session cookie upstream treats as logged-in.
-func RequiredCookieName() string { return linkedingo.LinkedInCookieJSESSIONID }
-
-// ImportCookieHeader replaces the in-memory jar from a Cookie request header.
-// It performs no network I/O. Returns false when the header cannot be parsed or
-// lacks JSESSIONID.
-func (r *Runtime) ImportCookieHeader(header string) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	jar, err := linkedingo.NewJarFromCookieHeader(header)
-	if err != nil || jar.GetCookie(linkedingo.LinkedInCookieJSESSIONID) == "" {
-		return false
-	}
-	r.jar = jar
-	r.client = linkedingo.NewClient(
-		context.Background(),
-		linkedingo.NewURN(""),
-		jar,
-		"",
-		"",
-		"",
-		linkedingo.Handlers{},
-	)
-	return true
-}
-
-// ExportCookiesJSON serializes the current jar for encrypted storage.
-// Empty string means no cookies are present.
-func (r *Runtime) ExportCookiesJSON() string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.jar == nil {
-		return ""
-	}
-	raw, err := r.jar.MarshalJSON()
-	if err != nil {
-		return ""
-	}
-	return string(raw)
-}
-
-// ImportCookiesJSON restores a jar previously produced by ExportCookiesJSON.
-func (r *Runtime) ImportCookiesJSON(jsonCookies string) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	jar := linkedingo.NewEmptyStringCookieJar()
-	if err := jar.UnmarshalJSON([]byte(jsonCookies)); err != nil {
-		return false
-	}
-	if jar.GetCookie(linkedingo.LinkedInCookieJSESSIONID) == "" {
-		return false
-	}
-	r.jar = jar
-	r.client = linkedingo.NewClient(
-		context.Background(),
-		linkedingo.NewURN(""),
-		jar,
-		"",
-		"",
-		"",
-		linkedingo.Handlers{},
-	)
-	return true
-}
+// RequiredCookieNamesCSV lists cookies that must be present before verify.
+func RequiredCookieNamesCSV() string { return CookieJSESSIONID + "," + CookieLiAt }
 
 // BrowserUserAgent is the upstream desktop UA LinkedIn cookies must match.
 func BrowserUserAgent() string { return linkedingo.UserAgent }
+
+// LoginStartURL is the owner sign-in page.
+func LoginStartURL() string { return LoginURL }
+
+// LoginSuccessURLPattern matches the post-login feed URL.
+func LoginSuccessURLPattern() string { return FeedURLPattern }
 
 // PinnedCommit exposes the pinned upstream commit for device tests.
 func PinnedCommit() string { return PinnedMautrixLinkedIn }
 
 // PinnedVersion exposes the pinned module version for device tests.
 func PinnedVersion() string { return PinnedMautrixLinkedInVersion }
+
+// VerifiedUserID returns the provider identity after VerifyIdentity, else empty.
+func (r *Runtime) VerifiedUserID() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.verifiedUserID
+}
+
+func jarHasRequiredCookies(jar *linkedingo.StringCookieJar) bool {
+	if jar == nil {
+		return false
+	}
+	jsession := jar.GetCookie(CookieJSESSIONID)
+	liAt := jar.GetCookie(CookieLiAt)
+	return jsession != "" && liAt != "" && liAt != "delete me"
+}
+
+// ImportOwnerSession installs cookies + browser identity headers from the WebView probe.
+// Returns a content-free code: empty on success.
+func (r *Runtime) ImportOwnerSession(cookieHeader, pageInstance, xLiTrack string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.verifiedUserID = ""
+	if strings.TrimSpace(cookieHeader) == "" {
+		return "missing_cookie_header"
+	}
+	if strings.TrimSpace(pageInstance) == "" || !strings.Contains(pageInstance, "urn:li:page") {
+		return "missing_page_instance"
+	}
+	if strings.TrimSpace(xLiTrack) == "" || !strings.Contains(xLiTrack, "clientVersion") {
+		return "missing_x_li_track"
+	}
+	jar, err := linkedingo.NewJarFromCookieHeader(cookieHeader)
+	if err != nil {
+		return "cookie_parse_failed"
+	}
+	if !jarHasRequiredCookies(jar) {
+		return "missing_required_cookies"
+	}
+	r.jar = jar
+	r.pageInstance = pageInstance
+	r.xLiTrack = xLiTrack
+	r.client = newClient(pageInstance, xLiTrack, jar)
+	return ""
+}
+
+// VerifyIdentity performs GetCurrentUserProfile. Success proves authentication.
+// Returns JSON: {"ok":true,"user_id":"..."} or {"ok":false,"code":"..."}.
+// Never includes names, cookies, or tokens.
+func (r *Runtime) VerifyIdentity() string {
+	r.mu.Lock()
+	client := r.client
+	jar := r.jar
+	r.mu.Unlock()
+	if client == nil || !jarHasRequiredCookies(jar) {
+		return encodeVerify(verifyResult{OK: false, Code: "session_incomplete"})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	profile, err := client.GetCurrentUserProfile(ctx)
+	if err != nil {
+		return encodeVerify(verifyResult{OK: false, Code: classifyVerifyError(err)})
+	}
+	if profile == nil {
+		return encodeVerify(verifyResult{OK: false, Code: "empty_profile"})
+	}
+	userID := profile.MiniProfile.EntityURN.ID()
+	if userID == "" {
+		userID = profile.MiniProfile.DashEntityURN.ID()
+	}
+	if userID == "" {
+		return encodeVerify(verifyResult{OK: false, Code: "empty_verified_identity"})
+	}
+	r.mu.Lock()
+	r.verifiedUserID = userID
+	r.mu.Unlock()
+	return encodeVerify(verifyResult{OK: true, UserID: userID})
+}
+
+func classifyVerifyError(err error) string {
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "access token is no longer valid"), strings.Contains(msg, "li_at"):
+		return "session_expired"
+	case strings.Contains(msg, "status code 401"), strings.Contains(msg, "status code 403"):
+		return "unauthorized"
+	case strings.Contains(msg, "status code"):
+		return "upstream_http_status"
+	case strings.Contains(msg, "timeout"), strings.Contains(msg, "deadline"):
+		return "network_error"
+	default:
+		return "verify_failed"
+	}
+}
+
+func encodeVerify(v verifyResult) string {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return `{"ok":false,"code":"encode_failed"}`
+	}
+	return string(raw)
+}
+
+// ExportSessionJSON serializes cookies + browser identity for encrypted storage.
+func (r *Runtime) ExportSessionJSON() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.jar == nil || r.pageInstance == "" || r.xLiTrack == "" {
+		return ""
+	}
+	rawCookies, err := r.jar.MarshalJSON()
+	if err != nil || len(rawCookies) == 0 {
+		return ""
+	}
+	snap := sessionSnapshot{
+		CookiesJSON:  string(rawCookies),
+		PageInstance: r.pageInstance,
+		XLITrack:     r.xLiTrack,
+		UserID:       r.verifiedUserID,
+	}
+	out, err := json.Marshal(snap)
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
+// ImportSessionJSON restores a snapshot previously produced by ExportSessionJSON.
+// Does not network-verify; call VerifyIdentity after restore.
+func (r *Runtime) ImportSessionJSON(sessionJSON string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.verifiedUserID = ""
+	var snap sessionSnapshot
+	if err := json.Unmarshal([]byte(sessionJSON), &snap); err != nil {
+		return "session_parse_failed"
+	}
+	if snap.CookiesJSON == "" || snap.PageInstance == "" || snap.XLITrack == "" {
+		return "session_incomplete"
+	}
+	jar := linkedingo.NewEmptyStringCookieJar()
+	if err := jar.UnmarshalJSON([]byte(snap.CookiesJSON)); err != nil {
+		return "cookie_parse_failed"
+	}
+	if !jarHasRequiredCookies(jar) {
+		return "missing_required_cookies"
+	}
+	r.jar = jar
+	r.pageInstance = snap.PageInstance
+	r.xLiTrack = snap.XLITrack
+	r.client = newClient(snap.PageInstance, snap.XLITrack, jar)
+	if snap.UserID != "" {
+		// Soft restore of last known id; VerifyIdentity must still succeed for IsAuthenticated.
+		r.verifiedUserID = ""
+	}
+	return ""
+}
+
+// ClearSession drops in-memory cookies and identity.
+func (r *Runtime) ClearSession() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.jar = linkedingo.NewEmptyStringCookieJar()
+	r.pageInstance = ""
+	r.xLiTrack = ""
+	r.verifiedUserID = ""
+	r.client = newClient("", "", r.jar)
+}

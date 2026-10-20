@@ -21,13 +21,13 @@ data class LinkedInSessionEnvelope private constructor(val ciphertext: ByteArray
         fun fromEncoded(bytes: ByteArray): LinkedInSessionEnvelope? =
             if (LinkedInSessionEnvelopeCodec.isValid(bytes)) LinkedInSessionEnvelope(bytes.copyOf()) else null
 
-        fun fromCookieJson(json: String): LinkedInSessionEnvelope {
-            require(json.isNotBlank()) { "empty LinkedIn cookie json" }
+        fun fromSessionJson(json: String): LinkedInSessionEnvelope {
+            require(json.isNotBlank()) { "empty LinkedIn session json" }
             return LinkedInSessionEnvelope(LinkedInSessionEnvelopeCodec.wrapPayload(json.toByteArray(Charsets.UTF_8)))
         }
     }
 
-    fun cookieJsonOrNull(): String? {
+    fun sessionJsonOrNull(): String? {
         val payload = LinkedInSessionEnvelopeCodec.payload(ciphertext) ?: return null
         return payload.toString(Charsets.UTF_8)
     }

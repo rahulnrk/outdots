@@ -1,6 +1,9 @@
 package liruntime
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestNewRuntimeConstructsWithoutNetwork(t *testing.T) {
 	r := NewRuntime()
@@ -16,46 +19,71 @@ func TestNewRuntimeConstructsWithoutNetwork(t *testing.T) {
 	if r.LoginAvailable() {
 		t.Fatal("LoginAvailable unexpectedly true")
 	}
-	if r.IsAuthenticated() {
-		t.Fatal("IsAuthenticated unexpectedly true")
+	if r.IsAuthenticated() || r.HasSessionCookies() {
+		t.Fatal("unexpected authenticated/cookie state")
 	}
 	if !GlobalLoggingDisabled() {
 		t.Fatal("global logging guard not active")
 	}
-	if PinnedVersion() != PinnedMautrixLinkedInVersion {
-		t.Fatalf("PinnedVersion=%q", PinnedVersion())
+	if RequiredCookieNamesCSV() != "JSESSIONID,li_at" {
+		t.Fatalf("RequiredCookieNamesCSV=%q", RequiredCookieNamesCSV())
 	}
-	if RequiredCookieName() != "JSESSIONID" {
-		t.Fatalf("RequiredCookieName=%q", RequiredCookieName())
-	}
-	if BrowserUserAgent() == "" {
-		t.Fatal("BrowserUserAgent empty")
+	if BrowserUserAgent() == "" || LoginStartURL() == "" || LoginSuccessURLPattern() == "" {
+		t.Fatal("missing login constants")
 	}
 }
 
-func TestCookieHeaderRoundTrip(t *testing.T) {
+func TestJsessionAloneIsNotAccepted(t *testing.T) {
 	r := NewRuntime()
-	if r.ImportCookieHeader("foo=bar") {
-		t.Fatal("accepted cookie header without JSESSIONID")
+	code := r.ImportOwnerSession(
+		"JSESSIONID=ajax:only",
+		"urn:li:page:messaging_thread;abc",
+		`{"clientVersion":"1.13.40953","mpVersion":"1.13.40953","mpName":"voyager-web"}`,
+	)
+	if code != "missing_required_cookies" {
+		t.Fatalf("code=%q want missing_required_cookies", code)
 	}
-	if !r.ImportCookieHeader("JSESSIONID=ajax:probe; li_at=token") {
-		t.Fatal("rejected valid cookie header")
+	if r.HasSessionCookies() || r.IsAuthenticated() {
+		t.Fatal("JSESSIONID-only must not authenticate")
 	}
-	if !r.IsAuthenticated() {
-		t.Fatal("expected authenticated after import")
+}
+
+func TestOwnerSessionRoundTripRequiresBrowserIdentity(t *testing.T) {
+	r := NewRuntime()
+	page := "urn:li:page:d_flagship3_feed;abc"
+	track := `{"clientVersion":"1.13.40953","mpVersion":"1.13.40953","osName":"web","mpName":"voyager-web"}`
+	if code := r.ImportOwnerSession("JSESSIONID=ajax:probe; li_at=token", "", track); code != "missing_page_instance" {
+		t.Fatalf("page code=%q", code)
 	}
-	if got := r.State(); got != StateAuthenticated {
-		t.Fatalf("State=%q", got)
+	if code := r.ImportOwnerSession("JSESSIONID=ajax:probe; li_at=token", page, ""); code != "missing_x_li_track" {
+		t.Fatalf("track code=%q", code)
 	}
-	exported := r.ExportCookiesJSON()
+	if code := r.ImportOwnerSession("JSESSIONID=ajax:probe; li_at=token", page, track); code != "" {
+		t.Fatalf("import code=%q", code)
+	}
+	if !r.HasSessionCookies() {
+		t.Fatal("expected required cookies")
+	}
+	if r.IsAuthenticated() {
+		t.Fatal("cookies alone must not set IsAuthenticated")
+	}
+	exported := r.ExportSessionJSON()
 	if exported == "" {
-		t.Fatal("ExportCookiesJSON empty")
+		t.Fatal("ExportSessionJSON empty")
+	}
+	var snap map[string]any
+	if err := json.Unmarshal([]byte(exported), &snap); err != nil {
+		t.Fatal(err)
 	}
 	r2 := NewRuntime()
-	if !r2.ImportCookiesJSON(exported) {
-		t.Fatal("ImportCookiesJSON failed")
+	if code := r2.ImportSessionJSON(exported); code != "" {
+		t.Fatalf("restore code=%q", code)
 	}
-	if !r2.IsAuthenticated() {
-		t.Fatal("expected authenticated after JSON restore")
+	if !r2.HasSessionCookies() {
+		t.Fatal("expected cookies after restore")
+	}
+	r2.ClearSession()
+	if r2.HasSessionCookies() || r2.IsAuthenticated() {
+		t.Fatal("ClearSession left state behind")
 	}
 }

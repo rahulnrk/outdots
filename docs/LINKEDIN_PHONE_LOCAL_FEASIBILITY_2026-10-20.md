@@ -51,18 +51,47 @@ Toolchain: Go 1.26.0 (`tmp/go126root`), NDK 26.1.10909125, gomobile from module 
 
 - `LinkedInSessionEnvelope` / `LinkedInSessionEnvelopeCodec`
 - `SqlCipherLinkedInSessionStore` (`mini-linkedin-session.db`, Keystore-wrapped SQLCipher key)
-- Not referenced from Manage Accounts / Inbox yet
+- Not referenced from Manage Accounts / Inbox
 
-## Supported login path for the next probe
+## Isolated owner login probe (implemented)
 
-Owner interaction required (content-free plan):
+Authentication requirements (pinned upstream `pkg/connector/login.go` + `linkedingo`):
 
-1. Isolated probe process (rtprobe-style), not normal Accounts.
-2. WebView loads `https://www.linkedin.com/` with upstream desktop UA.
-3. After messaging is reachable, extract cookie header / jar; require `JSESSIONID`.
-4. Import into `liruntime`, export JSON, wrap in `LinkedInSessionEnvelope`, save SQLCipher.
-5. Harmless authenticated read (e.g. voyager `/me` or bounded conversations) before any Inbox wiring.
-6. No live sends. No remote Matrix bridge.
+| Requirement | Role |
+|---|---|
+| `li_at` cookie | Session token; deleted/`delete me` invalidates access |
+| `JSESSIONID` cookie | CSRF token source; **not** sufficient alone |
+| `X-LI-Page-Instance` | Browser identity header (`urn:li:page…`) |
+| `X-LI-Track` | Browser identity JSON containing `clientVersion` |
+| Desktop `UserAgent` | Must match `linkedingo.UserAgent` |
+| `GetCurrentUserProfile` | Harmless authenticated proof; binds `AccountId` |
+
+Probe packaging:
+
+- Build with `-Pmini.rtprobe=true` → `applicationIdSuffix=.rtprobe` (does not touch `app.mini.hub`)
+- `LinkedInLoginActivity` in process `:lilogin` with WebView data-dir suffix `mini_li_login`
+- HTTPS LinkedIn top-level allowlist; owner completes 2FA/challenges in-page
+- Cookies/headers never logged or shown; scrubbed after handoff
+- Stale attempt callbacks ignored; cancel clears in-memory session
+
+Install/run (leaves sign-in screen open):
+
+```bat
+cd native\whatsappRuntime
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build-android.ps1
+cd ..
+gradlew.bat :androidApp:assembleDebug -Pmini.rtprobe=true
+adb install -r androidApp\build\outputs\apk\debug\androidApp-debug.apk
+adb shell am start -n app.mini.hub.rtprobe/app.mini.hub.android.connector.LinkedInLoginActivity
+```
+
+### Device result (20 Oct 2026)
+
+- `app.mini.hub.rtprobe` installed beside existing `app.mini.hub` (production package path unchanged).
+- LinkedIn probe Activity opened on `:lilogin` with Start/Restore UI.
+- After Start, LinkedIn served a **Cloudflare “Attention Required / Sorry, you have been blocked”** interstitial in the embedded WebView (`You are unable to access linkedin.com`).
+- Probe did **not** bypass the block. Owner challenge remains on-screen for manual handling/cancellation.
+- No cookies were displayed or logged by the probe UI.
 
 ## Instagram unfinished work (tracked)
 

@@ -18,6 +18,7 @@ import app.mini.hub.android.connector.GmailSyncJobService
 import app.mini.hub.android.connector.InstagramForegroundReceiver
 import app.mini.hub.android.connector.InstagramLoginActivity
 import app.mini.hub.android.connector.InstagramReadIngestor
+import app.mini.hub.android.connector.LinkedInLoginActivity
 import app.mini.hub.android.notification.MiniNotificationListenerService
 import app.mini.hub.android.ui.AndroidNativeHandoffLauncher
 import app.mini.hub.android.ui.InboxScreen
@@ -114,6 +115,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (BuildConfig.RTPROBE) {
+            startActivity(android.content.Intent(this, LinkedInLoginActivity::class.java))
+            finish()
+            return
+        }
         setContent {
             MaterialTheme {
                 Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {

@@ -64,6 +64,16 @@
             android:process=":iglogin"
             android:label="Instagram sign-in" />
 
+        <!--
+          Owner-operated LinkedIn cookie login for the rtprobe package. Dedicated
+          process keeps the WebView profile isolated. Not Manage Accounts.
+        -->
+        <activity
+            android:name=".connector.LinkedInLoginActivity"
+            android:exported="true"
+            android:process=":lilogin"
+            android:label="LinkedIn sign-in (probe)" />
+
         <service
             android:name=".notification.MiniNotificationListenerService"
             android:label="Mini Hub Notification Listener"
