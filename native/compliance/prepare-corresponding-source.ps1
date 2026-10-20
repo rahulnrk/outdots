@@ -165,7 +165,16 @@ $patterns = [ordered]@{
   "adb device serial"      = '\b2B011FDH300GL0\b'
   "owner email"            = 'nande[A-Za-z0-9._%+\-]*@'
 }
-$allow = @('placeholder', 'example', '1234567890-abcdef', 'probe-xs', 'probe-datr', '<redacted>', 'REDACTED', 'test-', 'fixture', 'synthetic')
+$allow = @('placeholder', 'example', '1234567890-abcdef', 'probe-xs', 'probe-datr', '<redacted>', 'REDACTED', 'test-', 'fixture', 'synthetic', 'xoxp-user-token')
+# Reviewed, exact exemptions (path + kind). Each was inspected and is not a secret.
+$reviewed = @{
+  'src\native\whatsappRuntime\vendor\go.mau.fi\whatsmeow\binary\token\token.go|google api key' = 'WhatsApp binary-protocol token dictionary entry that happens to start with AIza; not a Google key.'
+}
+# Vendored upstream test fixtures (tiny SQLite files used only by modernc.org/sqlite tests).
+$reviewedFiles = @{
+  'src\native\whatsappRuntime\vendor\modernc.org\sqlite\embed.db'  = 'modernc.org/sqlite test fixture (go:embed in all_test.go), 8 KiB, no user data.'
+  'src\native\whatsappRuntime\vendor\modernc.org\sqlite\embed2.db' = 'modernc.org/sqlite test fixture (go:embed in all_test.go), 8 KiB, no user data.'
+}
 $hits = @()
 $scanFiles = Get-ChildItem $stage -Recurse -File | Where-Object { $_.Length -lt 5MB -and $_.FullName -notmatch '\\vendor\\' }
 foreach ($f in $scanFiles) {
@@ -191,6 +200,15 @@ if ($IncludeGoModules) {
 $forbiddenFiles = Get-ChildItem $stage -Recurse -File | Where-Object {
   $_.Name -match '\.(jks|keystore|p12|pem|task|tflite|litertlm|apk|aab|db|sqlite|sqlite3)$' -or $_.Name -in @('local.properties', '.env', 'google-services.json')
 }
+$exempted = @()
+$vendorHits = @($vendorHits | Where-Object {
+  $key = "$($_.file)|$($_.kind)"
+  if ($reviewed.ContainsKey($key)) { $exempted += [pscustomobject]@{ item = $key; reason = $reviewed[$key] }; $false } else { $true }
+})
+$forbiddenFiles = @($forbiddenFiles | Where-Object {
+  $rel = $_.FullName.Substring($stage.Length + 1)
+  if ($reviewedFiles.ContainsKey($rel)) { $exempted += [pscustomobject]@{ item = $rel; reason = $reviewedFiles[$rel] }; $false } else { $true }
+})
 
 # ---- 5. Manifest + archive ----
 $manifest = Get-ChildItem $stage -Recurse -File | Sort-Object FullName | ForEach-Object {
@@ -204,6 +222,7 @@ $report = [ordered]@{
   excluded_tracked = $excluded.Count
   secret_hits = @($hits); vendor_hits = @($vendorHits)
   forbidden_files = @($forbiddenFiles | ForEach-Object { $_.FullName.Substring($stage.Length + 1) })
+  reviewed_exemptions = @($exempted)
 }
 $report | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $OutDir "scan-$short.json") -Encoding utf8
 
