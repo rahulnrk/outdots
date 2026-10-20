@@ -1,6 +1,7 @@
 package app.mini.hub.android
 
 import app.mini.hub.attention.AttentionStore
+import app.mini.hub.matter.MatterStore
 import app.mini.hub.persistence.ActionStore
 import app.mini.hub.persistence.ObservationStore
 
@@ -14,6 +15,7 @@ sealed class RuntimeStorage {
         val observations: ObservationStore,
         val actions: ActionStore,
         val attention: AttentionStore,
+        val matters: MatterStore,
     ) : RuntimeStorage()
 
     /** [cause] is the exception class name only, for a count-free state log line. */
@@ -29,8 +31,9 @@ sealed class RuntimeStorage {
             openObservations: () -> ObservationStore,
             openActions: () -> ActionStore,
             openAttention: () -> AttentionStore,
+            openMatters: () -> MatterStore,
         ): RuntimeStorage = try {
-            Ready(openObservations(), openActions(), openAttention())
+            Ready(openObservations(), openActions(), openAttention(), openMatters())
         } catch (e: Throwable) {
             Failed(USER_MESSAGE, e.javaClass.simpleName)
         }

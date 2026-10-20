@@ -358,6 +358,8 @@ internal fun MiniInboxPane(
                 }
                 if (state.isSearching) {
                     item { Text("Searching…", style = MaterialTheme.typography.bodySmall) }
+                } else if (state.searchError != null) {
+                    item { Text(state.searchError, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(24.dp)) }
                 } else if (searchHits.isEmpty()) {
                     item {
                         Text(

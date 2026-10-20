@@ -1,5 +1,6 @@
 package app.mini.hub.android
 
+import app.mini.hub.matter.InMemoryMatterStore
 import app.mini.hub.attention.InMemoryAttentionStore
 import app.mini.hub.persistence.InMemoryActionStore
 import app.mini.hub.persistence.InMemoryObservationStore
@@ -18,6 +19,7 @@ class RuntimeStorageTest {
             openObservations = { throw IllegalStateException("keystore unavailable") },
             openActions = { InMemoryActionStore() },
             openAttention = { InMemoryAttentionStore() },
+            openMatters = { InMemoryMatterStore() },
         )
         val failed = assertIs<RuntimeStorage.Failed>(state)
         // Plain-language, blocking message for the UI; no exception text leaks into it.
@@ -31,6 +33,7 @@ class RuntimeStorageTest {
             openObservations = { InMemoryObservationStore() },
             openActions = { throw RuntimeException("sqlcipher load") },
             openAttention = { InMemoryAttentionStore() },
+            openMatters = { InMemoryMatterStore() },
         )
         assertIs<RuntimeStorage.Failed>(state)
     }
@@ -41,6 +44,7 @@ class RuntimeStorageTest {
             openObservations = { InMemoryObservationStore() },
             openActions = { InMemoryActionStore() },
             openAttention = { InMemoryAttentionStore() },
+            openMatters = { InMemoryMatterStore() },
         )
         assertIs<RuntimeStorage.Ready>(state)
     }
@@ -51,6 +55,7 @@ class RuntimeStorageTest {
             openObservations = { throw IllegalStateException("x") },
             openActions = { InMemoryActionStore() },
             openAttention = { InMemoryAttentionStore() },
+            openMatters = { InMemoryMatterStore() },
         )
         val logs = mutableListOf<String>()
         var ran = 0
@@ -60,7 +65,7 @@ class RuntimeStorageTest {
         assertEquals(listOf("work=sync_job skipped storage=unavailable"), logs)
         assertFalse(logs.single().any { it.isDigit() }, "state line must carry no counts")
 
-        val ready = RuntimeStorage.open({ InMemoryObservationStore() }, { InMemoryActionStore() }, { InMemoryAttentionStore() })
+        val ready = RuntimeStorage.open({ InMemoryObservationStore() }, { InMemoryActionStore() }, { InMemoryAttentionStore() }, { InMemoryMatterStore() })
         assertTrue(RuntimeStorage.runIfReady(ready, "sync_job", logs::add) { ran++ })
         assertEquals(1, ran)
     }

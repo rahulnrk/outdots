@@ -50,8 +50,7 @@ class InstagramAccountConnector(
                 grantedScopes = setOf(InstagramApiConnector.SCOPE),
                 userActionRequired = null,
             )
-            tokens.put(account.id, credential)
-            accounts.upsert(account)
+            app.mini.hub.connector.AccountConnectionManager.installCredential(accounts, tokens, account, credential)
             Log.i(PkceAccountConnector.LOG_TAG, "instagram connected account=${account.id.localId}")
             ConnectOutcome.Connected(account)
         } catch (e: app.mini.hub.connector.ConnectorHttpException) {

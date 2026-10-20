@@ -98,6 +98,8 @@ class InboxViewModel(
     // the cancellation state or a newer draft.
     private var localDraftGeneration = 0L
     private var localDraftEditRevision = 0L
+    private var loadingDraftFor: app.mini.hub.domain.ScopedId? = null
+    private var loadingDraftEditRevision = 0L
     private val _state = mutableStateOf(InboxViewState())
     val state: State<InboxViewState> get() = _state
     private val draftStore: app.mini.hub.persistence.ConversationDraftStore? =
@@ -108,10 +110,22 @@ class InboxViewModel(
         null
     }
     /** Background executor on Android; inline on a plain JVM (no main Looper), like [postToMain]. */
-    private val refreshRunner: (Runnable) -> Unit = refreshRunner
+    private val storageRunner: (Runnable) -> Unit = refreshRunner
         ?: if (mainHandler != null) { r -> REFRESH_EXECUTOR.execute(r) } else { r -> r.run() }
+    private val refreshRunner: (Runnable) -> Unit = { work ->
+        storageRunner(Runnable {
+            try { work.run() } catch (_: Exception) {
+                postToMain("storage-work-failed") {
+                    _state.value = _state.value.copy(storageFailure = "Could not read saved messages. Your writing is kept; try again.", isSearching = false)
+                }
+            }
+        })
+    }
     /** Monotonic token: late search results are dropped when a newer query was typed. */
     private var searchGeneration = 0L
+    private val draftSaveLock = Any()
+    private val pendingDraftSaves = LinkedHashMap<String, Pair<ConversationObservationSummary, InboxViewState>>()
+    private var draftSaveScheduled = false
 
     init {
         localDraftExperiment?.setReleaseListener { ticket ->
@@ -344,12 +358,18 @@ class InboxViewModel(
             return
         }
         val gen = ++searchGeneration
-        _state.value = _state.value.copy(isSearching = true)
+        _state.value = _state.value.copy(isSearching = true, searchError = null)
         val enabledSources = selectedSources().flatMap { it.packageIds }.toSet() + extraVisiblePackages
         refreshRunner(Runnable {
             // Search runs off the main thread; logs contain no query text or message content.
             val query = app.mini.hub.search.SearchQuery(queryText = trimmed, sourceFilter = sourceFilter, limit = 50)
-            val rawResults = observationStore.search(query)
+            val rawResults = try { observationStore.search(query) } catch (_: Exception) {
+                postToMain("search-unavailable") {
+                    if (gen == searchGeneration) _state.value = _state.value.copy(isSearching = false,
+                        searchResults = emptyList(), searchError = "Search is unavailable right now. Try again.")
+                }
+                return@Runnable
+            }
             val scope = app.mini.hub.inbox.InboxScope(
                 accountKey = _state.value.inboxAccountKey,
                 showDone = _state.value.inboxShowArchived,
@@ -374,7 +394,29 @@ class InboxViewModel(
 
     private fun persistCurrentDraft() {
         val selected = _state.value.selectedConversation ?: return
-        persistDraftSnapshot(selected, _state.value)
+        // A blank loading composer is not a user instruction to delete an existing saved draft.
+        if (loadingDraftFor == selected.conversationId && loadingDraftEditRevision == localDraftEditRevision) return
+        val snapshot = _state.value
+        val schedule = synchronized(draftSaveLock) {
+            pendingDraftSaves[selected.conversationId.key] = selected to snapshot
+            if (draftSaveScheduled) false else { draftSaveScheduled = true; true }
+        }
+        if (schedule) refreshRunner(Runnable {
+            while (true) {
+                val pending = synchronized(draftSaveLock) {
+                    val first = pendingDraftSaves.entries.firstOrNull()
+                    if (first == null) { draftSaveScheduled = false; null }
+                    else pendingDraftSaves.remove(first.key)
+                } ?: break
+                try {
+                    persistDraftSnapshot(pending.first, pending.second)
+                } catch (_: Exception) {
+                    postToMain("draft-save-failed") {
+                        _state.value = _state.value.copy(localDraftStatus = "Could not save this draft. Keep MINI open and try again.")
+                    }
+                }
+            }
+        })
     }
 
     private fun persistDraftSnapshot(selected: ConversationObservationSummary, s: InboxViewState) {
@@ -390,7 +432,7 @@ class InboxViewModel(
             return
         }
 
-        val effectiveVersions = if (s.draftVersions.isNotEmpty()) {
+        var effectiveVersions = if (s.draftVersions.isNotEmpty()) {
             s.draftVersions
         } else if (s.localDraftText.isNotBlank()) {
             listOf(
@@ -402,6 +444,14 @@ class InboxViewModel(
             )
         } else {
             emptyList()
+        }
+        if (s.draftVersions.isEmpty()) {
+            val existing = store.loadDraft(selected.conversationId.key)?.takeIf { it.accountId == selected.accountId.key }
+            if (!existing?.body.isNullOrBlank() && existing?.body != s.localDraftText) {
+                val prior = existing!!.versions.ifEmpty { listOf(app.mini.hub.persistence.DraftVersion(
+                    text = existing.body, provenance = existing.provenance, originalAiText = existing.originalGeneratedDraft)) }
+                effectiveVersions = (prior + effectiveVersions).takeLast(5)
+            }
         }
 
         store.saveDraft(
@@ -487,7 +537,18 @@ class InboxViewModel(
      * there is one; otherwise starts an empty thread so the user can write the first message.
      */
     fun openCompose(accountId: app.mini.hub.domain.AccountId, address: String, name: String) {
-        val all = observationStore.getConversationSummaries(accountId)
+        val generation = ++conversationLoadGeneration
+        refreshRunner(Runnable {
+            val all = observationStore.getConversationSummaries(accountId)
+            postToMain("compose-selection") {
+                if (generation == conversationLoadGeneration) openComposeLoaded(accountId, address, name, all)
+            }
+        })
+    }
+
+    private fun openComposeLoaded(accountId: app.mini.hub.domain.AccountId, address: String, name: String,
+        all: List<ConversationObservationSummary>,
+    ) {
         val existing = all.firstOrNull { it.conversationId.value.equals(address, ignoreCase = true) }
             ?: all.firstOrNull { it.senderHint.contains(address, ignoreCase = true) }
         if (existing != null) {
@@ -514,31 +575,7 @@ class InboxViewModel(
             isRemoved = false,
         )
         clearSearch()
-        persistCurrentDraft()
-        abandonLocalDraft()
-        val draft = loadedDraft(summary.conversationId.key)
-        val restored = restoreDraftState(draft, accountId)
-        _state.value = _state.value.copy(
-            selectedConversation = summary,
-            selectedTimeline = emptyList(),
-            retrievedContext = retrievalEngine.retrieve(
-                ScopedRetrievalQuery(conversationId = summary.conversationId, compartment = CompartmentId(accountId.key), tokenBudget = 650),
-            ),
-            activeReviewPayload = null,
-            localDraftText = restored.body,
-            originalGeneratedDraft = restored.originalGeneratedDraft,
-            localDraftProvenance = restored.provenance,
-            draftVersions = restored.versions,
-            selectedVersionIndex = restored.selectedIndex,
-            showWhyThisDraft = false,
-            targetMessageIdToHighlight = null,
-            localDraftStatus = null,
-            conversationLoadStatus = null,
-            composeNewTo = if (isEmail) draft?.to?.ifBlank { address } ?: address else null,
-            composeCc = draft?.cc.orEmpty(),
-            composeBcc = draft?.bcc.orEmpty(),
-            composeSubject = draft?.subject.orEmpty(),
-        )
+        openConversation(summary, if (isEmail) address else null)
     }
 
     /** Compose button: opens a new email thread (To/Cc/Bcc/Subject) on the chosen account. */
@@ -558,38 +595,14 @@ class InboxViewModel(
             observationCount = 0, unreadCount = 0, isRemoved = false,
         )
         clearSearch()
-        persistCurrentDraft()
-        abandonLocalDraft()
-        val draft = loadedDraft(summary.conversationId.key)
-        val restored = restoreDraftState(draft, accountId)
-        _state.value = _state.value.copy(
-            selectedConversation = summary,
-            selectedTimeline = emptyList(),
-            retrievedContext = retrievalEngine.retrieve(
-                ScopedRetrievalQuery(conversationId = summary.conversationId, compartment = CompartmentId(accountId.key), tokenBudget = 650),
-            ),
-            activeReviewPayload = null,
-            localDraftText = restored.body,
-            originalGeneratedDraft = restored.originalGeneratedDraft,
-            localDraftProvenance = restored.provenance,
-            draftVersions = restored.versions,
-            selectedVersionIndex = restored.selectedIndex,
-            showWhyThisDraft = false,
-            targetMessageIdToHighlight = null,
-            localDraftStatus = null,
-            conversationLoadStatus = null,
-            composeNewTo = draft?.to ?: "",
-            composeCc = draft?.cc.orEmpty(),
-            composeBcc = draft?.bcc.orEmpty(),
-            composeSubject = draft?.subject.orEmpty(),
-        )
+        openConversation(summary, composeTo = "")
     }
 
     /** Reopens a persisted composer draft, including new emails that have no inbox thread yet. */
     fun openSavedDraft(draft: app.mini.hub.persistence.ConversationDraft) {
         val conversationId = runCatching { app.mini.hub.domain.ScopedId.parse(draft.conversationKey) }.getOrNull() ?: return
         val existing = _state.value.conversations.firstOrNull { it.conversationId == conversationId }
-            ?: observationStore.getConversationSummaries(conversationId.account).firstOrNull { it.conversationId == conversationId }
+
         if (existing != null && !draft.isNewEmail) {
             selectConversation(existing)
             return
@@ -613,30 +626,7 @@ class InboxViewModel(
             observationCount = 0, unreadCount = 0, isRemoved = false,
         )
         clearSearch()
-        persistCurrentDraft()
-        abandonLocalDraft()
-        val restored = restoreDraftState(draft, accountId)
-        _state.value = _state.value.copy(
-            selectedConversation = summary,
-            selectedTimeline = emptyList(),
-            retrievedContext = retrievalEngine.retrieve(
-                ScopedRetrievalQuery(conversationId = summary.conversationId, compartment = CompartmentId(accountId.key), tokenBudget = 650),
-            ),
-            activeReviewPayload = null,
-            localDraftText = restored.body,
-            originalGeneratedDraft = restored.originalGeneratedDraft,
-            localDraftProvenance = restored.provenance,
-            draftVersions = restored.versions,
-            selectedVersionIndex = restored.selectedIndex,
-            showWhyThisDraft = false,
-            targetMessageIdToHighlight = null,
-            localDraftStatus = "Saved draft restored.",
-            conversationLoadStatus = null,
-            composeNewTo = if (draft.isNewEmail) draft.to else null,
-            composeCc = draft.cc,
-            composeBcc = draft.bcc,
-            composeSubject = draft.subject,
-        )
+        openConversation(summary, if (draft.isNewEmail) draft.to else null, draft)
     }
 
     fun selectConversationFromSearch(result: app.mini.hub.search.SearchResult) {
@@ -651,12 +641,21 @@ class InboxViewModel(
         })
     }
 
-    fun selectConversation(summary: ConversationObservationSummary) {
+    fun selectConversation(summary: ConversationObservationSummary) = openConversation(summary)
+
+    private fun openConversation(summary: ConversationObservationSummary, composeTo: String? = null,
+        suppliedDraft: app.mini.hub.persistence.ConversationDraft? = null,
+    ) {
         val generation = ++conversationLoadGeneration
         val previousState = _state.value
         val previous = previousState.selectedConversation
         val previousWasDifferent = previous?.conversationId != summary.conversationId
-        if (previous != null && previousWasDifferent) {
+        persistCurrentDraft()
+        abandonLocalDraft()
+        val editRevision = localDraftEditRevision
+        loadingDraftFor = summary.conversationId
+        loadingDraftEditRevision = editRevision
+        if (previousWasDifferent) {
             // Snapshot persistence and all durable reads happen on the worker below. The UI gets a
             // selection immediately, while this generation prevents a slow store from winning.
             _state.value = _state.value.copy(
@@ -666,12 +665,18 @@ class InboxViewModel(
                 activeStyleProfile = null,
                 activeReviewPayload = null,
                 reviewContext = null,
+                localDraftText = "",
+                originalGeneratedDraft = null,
+                localDraftProvenance = null,
+                draftVersions = emptyList(),
+                selectedVersionIndex = 0,
+                composeNewTo = composeTo,
+                composeCc = "", composeBcc = "", composeSubject = "",
                 conversationLoadStatus = "Loading this conversation…",
             )
         }
-        abandonLocalDraft()
         refreshRunner(Runnable {
-            if (previous != null && previousWasDifferent) persistDraftSnapshot(previous, previousState)
+            try {
             val observations = observationStore.getObservationsForConversation(summary.conversationId)
             val retrieved = retrievalEngine.retrieve(
                 ScopedRetrievalQuery(
@@ -688,15 +693,21 @@ class InboxViewModel(
                 account = summary.accountId,
             )
             markConversationSeen(summary.conversationId.key, summary.latestEventAt.epochMillis)
-            val draft = loadedDraft(summary.conversationId.key)
+            val draft = suppliedDraft ?: loadedDraft(summary.conversationId.key)
             val restored = restoreDraftState(draft, summary.accountId)
             postToMain("conversation-selection") {
                 if (generation != conversationLoadGeneration) return@postToMain
-                _state.value = _state.value.copy(
+                loadingDraftFor = null
+                var next = _state.value.copy(
                     selectedConversation = summary,
                     selectedTimeline = observations,
                     retrievedContext = retrieved,
                     activeStyleProfile = style,
+                    conversationLoadStatus = null,
+                )
+                // Storage may finish after typing or selecting a newer draft version. Restore
+                // only if the composer has not changed since this selection started.
+                if (editRevision == localDraftEditRevision) next = next.copy(
                     activeReviewPayload = null,
                     outboxStatusMessage = null,
                     localDraftText = restored.body,
@@ -706,7 +717,7 @@ class InboxViewModel(
                     selectedVersionIndex = restored.selectedIndex,
                     showWhyThisDraft = false,
                     targetMessageIdToHighlight = null,
-                    composeNewTo = if (draft?.isNewEmail == true) draft.to else null,
+                    composeNewTo = if (draft?.isNewEmail == true) draft.to else composeTo,
                     composeCc = draft?.cc.orEmpty(),
                     composeBcc = draft?.bcc.orEmpty(),
                     composeSubject = draft?.subject.orEmpty(),
@@ -717,7 +728,22 @@ class InboxViewModel(
                     isLocalAiRetryAvailable = localDraftExperiment?.needsRecovery == true,
                     conversationLoadStatus = null,
                 )
+                if (editRevision != localDraftEditRevision && next.draftVersions.isEmpty()) {
+                    val retained = restored.versions
+                    val current = app.mini.hub.persistence.DraftVersion(text = next.localDraftText,
+                        provenance = next.localDraftProvenance, originalAiText = next.originalGeneratedDraft)
+                    val versions = (retained + listOf(current).filter { next.localDraftText.isNotBlank() && retained.none { old -> old.text == current.text } }).takeLast(5)
+                    next = next.copy(draftVersions = versions,
+                        selectedVersionIndex = versions.indexOfLast { it.text == next.localDraftText })
+                }
+                _state.value = next
                 loadFullConversation(summary)
+            }
+            } catch (_: Exception) {
+                postToMain("conversation-selection-failed") {
+                    if (generation == conversationLoadGeneration) _state.value = _state.value.copy(
+                        conversationLoadStatus = "Could not open this conversation. Your writing is kept; try again.")
+                }
             }
         })
     }
@@ -729,12 +755,17 @@ class InboxViewModel(
         val generation = ++conversationLoadGeneration
         _state.value = _state.value.copy(conversationLoadStatus = "Loading the full conversation from ${account.id.provider.wire}…")
         Thread({
-            val loaded = runCatching { loader(summary) }
+            val loaded = runCatching {
+                val timeline = loader(summary)
+                val context = if (timeline == null) null else retrievalEngine.retrieve(
+                    ScopedRetrievalQuery(summary.conversationId, CompartmentId(summary.accountId.key), tokenBudget = 650))
+                timeline to context
+            }
             postToMain("conversation-load") {
                 if (generation != conversationLoadGeneration ||
                     _state.value.selectedConversation?.conversationId != summary.conversationId
                 ) return@postToMain
-                val timeline = loaded.getOrNull()
+                val timeline = loaded.getOrNull()?.first
                 _state.value = when {
                     loaded.isFailure -> _state.value.copy(
                         conversationLoadStatus = "Full conversation unavailable right now; showing messages already in MINI.",
@@ -748,13 +779,7 @@ class InboxViewModel(
                             _state.value.attentionRecords[summary.conversationId.key]
                                 ?: AttentionRules.default(summary.conversationId, clock.now()),
                         )),
-                        retrievedContext = retrievalEngine.retrieve(
-                            ScopedRetrievalQuery(
-                                conversationId = summary.conversationId,
-                                compartment = CompartmentId(summary.accountId.key),
-                                tokenBudget = 650,
-                            ),
-                        ),
+                        retrievedContext = loaded.getOrNull()?.second,
                         conversationLoadStatus = "Full conversation loaded (${timeline.size} message(s)).",
                     )
                 }
@@ -764,6 +789,7 @@ class InboxViewModel(
 
     fun clearSelection() {
         persistCurrentDraft()
+        loadingDraftFor = null
         abandonLocalDraft()
         conversationLoadGeneration++
         _state.value = _state.value.copy(
@@ -986,6 +1012,7 @@ class InboxViewModel(
     ) = applyGenerationResult(result, provenance, baselineTextAtStart, baselineEditRevisionAtStart)
 
     fun selectDraftVersion(index: Int) {
+        localDraftEditRevision++
         val s = _state.value
         val version = s.draftVersions.getOrNull(index) ?: return
         _state.value = s.copy(
@@ -998,9 +1025,9 @@ class InboxViewModel(
     }
 
     fun discardDraft() {
+        localDraftEditRevision++
         val selected = _state.value.selectedConversation ?: return
         abandonLocalDraft()
-        draftStore?.deleteDraft(selected.conversationId.key)
         _state.value = _state.value.copy(
             localDraftText = "",
             originalGeneratedDraft = null,
@@ -1012,7 +1039,7 @@ class InboxViewModel(
             localDraftStatus = "Draft discarded.",
             isLocalDraftInProgress = false,
         )
-        publishDrafts()
+        persistCurrentDraft()
     }
 
     fun openWhyThisDraft() {
@@ -1071,22 +1098,26 @@ class InboxViewModel(
     }
 
     fun updateComposeTo(value: String) {
+        localDraftEditRevision++
         if (_state.value.composeNewTo == null) return
         _state.value = _state.value.copy(composeNewTo = value)
         persistCurrentDraft()
     }
 
     fun updateComposeCc(value: String) {
+        localDraftEditRevision++
         _state.value = _state.value.copy(composeCc = value)
         persistCurrentDraft()
     }
 
     fun updateComposeBcc(value: String) {
+        localDraftEditRevision++
         _state.value = _state.value.copy(composeBcc = value)
         persistCurrentDraft()
     }
 
     fun updateComposeSubject(value: String) {
+        localDraftEditRevision++
         _state.value = _state.value.copy(composeSubject = value)
         persistCurrentDraft()
     }
@@ -1352,86 +1383,87 @@ class InboxViewModel(
     }
 
     fun approveAndDispatch(handoffLauncher: HandoffLauncher) {
-        if (sendInFlight) return // a second tap while a send is in flight does nothing
+        if (sendInFlight) return
         val payload = _state.value.activeReviewPayload ?: return
+        val approvedAt = clock.now()
         val context = _state.value.reviewContext
+        val learningSummary = _state.value.selectedConversation?.takeIf { it.accountId.key == payload.accountId && it.conversationId.key == payload.conversationId }
+        val authorship = authorshipForApprovedBody(payload.body)
         val launcher = (handoffLauncher as? AndroidNativeHandoffLauncher)?.forPackage(context?.handoffPackage) ?: handoffLauncher
-
-        if (payload.route == ActionRoute.NativeHandoff) {
-            var outboxCmdId: String? = null
-            actionStore.transaction { currentActionState ->
-                val (approvedState, command) = actionController.approve(currentActionState, payload)
-                outboxCmdId = command.id
-                approvedState.copy(reviewedSnapshots = approvedState.reviewedSnapshots + payload.toReviewedSnapshot(command))
-            }
-            val cmdId = outboxCmdId ?: return
-            // Handoff opens an activity: it must stay on the main thread and makes no network call.
-            val finalState = actionStore.transaction {
-                actionController.dispatch(it, cmdId, payload, gateway, launcher, liveDispatchChecks(payload))
-            }
-            applyDispatchResult(payload, context, finalState.outbox.find { it.id == cmdId })
-            return
-        }
-
-        // API send in three durable steps. The provider call runs off the main thread and outside
-        // any database transaction; Dispatching and the consumed approval are committed first, so a
-        // crash mid-call is recovered at startup as OutcomeUnknown and never re-sent.
         sendInFlight = true
-        _state.value = _state.value.copy(isSending = true, outboxStatusMessage = "Sending through ${context?.providerName ?: "the provider"}…")
-        sendRunner(Runnable {
-            val finalCommand = runCatching {
-                var outboxCmdId: String? = null
-                actionStore.transaction { currentActionState ->
-                    val (approvedState, command) = actionController.approve(currentActionState, payload)
-                    outboxCmdId = command.id
-                    approvedState.copy(reviewedSnapshots = approvedState.reviewedSnapshots + payload.toReviewedSnapshot(command))
+        _state.value = _state.value.copy(isSending = true, outboxStatusMessage = "Preparing your reviewed action…")
+        val runner = if (payload.route == ActionRoute.NativeHandoff) refreshRunner else sendRunner
+        runner(Runnable {
+            var commandId: String? = null
+            fun finish() {
+                val snapshot = runCatching { actionStore.snapshot() }.getOrNull()
+                val command = snapshot?.outbox?.find { it.id == commandId }
+                if (command?.state == OutboxState.AcceptedByProvider && learningSummary != null && authorship != null) {
+                    runCatching { onLearnFromApprovedText?.invoke(learningSummary, payload.body, payload.recipients.firstOrNull().orEmpty(), authorship) }
                 }
-                val cmdId = outboxCmdId ?: return@runCatching null
-                val liveChecks = liveDispatchChecks(payload)
-                val begun = actionStore.transaction { actionController.beginDispatch(it, cmdId, payload, liveChecks) }
-                val command = begun.outbox.first { it.id == cmdId }
-                if (command.state != OutboxState.Dispatching) {
-                    command
+                postToMain("send-result") {
+                    sendInFlight = false
+                    applyDispatchResult(payload, context, command, snapshot?.reviewedSnapshots.orEmpty(), learningSummary, authorship)
+                }
+            }
+            try {
+                actionStore.transaction { current ->
+                    val (approved, command) = actionController.approve(current, payload, approvedAt)
+                    commandId = command.id
+                    approved.copy(reviewedSnapshots = approved.reviewedSnapshots + payload.toReviewedSnapshot(command))
+                }
+                val id = requireNotNull(commandId)
+                val checks = liveDispatchChecks(payload)
+                val begun = actionStore.transaction { actionController.beginDispatch(it, id, payload, checks) }
+                val command = begun.outbox.first { it.id == id }
+                if (command.state != OutboxState.Dispatching) { finish(); return@Runnable }
+                if (payload.route == ActionRoute.NativeHandoff) {
+                    val approval = begun.approvals.first { it.id == command.approvalId }
+                    // Only Activity launch is on main; approval, consumption and completion are durable worker writes.
+                    postToMain("native-handoff") {
+                        val valid = clock.now() >= approval.approvedAt && clock.now() <= approval.expiresAt
+                        val opened = if (valid) runCatching { launcher.open(command, payload) }.getOrNull() else null
+                        refreshRunner(Runnable {
+                            try {
+                                actionStore.transaction {
+                                    if (valid) actionController.completeHandoff(it, id, opened)
+                                    else actionController.rejectBeforeExecution(it, id, "approval_expired_before_handoff")
+                                }
+                            } finally { finish() }
+                        })
+                    }
                 } else {
                     val result = actionController.executeGateway(command, payload, gateway)
-                    actionStore.transaction { actionController.completeDispatch(it, cmdId, result) }
-                        .outbox.find { it.id == cmdId }
+                    actionStore.transaction { actionController.completeDispatch(it, id, result) }
+                    finish()
                 }
-            }.getOrNull() ?: actionStore.snapshot().outbox.lastOrNull()
-            postToMain("send-result") {
-                sendInFlight = false
-                applyDispatchResult(payload, context, finalCommand)
+            } catch (_: Exception) {
+                // A committed Dispatching state stays uncertain; never show an unrelated command's result.
+                finish()
             }
         })
     }
-
-    private fun applyDispatchResult(payload: ExactActionPayload, context: ReviewContext?, finalCommand: app.mini.hub.action.OutboxCommand?) {
+    private fun applyDispatchResult(payload: ExactActionPayload, context: ReviewContext?, finalCommand: app.mini.hub.action.OutboxCommand?,
+        snapshots: List<app.mini.hub.action.ReviewedActionSnapshot>, learningSummary: ConversationObservationSummary?,
+        authorship: app.mini.hub.style.TextAuthorship?,
+    ) {
         run {
             val statusMessage = when (finalCommand?.state) {
                 OutboxState.HandoffOpened -> "Draft opened in ${context?.handoffPackage?.let { app.mini.hub.observation.SourceAppNames.forPackage(it) } ?: "another app"}. Nothing is sent until you send it there."
                 OutboxState.AcceptedByProvider -> "${context?.providerName ?: "Provider"} accepted the ${if (context?.isReply == true) "reply" else "message"} (receipt ${finalCommand.receipt ?: "accepted"}). Accepted means the provider took it; it does not confirm the recipient received it."
                 OutboxState.Rejected -> "Not sent: ${finalCommand.failureReason}"
                 OutboxState.OutcomeUnknown -> "Send outcome unknown (${finalCommand.failureReason ?: "timeout/network failure"}). Check the conversation before trying again so it is not sent twice."
-                else -> "Action state: ${finalCommand?.state?.name}"
-            }
-
-            if (finalCommand?.state == OutboxState.AcceptedByProvider) {
-                authorshipForApprovedBody(payload.body)?.let { authorship ->
-                    onLearnFromApprovedText?.invoke(
-                        selectedConversationForLearning(),
-                        payload.body,
-                        payload.recipients.firstOrNull().orEmpty(),
-                        authorship,
-                    )
-                }
+                null -> "Could not record the action. Your draft is kept; try again."
+                OutboxState.Dispatching -> "Send outcome is not confirmed. Check the source conversation before trying again."
+                else -> "Action state: ${finalCommand.state.name}"
             }
 
             _state.value = _state.value.copy(
-                activeReviewPayload = null,
-                reviewContext = null,
+                activeReviewPayload = _state.value.activeReviewPayload.takeUnless { it == payload },
+                reviewContext = _state.value.reviewContext.takeUnless { _state.value.activeReviewPayload == payload },
                 outboxStatusMessage = statusMessage,
                 isSending = false,
-                reviewedSnapshots = actionStore.snapshot().reviewedSnapshots,
+                reviewedSnapshots = snapshots,
             )
         }
     }

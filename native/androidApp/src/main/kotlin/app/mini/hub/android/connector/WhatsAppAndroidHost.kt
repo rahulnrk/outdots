@@ -60,8 +60,7 @@ class WhatsAppAndroidHost(
             state = ConnectionState.Healthy,
             grantedScopes = setOf(UnprovisionedWhatsAppClient.PHONE_SESSION_SCOPE),
         )
-        accounts.upsert(account)
-        tokens.put(accountId, StoredAccessToken("phone-local-session", null))
+        app.mini.hub.connector.AccountConnectionManager.installCredential(accounts, tokens, account, StoredAccessToken("phone-local-session", null))
         return account
     }
 

@@ -18,6 +18,19 @@
             android:taskAffinity=""
             android:windowSoftInputMode="adjustResize"
             android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <!--
+          rtprobe-only trampoline that opens the isolated Instagram sign-in in its
+          dedicated :iglogin process. Present only in debug/rtprobe builds. It
+          stores a verified session and proves a harmless authenticated read; it
+          never enables Accounts and never sends.
+        -->
+        <activity
+            android:name=".connector.InstagramLoginProbeLauncher"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <receiver
             android:name=".notification.SyntheticNotificationReceiver"
             android:exported="true">

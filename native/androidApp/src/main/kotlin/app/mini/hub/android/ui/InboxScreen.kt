@@ -29,7 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -90,6 +90,8 @@ fun InboxScreen(
     },
     onCancelWhatsAppPairing: () -> Unit = {},
     onWhatsAppLinked: (app.mini.hub.connector.WhatsAppPairing.Linked) -> Unit = {},
+    isFocusEnabled: (app.mini.hub.domain.AccountId) -> Boolean = { false },
+    onFocusChanged: (app.mini.hub.domain.AccountId, Boolean) -> Unit = { _, _ -> },
     onDisconnectAccount: (ConnectedAccount) -> Unit = {},
     onSyncNow: () -> Unit = {},
     accountsVersion: Int = 0,
@@ -407,6 +409,8 @@ fun InboxScreen(
                     // Search Results View
                     if (state.isSearching) {
                         Text("Searching…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
+                    } else if (state.searchError != null) {
+                        Text(state.searchError.orEmpty(), color = MaterialTheme.colorScheme.error)
                     } else if (state.searchResults.isEmpty()) {
                         Text("No matching messages found.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
                     } else {
@@ -498,6 +502,8 @@ fun InboxScreen(
             onPollWhatsAppPairing = onPollWhatsAppPairing,
             onCancelWhatsAppPairing = onCancelWhatsAppPairing,
             onWhatsAppLinked = onWhatsAppLinked,
+            isFocusEnabled = isFocusEnabled,
+            onFocusChanged = onFocusChanged,
             onDisconnect = onDisconnectAccount,
             onSyncNow = onSyncNow,
             onDismiss = { showAccountSettings = false },
@@ -648,6 +654,8 @@ private fun ConnectedAccountSettingsDialog(
     onPollWhatsAppPairing: () -> app.mini.hub.connector.WhatsAppPairing,
     onCancelWhatsAppPairing: () -> Unit,
     onWhatsAppLinked: (app.mini.hub.connector.WhatsAppPairing.Linked) -> Unit,
+    isFocusEnabled: (app.mini.hub.domain.AccountId) -> Boolean,
+    onFocusChanged: (app.mini.hub.domain.AccountId, Boolean) -> Unit,
     onDisconnect: (ConnectedAccount) -> Unit,
     onSyncNow: () -> Unit,
     onDismiss: () -> Unit,
@@ -734,6 +742,25 @@ private fun ConnectedAccountSettingsDialog(
                                 capabilitySummary(snapshot),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val focusGranted = isFocusEnabled(account.id)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Enable Focus", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                Text(
+                                    "When enabled, MINI allows AI-backed attention matters and evidence to be formed for this account. Default is OFF.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = focusGranted,
+                                onCheckedChange = { checked -> onFocusChanged(account.id, checked) },
                             )
                         }
                         if (account.state != app.mini.hub.connector.ConnectionState.Disconnected) {

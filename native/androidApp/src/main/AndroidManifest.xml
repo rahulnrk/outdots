@@ -51,6 +51,19 @@
             android:permission="android.permission.BIND_JOB_SERVICE"
             android:exported="false" />
 
+        <!--
+          Owner-operated Instagram sign-in runs in a dedicated process so its
+          process-global WebView data-directory suffix cannot collide with any
+          other WebView. It is not exported and is launched only by the rtprobe
+          debug entry. It stores the verified session and proves a harmless
+          authenticated read; it never enables the account in normal Accounts.
+        -->
+        <activity
+            android:name=".connector.InstagramLoginActivity"
+            android:exported="false"
+            android:process=":iglogin"
+            android:label="Instagram sign-in" />
+
         <service
             android:name=".notification.MiniNotificationListenerService"
             android:label="Mini Hub Notification Listener"

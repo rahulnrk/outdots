@@ -118,8 +118,7 @@ class GmailOAuthClient(context: Context) {
                 grantedScopes = granted,
                 userActionRequired = null,
             )
-            tokens.put(account.id, token)
-            accounts.upsert(account)
+            app.mini.hub.connector.AccountConnectionManager.installCredential(accounts, tokens, account, token)
             prefs.edit().remove(KEY_STATE).remove(KEY_VERIFIER).apply()
             android.util.Log.i(LOG_TAG, "Gmail OAuth callback stored account (new=${existing == null})")
             GmailOAuthOutcome.Connected(account)

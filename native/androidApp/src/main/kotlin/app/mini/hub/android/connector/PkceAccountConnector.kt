@@ -117,8 +117,7 @@ class PkceAccountConnector(
                 grantedScopes = grant.grantedScopes.ifEmpty { spec.scopes.toSet() },
                 userActionRequired = null,
             )
-            tokens.put(account.id, grant.token)
-            accounts.upsert(account)
+            app.mini.hub.connector.AccountConnectionManager.installCredential(accounts, tokens, account, grant.token)
             Log.i(LOG_TAG, "${spec.id} connected account=${account.id.localId} new=${existing == null} scopes=${account.grantedScopes.size}")
             ConnectOutcome.Connected(account)
         } catch (e: Exception) {
@@ -195,8 +194,7 @@ class TelegramBotAccountConnector(
                 grantedScopes = setOf(app.mini.hub.connector.ConnectorCatalog.TELEGRAM_BOT_SCOPE),
                 userActionRequired = null,
             )
-            tokens.put(account.id, credential)
-            accounts.upsert(account)
+            app.mini.hub.connector.AccountConnectionManager.installCredential(accounts, tokens, account, credential)
             Log.i(PkceAccountConnector.LOG_TAG, "telegram bot connected account=${account.id.localId} new=${existing == null}")
             ConnectOutcome.Connected(account)
         } catch (e: app.mini.hub.connector.ConnectorHttpException) {
@@ -222,7 +220,7 @@ class MatrixBridgeAccountConnector(
         if (parts.size != 2 || !homeserver.startsWith("https://", ignoreCase = true)) {
             return ConnectOutcome.Blocked("Invalid bridge credential format. Use an HTTPS homeserver as 'https://host|token'.")
         }
-        
+
         return try {
             val credential = StoredAccessToken(bridgeToken, expiresAtMillis = null)
             val identity = connector.discoverAccount(credential, transport)
@@ -241,8 +239,7 @@ class MatrixBridgeAccountConnector(
                 grantedScopes = setOf("matrix_token"),
                 userActionRequired = null,
             )
-            tokens.put(account.id, credential)
-            accounts.upsert(account)
+            app.mini.hub.connector.AccountConnectionManager.installCredential(accounts, tokens, account, credential)
             Log.i(PkceAccountConnector.LOG_TAG, "${provider.wire} matrix bridge connected account=${account.id.localId} new=${existing == null}")
             ConnectOutcome.Connected(account)
         } catch (e: app.mini.hub.connector.ConnectorHttpException) {

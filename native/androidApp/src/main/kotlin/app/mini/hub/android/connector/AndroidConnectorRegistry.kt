@@ -65,11 +65,12 @@ class AndroidConnectorRegistry(
     private val digest: DigestProvider,
     private val transport: ProviderHttpTransport,
     private val onMessagesFetched: (ConnectedAccount, List<ProviderMessage>) -> Unit = { _, _ -> },
+    private val dispatchAuthorizationCheck: (app.mini.hub.action.OutboxCommand, app.mini.hub.action.ExactActionPayload) -> Boolean = { _, _ -> true },
 ) {
     private val appContext = context.applicationContext
     private val accounts = AndroidConnectedAccountStore(appContext)
     private val tokens = AndroidKeystoreAccessTokenStore(appContext)
-    private val operations = AccountOperationCoordinator()
+    private val operations = AccountOperationCoordinator.Shared
     private val gateEvidence = GateEvidenceStore(appContext)
     internal val whatsappHost = WhatsAppAndroidHost(appContext, accounts, tokens)
 
@@ -155,6 +156,7 @@ class AndroidConnectorRegistry(
         transport = transport,
         onMessagesFetched = onMessagesFetched,
         operations = operations,
+        clock = app.mini.hub.domain.SystemClock,
     )
 
     private fun configuredClients(): Set<Provider> = buildSet {
@@ -183,12 +185,15 @@ class AndroidConnectorRegistry(
         gates = gatePolicy,
         transport = transport,
         nowMillis = { System.currentTimeMillis() },
+        transportForAccount = ::requestTransport,
     )
 
     /** Refreshes an expired token through the provider's existing refresher before any send. */
     val gateway: app.mini.hub.action.ProviderGateway = RefreshingGateway(
         accounts, tokens, { account, token -> refreshForUse(account, token) }, directGateway,
         operations = operations,
+        admissionAllowed = { app.mini.hub.connector.AccountRetryAdmission.allowed(store, it, System.currentTimeMillis()) },
+        authorizationCheck = dispatchAuthorizationCheck,
     ) { System.currentTimeMillis() }
 
     /** Gmail uses its Google refresher; every other route uses the sync engine's refreshers. */
@@ -321,6 +326,10 @@ class AndroidConnectorRegistry(
         operations.withAccount(account.id) { fetchConversationInternal(account, conversationId) }
 
     private fun fetchConversationInternal(account: ConnectedAccount, conversationId: String): List<ProviderMessage>? {
+        val current = accounts.get(account.id) ?: return null
+        if (current.state == app.mini.hub.connector.ConnectionState.Disconnected ||
+            !app.mini.hub.connector.AccountRetryAdmission.allowed(store, current, System.currentTimeMillis())) return null
+        val transport = requestTransport(current)
         var token = tokens.get(account.id) ?: return null
         if (token.isExpired(System.currentTimeMillis() + RefreshingGateway.EXPIRY_SKEW_MILLIS)) {
             token = refreshForUse(account, token) ?: return null
@@ -341,6 +350,9 @@ class AndroidConnectorRegistry(
             else -> null
         }
     }
+
+    private fun requestTransport(account: ConnectedAccount): ProviderHttpTransport =
+        app.mini.hub.connector.AccountRequestTransport(account, store, transport) { System.currentTimeMillis() }
 
     fun listAccounts(): List<ConnectedAccount> = accounts.list()
 
@@ -427,7 +439,7 @@ class AndroidConnectorRegistry(
         ConnectOutcome.Connected(whatsappHost.completeLinked(linked))
     fun restoreWhatsAppSession() = whatsappHost.restoreOnStart()
 
-    fun disconnectAccount(account: ConnectedAccount) {
+    fun disconnectAccount(account: ConnectedAccount) = operations.withAccount(account.id) {
         if (account.id.provider == Provider.WHATSAPP && account.route == app.mini.hub.connector.ConnectorRoute.PhoneLocalBridge) {
             whatsappHost.logout(account.id)
         }

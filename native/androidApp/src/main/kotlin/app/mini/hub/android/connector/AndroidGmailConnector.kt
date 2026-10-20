@@ -21,6 +21,7 @@ import app.mini.hub.domain.IdGenerator
 import app.mini.hub.domain.Provider
 import app.mini.hub.observation.IngestCursor
 import app.mini.hub.persistence.ObservationStore
+import app.mini.hub.android.MiniHubRuntime
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -85,7 +86,7 @@ class AndroidGmailConnector(
     private val refresher: GoogleTokenRefresher = GoogleTokenRefresher(),
     private val transport: ProviderHttpTransport = AndroidProviderHttpTransport(),
     private val onMessagesFetched: (ConnectedAccount, List<ProviderMessage>) -> Unit = { _, _ -> },
-    private val operations: AccountOperationCoordinator = AccountOperationCoordinator(),
+    private val operations: AccountOperationCoordinator = AccountOperationCoordinator.Shared,
 ) {
     private val accounts = AndroidConnectedAccountStore(context)
     private val tokens = AndroidKeystoreAccessTokenStore(context)
@@ -102,14 +103,17 @@ class AndroidGmailConnector(
                     sync(account, SyncCheckpoint(), nowMillis)
                 } catch (e: Exception) {
                     val latest = accounts.get(account.id)
-                    GmailSyncReport(account.id.localId, SyncCheckpoint(), 0, 0, latest?.state ?: account.state, false, e.javaClass.simpleName)
+                    if (latest?.state in setOf(ConnectionState.Healthy, ConnectionState.Authorized, ConnectionState.Syncing))
+                        markState(requireNotNull(latest), ConnectionState.Degraded, RETRY_ACTION)
+                    GmailSyncReport(account.id.localId, SyncCheckpoint(), 0, 0, accounts.get(account.id)?.state ?: account.state, false, e.javaClass.simpleName)
                 }
                 Log.i(LOG_TAG, report.logLine(trigger))
                 report
             }
 
     fun sync(account: ConnectedAccount, checkpoint: SyncCheckpoint, nowMillis: Long): GmailSyncReport =
-        operations.withAccount(account.id) { syncInternal(account, checkpoint, nowMillis) }
+        operations.withSync(account.id) { syncInternal(account, checkpoint, System.currentTimeMillis()) }
+            ?: GmailSyncReport(account.id.localId, checkpoint, 0, 0, account.state, false, "coalesced")
 
     private fun syncInternal(account: ConnectedAccount, checkpoint: SyncCheckpoint, nowMillis: Long): GmailSyncReport {
         require(account.id.provider == Provider.GMAIL)
@@ -180,6 +184,11 @@ class AndroidGmailConnector(
         )
         val persisted = observationStore.persistAtomicBatch(removals, newObs, listOf(cursor))
         check(persisted.isFullySuccessful) { "Gmail sync was not committed: ${persisted.errors.joinToString()}" }
+        if (removals.isNotEmpty()) {
+            try {
+                MiniHubRuntime.focusScheduler.notifyDeletionCommitted(current.id)
+            } catch (_: Throwable) {}
+        }
         onMessagesFetched(current, incResult.messages)
         val userNotice = if (incResult.gap) ConnectorSyncEngine.GAP_NOTICE else null
         accounts.upsert(
@@ -196,18 +205,25 @@ class AndroidGmailConnector(
     fun fetchThread(threadId: String, account: ConnectedAccount): List<app.mini.hub.connector.ProviderMessage> =
         operations.withAccount(account.id) {
             val token = tokens.get(account.id) ?: error("Credential missing for Gmail account")
-            connector.fetchThread(threadId, token, transport, account.displayName, account.id)
+            connector.fetchThread(threadId, token, requestTransport(account), account.displayName, account.id)
         }
 
     fun fetchAttachment(account: ConnectedAccount, messageId: String, attachmentId: String): ByteArray? =
         operations.withAccount(account.id) {
             val token = tokens.get(account.id) ?: return@withAccount null
-            connector.fetchAttachment(messageId, attachmentId, token, transport)
+            connector.fetchAttachment(messageId, attachmentId, token, requestTransport(account))
         }
 
     /** Same refresh-and-mark path sync uses; for send and conversation reads. */
     fun refreshForUse(account: ConnectedAccount, token: StoredAccessToken, nowMillis: Long): StoredAccessToken? =
-        operations.withAccount(account.id) { refreshOrMark(account, token, nowMillis) }
+        operations.withAccount(account.id) {
+            val current = accounts.get(account.id) ?: return@withAccount null
+            if (current.state == ConnectionState.Disconnected) return@withAccount null
+            if ((observationStore.getCursor("gmail:${current.id.key}")?.nextAllowedAtMillis ?: 0) > nowMillis) return@withAccount null
+            val credential = tokens.get(current.id) ?: return@withAccount null
+            if (credential != token && !credential.isExpired(nowMillis + EXPIRY_SKEW_MILLIS)) credential
+            else refreshOrMark(current, credential, nowMillis)
+        }
 
     private fun refreshOrMark(account: ConnectedAccount, token: StoredAccessToken, nowMillis: Long): StoredAccessToken? =
         when (val outcome = refresher.refresh(token, nowMillis)) {
@@ -246,32 +262,15 @@ class AndroidGmailConnector(
     }
 
     private fun persistRetryAdmission(source: String, previous: IngestCursor?, nowMillis: Long, error: ConnectorHttpException) {
-        if (error.kind != ProviderErrorKind.RateLimited && error.kind != ProviderErrorKind.Transient) return
-        val attempt = (previous?.retryAttempt ?: 0) + 1
-        val exponential = (1_000L shl (attempt - 1).coerceAtMost(13)).coerceAtMost(MAX_BACKOFF_MILLIS)
-        val requested = error.retryAfterSeconds?.let { seconds ->
-            seconds.takeIf { it in 1L..MAX_PROVIDER_DELAY_SECONDS }?.let { it * 1_000L }
-        }
-        val base = (requested ?: exponential).coerceAtLeast(1_000L)
-        val jitterBound = minOf(base / 4, MAX_JITTER_MILLIS)
-        val jitter = if (jitterBound == 0L) 0L else
-            (source.hashCode().toLong().and(Long.MAX_VALUE) % (jitterBound + 1L))
-        observationStore.checkpointCursor(
-            IngestCursor(
-                source = source,
-                lastProcessedTimeMillis = nowMillis,
-                lastProcessedKey = previous?.lastProcessedKey,
-                processedCount = previous?.processedCount ?: 0L,
-                gapCount = previous?.gapCount ?: 0L,
-                nextAllowedAtMillis = nowMillis + base + jitter,
-                retryAttempt = attempt,
-            ),
-        )
+        app.mini.hub.connector.AccountRetryAdmission.record(observationStore, source, System.currentTimeMillis(), error)
     }
 
     private fun markState(account: ConnectedAccount, state: ConnectionState, action: String?) {
         accounts.upsert((accounts.get(account.id) ?: account).copy(state = state, userActionRequired = action))
     }
+
+    private fun requestTransport(account: ConnectedAccount): ProviderHttpTransport =
+        app.mini.hub.connector.AccountRequestTransport(account, observationStore, transport) { System.currentTimeMillis() }
 
     companion object {
         const val LOG_TAG = "MiniGmailSync"

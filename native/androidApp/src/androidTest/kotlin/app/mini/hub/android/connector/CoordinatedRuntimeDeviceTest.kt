@@ -32,20 +32,27 @@ class CoordinatedRuntimeDeviceTest {
     }
 
     @Test
-    fun instagramProtocolRuntimeIsLinkedButUnavailable() {
+    fun instagramProtocolRuntimeIsLinkedAndLoginAvailable() {
         val facade = Class.forName("app.mini.hub.wa.igruntime.Igruntime")
         val runtime = facade.getMethod("newRuntime").invoke(null)!!
         fun call(name: String): Any? = runtime.javaClass.getMethod(name).invoke(runtime)
 
         assertEquals("instagram", call("platform"))
+        // A fresh runtime has no session, so it reports unavailable, but the real
+        // owner-operated login flow is now available.
         assertEquals("unavailable", call("state"))
-        assertFalse(call("loginAvailable") as Boolean)
+        assertTrue(call("loginAvailable") as Boolean)
         assertFalse(call("isAuthenticated") as Boolean)
         assertTrue(facade.getMethod("globalLoggingDisabled").invoke(null) as Boolean)
         assertEquals(
             "3c16226686c71af64df294df0803791685064e0b",
             facade.getField("PinnedMautrixMeta").get(null),
         )
+        // The real login controller is constructible without network I/O.
+        val controller = facade.methods
+            .first { it.name == "newLoginController" && it.parameterTypes.size == 1 }
+            .invoke(null, "instagram|pending")
+        assertNotNull(controller)
     }
 
     @Test

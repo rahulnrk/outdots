@@ -23,7 +23,9 @@ class RefreshingGateway(
     private val tokens: AccessTokenStore,
     private val refresh: (ConnectedAccount, StoredAccessToken) -> StoredAccessToken?,
     private val delegate: ProviderGateway,
-    private val operations: AccountOperationCoordinator = AccountOperationCoordinator(),
+    private val operations: AccountOperationCoordinator = AccountOperationCoordinator.Shared,
+    private val admissionAllowed: (ConnectedAccount) -> Boolean = { true },
+    private val authorizationCheck: (OutboxCommand, ExactActionPayload) -> Boolean = { _, _ -> true },
     private val nowMillis: () -> Long,
 ) : ProviderGateway {
     override fun execute(command: OutboxCommand, payload: ExactActionPayload): GatewayResult {
@@ -31,6 +33,8 @@ class RefreshingGateway(
             ?: return delegate.execute(command, payload)
         return operations.withAccount(accountId) {
             val account = accounts.get(accountId) ?: return@withAccount delegate.execute(command, payload)
+            if (account.state == app.mini.hub.connector.ConnectionState.Disconnected) return@withAccount GatewayResult.Rejected("account_disconnected")
+            if (!admissionAllowed(account)) return@withAccount GatewayResult.Rejected("provider_cooldown")
             val token = tokens.get(accountId) ?: return@withAccount delegate.execute(command, payload)
             if (token.isExpired(nowMillis() + EXPIRY_SKEW_MILLIS)) {
                 if (refresh(account, token) == null) {
@@ -38,6 +42,7 @@ class RefreshingGateway(
                     return@withAccount GatewayResult.Rejected("credential_refresh_failed: $message")
                 }
             }
+            if (!authorizationCheck(command, payload)) return@withAccount GatewayResult.Rejected("approval_or_sources_changed_before_send")
             delegate.execute(command, payload)
         }
     }

@@ -341,6 +341,7 @@ class MiniNotificationListenerService : NotificationListenerService() {
             notificationId = sbn.id,
             tag = sbn.tag,
             postTimeMillis = sbn.postTime,
+            sourceMessageTimeMillis = messagingStyle?.messages?.lastOrNull()?.timestamp,
             senderHint = title ?: subText ?: pkg,
             title = title,
             text = text.ifBlank { bigText ?: messagingStyle?.messages?.lastOrNull()?.text?.toString() ?: "" },

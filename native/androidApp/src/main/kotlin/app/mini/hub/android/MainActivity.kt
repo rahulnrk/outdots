@@ -32,21 +32,52 @@ class MainActivity : ComponentActivity() {
     private val connectionStatus = mutableStateOf<String?>(null)
     private val accountsVersion = mutableStateOf(0)
     private val styleLearningEnabled = mutableStateOf(false)
+    private val focusEnabledMap = mutableStateOf<Map<String, Boolean>>(emptyMap())
+    private val focusGenerations = mutableMapOf<String, Long>()
+    private val focusSerialExecutors = mutableMapOf<String, java.util.concurrent.ExecutorService>()
+
+    private fun loadFocusStates(accounts: List<app.mini.hub.connector.ConnectedAccount>) {
+        if (!MiniHubRuntime.isStorageReady) return
+        BOOTSTRAP_EXECUTOR.execute {
+            val map = mutableMapOf<String, Boolean>()
+            accounts.forEach { acc ->
+                val key = acc.id.key
+                // If there is an active/pending toggle generation for this account, honor its intended optimistic state
+                // or ensure we don't overwrite a newer pending toggle completion with an out-of-order background read.
+                val enabled = runCatching {
+                    MiniHubRuntime.matterStore.isConsentGranted(acc.id) && !MiniHubRuntime.matterStore.isExcluded(acc.id)
+                }.getOrDefault(false)
+                map[key] = enabled
+            }
+            runOnUiThread {
+                if (!isDestroyed) {
+                    val currentMap = focusEnabledMap.value.toMutableMap()
+                    map.forEach { (k, v) ->
+                        // Only update if no active generation is currently inflight for k
+                        if ((focusGenerations[k] ?: 0L) % 2L == 0L) {
+                            currentMap[k] = v
+                        }
+                    }
+                    focusEnabledMap.value = currentMap
+                }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
                 Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-                    Text("Opening MINI storage…", style = MaterialTheme.typography.headlineSmall)
-                    Text("Encrypted history is being opened before the inbox is enabled.", modifier = Modifier.padding(top = 12.dp))
+                    Text("Opening your inbox…", style = MaterialTheme.typography.headlineSmall)
+                    Text("Your messages will appear when MINI is ready.", modifier = Modifier.padding(top = 12.dp))
                 }
             }
         }
-        Thread({
+        BOOTSTRAP_EXECUTOR.execute {
             MiniHubRuntime.init(applicationContext)
-            runOnUiThread { finishRuntimeSetup() }
-        }, "mini-runtime-bootstrap").start()
+            runOnUiThread { if (!isDestroyed) finishRuntimeSetup() }
+        }
     }
 
     private fun finishRuntimeSetup() {
@@ -104,6 +135,8 @@ class MainActivity : ComponentActivity() {
 
         handoffLauncher = AndroidNativeHandoffLauncher(this)
 
+        loadFocusStates(accountStore.list())
+
         setContent {
             MiniTheme {
                 InboxScreen(
@@ -136,12 +169,57 @@ class MainActivity : ComponentActivity() {
                         connectionStatus.value = message
                         accountsVersion.value++
                     },
+                    isFocusEnabled = { accountId ->
+                        focusEnabledMap.value[accountId.key] ?: false
+                    },
+                    onFocusChanged = { accountId, enabled ->
+                        if (MiniHubRuntime.isStorageReady) {
+                            val key = accountId.key
+                            val gen = (focusGenerations[key] ?: 0L) + 1L
+                            focusGenerations[key] = gen
+                            connectionStatus.value = "Updating Focus..."
+
+                            val executor = synchronized(focusSerialExecutors) {
+                                focusSerialExecutors.getOrPut(key) {
+                                    java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "mini-focus-$key").apply { isDaemon = true } }
+                                }
+                            }
+
+                            executor.execute {
+                                val result = runCatching {
+                                    if (enabled) {
+                                        MiniHubRuntime.matterStore.setConsent(accountId, true, false)
+                                    } else {
+                                        MiniHubRuntime.matterStore.invalidateForAccount(accountId)
+                                    }
+                                }
+                                runOnUiThread {
+                                    if (!isDestroyed) {
+                                        val currentGen = focusGenerations[key] ?: 0L
+                                        if (gen == currentGen) {
+                                            connectionStatus.value = if (result.isSuccess) null else "Could not update Focus. Try again."
+                                            loadFocusStates(accountStore.list())
+                                            accountsVersion.value++
+                                            refreshInbox()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
                     onDisconnectAccount = { account ->
-                        MiniHubRuntime.connectors.disconnectAccount(account)
-                        if (account.id.provider == Provider.WHATSAPP) WhatsAppSyncService.stop(applicationContext)
-                        android.util.Log.i("MiniSync", "account=${account.id.localId} disconnected by user")
-                        connectionStatus.value = "Disconnected ${account.displayName ?: account.id.provider.wire}. Messages stay in MINI. Reconnect to resume."
-                        accountsVersion.value++
+                        connectionStatus.value = "Disconnecting…"
+                        Thread({
+                            val result = runCatching { MiniHubRuntime.connectors.disconnectAccount(account) }
+                            if (result.isSuccess && account.id.provider == Provider.WHATSAPP) WhatsAppSyncService.stop(applicationContext)
+                            runOnUiThread {
+                                if (!isDestroyed) {
+                                    connectionStatus.value = if (result.isSuccess) "Disconnected. Messages stay in MINI. Reconnect to resume."
+                                        else "Could not disconnect right now. Try again."
+                                    accountsVersion.value++
+                                }
+                            }
+                        }, "mini-disconnect").start()
                     },
                     onSyncNow = { syncNow() },
                     styleLearningEnabled = styleLearningEnabled.value,
@@ -157,6 +235,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+        if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) activateForeground()
     }
 
     private fun connect(provider: Provider) {
@@ -211,7 +290,10 @@ class MainActivity : ComponentActivity() {
     private fun syncNow() {
         connectionStatus.value = "Syncing connected accounts..."
         Thread({
-            val summary = MiniHubRuntime.connectors.syncAll("manual")
+            val summary = try { MiniHubRuntime.connectors.syncAll("manual") } catch (_: Exception) {
+                runOnUiThread { if (!isDestroyed) connectionStatus.value = "Sync could not finish. Your history is kept; try again." }
+                return@Thread
+            }
             runOnUiThread {
                 connectionStatus.value = buildString {
                     append("Sync finished: ${summary.inserted} new, ${summary.updated} updated across ${summary.accounts} account(s).")
@@ -232,7 +314,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        activateForeground()
+    }
+
+    private fun activateForeground() {
         if (::viewModel.isInitialized) {
+            loadFocusStates(AndroidConnectedAccountStore(applicationContext).list())
             MiniNotificationListenerService.rebindIfNeeded(this)
             refreshInbox()
 
@@ -285,4 +372,8 @@ class MainActivity : ComponentActivity() {
             MiniHubRuntime.setWhatsAppForeground(false)
         }
     }
+    companion object {
+        private val BOOTSTRAP_EXECUTOR = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "mini-runtime-bootstrap") }
+    }
+
 }

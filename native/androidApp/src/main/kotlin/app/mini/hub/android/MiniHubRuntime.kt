@@ -58,6 +58,12 @@ object MiniHubRuntime {
         private set
     lateinit var attentionStore: app.mini.hub.attention.AttentionStore
         private set
+    lateinit var matterStore: app.mini.hub.matter.MatterStore
+        private set
+    lateinit var focusCoordinator: app.mini.hub.matter.ProductionFocusCoordinator
+        private set
+    lateinit var focusScheduler: app.mini.hub.matter.FocusReconciliationScheduler
+        private set
     lateinit var ingestCoordinator: ObservationIngestCoordinator
         private set
     val ledger = DeliveryAccountingLedger(2000)
@@ -124,6 +130,7 @@ object MiniHubRuntime {
                 openObservations = { SqlCipherObservationStore(context.applicationContext) },
                 openActions = { SqlCipherActionStore(context.applicationContext) },
                 openAttention = { app.mini.hub.persistence.SqlCipherAttentionStore(context.applicationContext) },
+                openMatters = { app.mini.hub.persistence.SqlCipherMatterStore(context.applicationContext) },
             )
             storage = opened
             if (opened is RuntimeStorage.Failed) {
@@ -136,6 +143,10 @@ object MiniHubRuntime {
             observationStore = opened.observations
             actionStore = opened.actions
             attentionStore = opened.attention
+            matterStore = opened.matters
+            focusCoordinator = app.mini.hub.matter.ProductionFocusCoordinator(matterStore, observationStore)
+            focusScheduler = app.mini.hub.matter.FocusReconciliationScheduler(focusCoordinator)
+            focusScheduler.startStartupRecovery()
 
             val normalizer = NotificationNormalizer(idGen, digest)
             val deduplicator = NotificationDeduplicator()
@@ -176,6 +187,20 @@ object MiniHubRuntime {
                 onMessagesFetched = { account, messages ->
                     val learned = StyleContext.learn(styleEngine, account, messages, clock.now())
                     if (learned > 0) styleStore.save(styleEngine)
+                },
+                dispatchAuthorizationCheck = { command, payload ->
+                    val account = connectors.listAccounts().firstOrNull { it.id.key == payload.accountId }
+                    val conversation = runCatching { app.mini.hub.domain.ScopedId.parse(payload.conversationId) }.getOrNull()
+                    if (account == null) false else {
+                        val live = app.mini.hub.action.LiveDispatchChecks(
+                            app.mini.hub.connector.AuthorizationSnapshot.grantVersion(account.grantedScopes),
+                            app.mini.hub.connector.AuthorizationSnapshot.policyVersion(connectors.capabilities(account)?.enabled.orEmpty(), payload.route),
+                            conversation?.let { id -> observationStore.getObservationsForConversation(id)
+                                .filterNot { it.isRemoved && it.notificationKey.startsWith("provider:") }
+                                .map { app.mini.hub.action.SourceVersion(it.id.key, it.revision) } } ?: payload.sourceVersions,
+                        )
+                        actionController.executionStillAuthorized(actionStore.snapshot(), command.id, payload, live)
+                    }
                 },
             )
             runCatching { connectors.sweepAttachmentExports() }

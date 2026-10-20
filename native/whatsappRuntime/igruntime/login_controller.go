@@ -137,6 +137,17 @@ func (lc *LoginController) VerifiedUsername() string {
 	return lc.verifiedUsername
 }
 
+// VerifiedAccountKey is the MINI account key bound to the upstream-verified user
+// identity (instagram|<user_id>). It is empty until authentication succeeds.
+func (lc *LoginController) VerifiedAccountKey() string {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	if lc.verifiedUserID == "" {
+		return ""
+	}
+	return lc.accountID
+}
+
 // Start returns the initial credentials step snapshot. No network I/O occurs.
 func (lc *LoginController) Start() []byte {
 	return lc.machine.SnapshotJSON()
@@ -362,13 +373,17 @@ func (lc *LoginController) complete() error {
 		return errors.New(LoginFailureIdentityMismatch)
 	}
 
-	runtime := &Runtime{client: lc.client, accountID: lc.accountID}
-	envelope, err := runtime.ExportSessionEnvelope(lc.accountID)
+	// The stored account key is derived from the upstream-verified user ID, not
+	// from the provisional slot key or any screen-supplied username/account key.
+	verifiedAccountID := "instagram|" + nativeSession.UserID
+	runtime := &Runtime{client: lc.client, accountID: verifiedAccountID}
+	envelope, err := runtime.ExportSessionEnvelope(verifiedAccountID)
 	if err != nil {
 		lc.machine.markFailed(LoginFailureUpstream)
 		return errors.New(LoginFailureUpstream)
 	}
 
+	lc.accountID = verifiedAccountID
 	lc.verifiedUserID = nativeSession.UserID
 	lc.verifiedUsername = viewer.GetUsername()
 	lc.verifiedSession = envelope
