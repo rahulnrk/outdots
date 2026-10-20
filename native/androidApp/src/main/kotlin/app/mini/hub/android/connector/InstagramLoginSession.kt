@@ -90,8 +90,35 @@ class InstagramLoginSession(
 
     fun submitCode(code: String) {
         val lc = controller.get() ?: return
-        val input = JSONObject().put("verification_code", code).toString().toByteArray(Charsets.UTF_8)
-        executor.execute { runUpstream(lc) { lc.submitInput(input) } }
+        val trimmed = code.trim()
+        if (trimmed.length < 5) {
+            publish(latest.get().copy(status = InstagramLoginStatus.FAILED, failureCode = "verification_code_invalid"))
+            return
+        }
+        executor.execute {
+            val current = latest.get()
+            publish(current.copy(status = InstagramLoginStatus.LOADING, instructions = "Submitting verification code…"))
+            val needsEnterCodeAction = current.fieldIds.contains("action") ||
+                current.choices.any { it.fieldId == "action" && it.value.equals("Enter code", ignoreCase = true) } ||
+                current.instructions.orEmpty().contains("Enter code", ignoreCase = true)
+            if (needsEnterCodeAction && !current.fieldIds.contains("verification_code")) {
+                val selectEnter = JSONObject().put("action", "Enter code").toString().toByteArray(Charsets.UTF_8)
+                try {
+                    lc.submitInput(selectEnter)
+                } catch (error: Throwable) {
+                    publish(latest.get().copy(status = InstagramLoginStatus.FAILED, failureCode = error.message ?: "upstream_error"))
+                    return@execute
+                }
+                // Refresh snapshot after selecting Enter code; continue only if still interactive.
+                publishFromController(lc)
+            }
+            val codeField = when {
+                latest.get().fieldIds.contains("two_factor_code") -> "two_factor_code"
+                else -> "verification_code"
+            }
+            val input = JSONObject().put(codeField, trimmed).toString().toByteArray(Charsets.UTF_8)
+            runUpstream(lc) { lc.submitInput(input) }
+        }
     }
 
     fun submitSelection(fieldId: String, value: String) {
@@ -292,6 +319,13 @@ internal fun isValidInstagramSelection(
     state: InstagramLoginUiState,
     fieldId: String,
     value: String,
-): Boolean = fieldId.isNotBlank() && value.isNotBlank() &&
-    state.status == InstagramLoginStatus.INPUT && state.state == "select" &&
-    state.choices.any { it.fieldId == fieldId && it.value == value }
+): Boolean {
+    if (fieldId.isBlank() || value.isBlank() || state.status != InstagramLoginStatus.INPUT) return false
+    if (state.choices.any { it.fieldId == fieldId && it.value == value }) return true
+    // Synthesized OTP action/method choices when upstream field IDs survived but choice labels did not.
+    if (fieldId == "action" && state.fieldIds.contains("action") &&
+        value in setOf("Enter code", "Resend code", "Try another method")
+    ) return true
+    if (fieldId == "method" && state.fieldIds.contains("method") && value.isNotBlank()) return true
+    return state.state == "select" && state.choices.any { it.fieldId == fieldId && it.value == value }
+}

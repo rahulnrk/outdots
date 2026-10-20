@@ -284,12 +284,28 @@ private fun InstagramLoginScreen(
             InstagramLoginStatus.INPUT -> {
                 when {
                     state.choices.isNotEmpty() -> SelectionForm(state.choices, onSubmitSelection)
+                    state.fieldIds.contains("action") || state.fieldIds.contains("method") -> {
+                        val options = when {
+                            state.fieldIds.contains("method") -> listOf(
+                                InstagramSelectionOption("method", "Email", "Email"),
+                                InstagramSelectionOption("method", "SMS", "SMS"),
+                            )
+                            else -> buildList {
+                                add(InstagramSelectionOption("action", "Enter code", "Enter code"))
+                                if (state.instructions.orEmpty().contains("new code", ignoreCase = true) ||
+                                    state.instructions.orEmpty().contains("resend", ignoreCase = true)
+                                ) {
+                                    add(InstagramSelectionOption("action", "Resend code", "Resend code"))
+                                }
+                            }
+                        }
+                        SelectionForm(options, onSubmitSelection)
+                    }
                     state.fieldIds.contains("password") -> {
                     CredentialsForm(onSubmitCredentials)
                     }
                     state.fieldIds.any { it == "verification_code" || it == "two_factor_code" || it == "captcha_code" } ||
-                        state.state == "2fa" ||
-                        state.instructions.orEmpty().contains("code", ignoreCase = true) -> {
+                        state.state == "2fa" -> {
                     CodeForm(onSubmitCode)
                     }
                     else -> {
