@@ -110,3 +110,39 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.6.8")
 }
+
+// Licensing guard. The gomobile runtime (libgojni.so + app.mini.hub.wa.*) links
+// AGPL-3.0 mautrix-meta/mautrix-linkedin and GPL-3.0 libsignal. It must not ship
+// in a release build until a licensing decision is recorded. See
+// native/whatsappRuntime/NOTICE and docs/LICENSING_COMPLIANCE_2026-10-20.md.
+// Recorded decisions: "agpl" (MINI under AGPL-3.0-or-later) or "exception"
+// (written upstream exceptions on file). Anything else fails the release build.
+val licenseDecision = providers.gradleProperty("mini.licenseDecision").orNull
+val allowedLicenseDecisions = setOf("agpl", "exception")
+val verifyReleaseRuntimeLicensing = tasks.register("verifyReleaseRuntimeLicensing") {
+    group = "verification"
+    description = "Fails if the copyleft gomobile runtime is in the release variant without a licensing decision."
+    val releaseRuntime = configurations.matching { it.name == "releaseRuntimeClasspath" }
+    doLast {
+        if (licenseDecision in allowedLicenseDecisions) return@doLast
+        val offenders = mutableListOf<String>()
+        releaseRuntime.forEach { cfg ->
+            cfg.incoming.artifactView { lenient(true) }.files.files
+                .filter { it.name == "classes.jar" && it.path.contains("whatsappRuntime") }
+                .forEach { offenders += it.path }
+        }
+        android.sourceSets.findByName("release")?.jniLibs?.srcDirs
+            ?.filter { it.exists() && it.walkTopDown().any { f -> f.name == "libgojni.so" } }
+            ?.forEach { offenders += it.path }
+        android.sourceSets.findByName("main")?.jniLibs?.srcDirs
+            ?.filter { it.exists() && it.walkTopDown().any { f -> f.name == "libgojni.so" } }
+            ?.forEach { offenders += it.path }
+        if (offenders.isNotEmpty()) {
+            throw GradleException(
+                "Release build contains the AGPL/GPL gomobile runtime without a licensing decision " +
+                    "(-Pmini.licenseDecision=agpl|exception). Offending inputs: " + offenders.joinToString(),
+            )
+        }
+    }
+}
+tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(verifyReleaseRuntimeLicensing) }

@@ -1,48 +1,71 @@
 This directory packages MINI's single phone-local gomobile runtime
-(one libgojni.so). Two gomobile AARs cannot coexist in one app.
+(one libgojni.so). Two gomobile AARs cannot coexist in one app, so every
+package below is statically linked into the same native library and called
+from the Kotlin app over JNI. Legally that is one combined work.
+
+Full module-by-module inventory: THIRD_PARTY_LICENSES.md
+(regenerate with license-inventory.ps1). Analysis and options:
+docs/LICENSING_COMPLIANCE_2026-10-20.md.
+
+Packages and their strongest licence obligations
+------------------------------------------------
 
 1. waruntime: WhatsApp companion runtime.
-   Depends on whatsmeow (https://github.com/tulir/whatsmeow),
-   Mozilla Public License 2.0. Source of whatsmeow and modifications to it
-   must remain under MPL-2.0.
-   Pinned revision: c386243a72bacad080ba2938b37e1e4e0f1ca3b2
-   Module version: v0.0.0-20261007111105-c386243a72ba (held via go.mod replace;
-   mautrix-meta requests f16f9ca30d6a but instameow does not import whatsmeow)
-   License text: https://github.com/tulir/whatsmeow/blob/main/LICENSE
+   - whatsmeow (https://github.com/tulir/whatsmeow), MPL-2.0.
+     Pinned: c386243a72bacad080ba2938b37e1e4e0f1ca3b2
+     Module: v0.0.0-20261007111105-c386243a72ba (held via go.mod replace;
+     mautrix-meta requests f16f9ca30d6a, compatibility verified in
+     docs/MESSENGER_WHATSMEOW_UPGRADE_PROBE_2026-10-20.md).
+   - go.mau.fi/libsignal v0.2.2, GNU GPL v3 (pulled in by whatsmeow).
+     LICENSE SHA-256: 09F9333D941468C9D82AC9E2BF6B0B9085C52B50382B9FBB3806F586D502B719
+     Consequence: the WhatsApp runtime alone is already a GPL-3.0 combined
+     work. A WhatsApp-only release is NOT free of copyleft obligations.
 
-2. igruntime: Instagram DM protocol facade (debug feasibility only).
-   Depends on mautrix-meta (https://github.com/mautrix/meta), package
-   go.mau.fi/mautrix-meta/pkg/instameow and its messagix subpackages.
-   License: GNU Affero General Public License v3.0 or later.
-   LICENSE SHA-256: E0EEDBA615D5CD1B986AFB6C5B3A4B1AE33713E7E9DC74D19DAEC5E3221F9D2E
-   Pinned: tag v0.2610.0 = 3c16226686c71af64df294df0803791685064e0b
-   LICENSE.exceptions grants embedding rights only to Beeper and Element.
-   Those exceptions do not apply to MINI.
-   Also links github.com/beeper/req/v3 v3.0.0-20260925135712-b49593750e56
-   (replace for github.com/imroc/req/v3, MIT) and maunium.net/go/mautrix
-   v0.32.0 (MPL-2.0).
+2. igruntime: Instagram DM protocol facade.
+   - mautrix-meta (https://github.com/mautrix/meta), pkg/instameow and
+     pkg/messagix subpackages. GNU AGPL v3 or later.
+     LICENSE SHA-256: 0D96A4FF68AD6D4B6F1F30F713B18D5184912BA8DD389F86AA7710DB079ABCB0
+     Pinned: tag v0.2610.0 = 3c16226686c71af64df294df0803791685064e0b
 
-3. liruntime: LinkedIn messaging protocol facade (debug feasibility only).
-   Depends on mautrix-linkedin (https://github.com/mautrix/linkedin), package
-   go.mau.fi/mautrix-linkedin/pkg/linkedingo.
-   License: GNU Affero General Public License v3.0 or later.
-   LICENSE SHA-256: 0D96A4FF68AD6D4B6F1F30F713B18D5184912BA8DD389F86AA7710DB079ABCB0
-   Pinned: tag v0.2609.0 = 788444401499e504b81d50480ddb686cdb976281
-   LICENSE.exceptions grants embedding rights only to Beeper and Element.
-   Those exceptions do not apply to MINI. Upstream auth is browser cookie based;
-   login remains unavailable in this facade until an isolated probe lands.
+3. liruntime: LinkedIn messaging protocol facade. Login BLOCKED (Cloudflare).
+   - mautrix-linkedin (https://github.com/mautrix/linkedin), pkg/linkedingo.
+     GNU AGPL v3 or later.
+     LICENSE SHA-256: 0D96A4FF68AD6D4B6F1F30F713B18D5184912BA8DD389F86AA7710DB079ABCB0
+     Pinned: tag v0.2609.0 = 788444401499e504b81d50480ddb686cdb976281
 
-AGPL distribution requirements (must be satisfied before any build that
-contains igruntime or liruntime leaves the developer's machine, including testers):
-- The combined libgojni.so is a work based on AGPL protocol packages. Distributing it
-  requires offering the Corresponding Source of the whole linked runtime
-  (this module, go.mod/go.sum, build-android.ps1, and any modifications to
-  upstream) under AGPL-3.0-or-later.
-- AGPL s13: users interacting with it over a network must be offered source.
-  MINI has no server, but the offer must still accompany the app.
-- The Android app that loads the runtime is likely a combined work. Options
-  recorded in docs/CONNECTOR_ROADMAP.md: (a) license MINI under AGPL,
-  (b) obtain a commercial licence or exception from the upstream authors,
-  (c) write an independent client. No option has been chosen.
-- Until decided: debug builds only, not distributed. Release must not bind
-  ./igruntime or ./liruntime.
+4. msgruntime: Facebook Messenger protocol facade (rtprobe only).
+   - mautrix-meta pkg/messagix (AGPL v3+), whatsmeow (MPL-2.0) for
+     Armadillo E2EE, and go.mau.fi/libsignal (GPL v3).
+
+Other notable components
+------------------------
+- maunium.net/go/mautrix v0.32.0, go.mau.fi/util v0.11.0,
+  go.mau.fi/zeroconfig v0.2.0: MPL-2.0.
+- github.com/beeper/req/v3 (replace for github.com/imroc/req/v3): MIT.
+- github.com/beeper/poly1305: no LICENSE file upstream; fork of
+  golang.org/x/crypto, BSD-3-Clause per Go Authors source headers.
+- Remaining ~48 modules: MIT, BSD-2/3-Clause, ISC, Apache-2.0. Their notice
+  texts must ship with any distributed binary.
+
+Upstream licence exceptions
+---------------------------
+mautrix-meta and mautrix-linkedin both ship LICENSE.exceptions granting:
+- Beeper: right to embed in Beeper clients/servers and distribute the
+  collective work without applying the AGPL to the whole;
+- Element: right to distribute compiled binaries in server bundles.
+Both conditional on modifications to the mautrix code staying public under
+AGPL v3+. These exceptions are named grants. They do NOT apply to MINI.
+
+Distribution rule (in force until a licensing decision is recorded)
+-------------------------------------------------------------------
+- Builds containing libgojni.so are private developer builds. Do not share
+  them with anyone, including testers.
+- The release variant must not contain the runtime. build.gradle.kts fails
+  release tasks if it does, unless -Pmini.licenseDecision is set to a
+  recorded decision.
+- Before any distribution: choose AGPL-for-MINI and/or obtain upstream
+  exceptions (mautrix and libsignal), add in-app Appropriate Legal Notices,
+  publish Corresponding Source for the exact build, and include all
+  third-party notices. See the checklist in the compliance doc.
+- Never patch upstream sources in place. Use a public fork with dated change
+  notes and a go.mod replace.

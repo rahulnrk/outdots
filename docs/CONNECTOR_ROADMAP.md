@@ -45,7 +45,11 @@ Engineering constraints:
 - **AGPL.** Linking libgm / mautrix-meta / mautrix-linkedin into the distributed app makes the combined runtime
   AGPL. Options: (a) publish MINI's bridge runtime (and likely the app) under AGPL, (b) obtain a commercial
   license from the authors, (c) write our own clients from the protocol. Prototype work can proceed in debug;
-  release requires this decision.
+  release requires this decision. **20 Oct 2026 review:** upstream `LICENSE.exceptions` cover only Beeper and
+  Element. whatsmeow pulls in **GPL-3.0 `go.mau.fi/libsignal`**, so even a WhatsApp-only release is copyleft.
+  Recommended path: request a MINI exception upstream while preparing full AGPL compliance. A Gradle guard now
+  blocks release builds that contain the runtime without `-Pmini.licenseDecision`. See
+  [Licensing compliance review](LICENSING_COMPLIANCE_2026-10-20.md).
 - **iMessage.** Apple's protocol needs Apple-signed device validation. Beeper Mini was shut down by Apple; Beeper
   now supports iMessage only on a Mac. Fallback: Android notification capture is impossible (no iMessage on
   Android); on iOS, handoff only; optional future "Mac relay" owned by the user (plaintext on the user's Mac).
