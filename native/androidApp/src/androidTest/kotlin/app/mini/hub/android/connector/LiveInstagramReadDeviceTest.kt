@@ -21,20 +21,27 @@ class LiveInstagramReadDeviceTest {
         val ingestor = InstagramReadIngestor(context)
         val first = ingestor.sync(account, maxThreads = 20, maxMessages = 20)
         if (first is InstagramReadIngestor.Result.Failed) {
-            println("LIVE_READ_FAILED=${first.code}")
-            return
+            assertTrue("LIVE_READ_FAILED=${first.code}", false)
         }
         assertTrue(first is InstagramReadIngestor.Result.Success)
         val firstView = (first as InstagramReadIngestor.Result.Success).view
-        if (!firstView.conversations.flatMap { it.messages }.any { it.direction == "inbound" }) {
-            println("LIVE_READ_NO_INCOMING_MESSAGE")
-        } else {
-            println("LIVE_READ_INBOUND_MESSAGE_OBSERVED")
+        val firstInbound = firstView.conversations.flatMap { it.messages }.filter { it.direction == "inbound" }
+        assertTrue(firstInbound.isNotEmpty())
+        val newestInbound = firstInbound.maxBy { it.timestampMillis }
+        val latencyMillis = (System.currentTimeMillis() - newestInbound.timestampMillis).coerceAtLeast(0L)
+        val latencyBucket = when {
+            latencyMillis < 5 * 60 * 1000L -> "under_5m"
+            latencyMillis < 15 * 60 * 1000L -> "5_to_15m"
+            latencyMillis < 60 * 60 * 1000L -> "15_to_60m"
+            else -> "over_60m"
         }
+        context.getSharedPreferences("instagram_read_test_evidence", android.content.Context.MODE_PRIVATE)
+            .edit().putString("arrival_latency_bucket", latencyBucket).apply()
         val second = ingestor.sync(account, maxThreads = 20, maxMessages = 20)
         assertTrue(second is InstagramReadIngestor.Result.Success)
         val persisted = ingestor.loadPersisted(account)
         val ids = persisted.conversations.flatMap { it.messages }.map { it.id }
         assertTrue(ids.size == ids.toSet().size)
+        assertTrue(ids.size >= firstInbound.size)
     }
 }
