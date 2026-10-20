@@ -209,6 +209,11 @@ class InboxViewModel(
             }
             .filterNot { it.latestSnippet.isBlank() && it.observationCount <= 1 }
         val conversations = summaries.filter { app.mini.hub.observation.isConversationSummary(it) }
+        val instagramInConversations = conversations.count { it.accountId.provider == app.mini.hub.domain.Provider.INSTAGRAM }
+        android.util.Log.i(
+            "MiniInboxRefresh",
+            "after_filters visible=${summaries.size} conversations=${conversations.size} instagram_conversations=$instagramInConversations",
+        )
         val activity = summaries.filter { app.mini.hub.observation.isLinkedInActivitySummary(it) }
         val loadResult = attentionStore.loadAll()
 
