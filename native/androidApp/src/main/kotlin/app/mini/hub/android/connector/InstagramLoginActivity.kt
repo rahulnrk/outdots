@@ -279,24 +279,23 @@ private fun InstagramLoginScreen(
         state.instructions?.takeIf { it.isNotEmpty() }?.let { Text(it) }
 
         when (state.status) {
-            InstagramLoginStatus.LOADING -> Text("Preparing secure login...")
+            InstagramLoginStatus.LOADING -> {
+                Text(state.instructions?.takeIf { it.isNotBlank() } ?: "Preparing secure login...")
+            }
             InstagramLoginStatus.UNAVAILABLE -> Text("Instagram runtime is not available in this build.")
             InstagramLoginStatus.INPUT -> {
                 when {
                     state.choices.isNotEmpty() -> SelectionForm(state.choices, onSubmitSelection)
-                    state.fieldIds.contains("action") || state.fieldIds.contains("method") -> {
-                        val options = when {
-                            state.fieldIds.contains("method") -> listOf(
-                                InstagramSelectionOption("method", "Email", "Email"),
-                                InstagramSelectionOption("method", "SMS", "SMS"),
-                            )
-                            else -> buildList {
-                                add(InstagramSelectionOption("action", "Enter code", "Enter code"))
-                                if (state.instructions.orEmpty().contains("new code", ignoreCase = true) ||
-                                    state.instructions.orEmpty().contains("resend", ignoreCase = true)
-                                ) {
-                                    add(InstagramSelectionOption("action", "Resend code", "Resend code"))
-                                }
+                    state.fieldIds.contains("action") -> {
+                        val options = buildList {
+                            add(InstagramSelectionOption("action", "Enter code", "Enter code"))
+                            if (state.instructions.orEmpty().contains("new code", ignoreCase = true) ||
+                                state.instructions.orEmpty().contains("resend", ignoreCase = true)
+                            ) {
+                                add(InstagramSelectionOption("action", "Resend code", "Resend code"))
+                            }
+                            if (state.instructions.orEmpty().contains("another method", ignoreCase = true)) {
+                                add(InstagramSelectionOption("action", "Try another method", "Try another method"))
                             }
                         }
                         SelectionForm(options, onSubmitSelection)

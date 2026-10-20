@@ -103,8 +103,7 @@ class InstagramLoginSession(
             }
             val needsEnterCodeAction = !hasExplicitCodeField && (
                 current.fieldIds.contains("action") ||
-                current.choices.any { it.fieldId == "action" && it.value.equals("Enter code", ignoreCase = true) } ||
-                current.instructions.orEmpty().contains("Enter code", ignoreCase = true)
+                current.choices.any { it.fieldId == "action" && it.value.equals("Enter code", ignoreCase = true) }
             )
             if (needsEnterCodeAction) {
                 val selectEnter = JSONObject().put("action", "Enter code").toString().toByteArray(Charsets.UTF_8)
@@ -133,15 +132,20 @@ class InstagramLoginSession(
 
     fun submitSelection(fieldId: String, value: String) {
         val lc = controller.get() ?: return
-        if (!isCurrentSelection(fieldId, value)) {
-            publish(latest.get().copy(status = InstagramLoginStatus.FAILED, failureCode = "invalid_or_stale_selection"))
+        val snapshot = latest.get()
+        if (!isValidInstagramSelection(snapshot, fieldId, value)) {
+            publish(snapshot.copy(status = InstagramLoginStatus.FAILED, failureCode = "invalid_or_stale_selection"))
             return
         }
         executor.execute {
-            if (!isCurrentSelection(fieldId, value)) {
-                publish(latest.get().copy(status = InstagramLoginStatus.FAILED, failureCode = "invalid_or_stale_selection"))
+            val current = latest.get()
+            if (current.status == InstagramLoginStatus.AUTHENTICATED ||
+                current.status == InstagramLoginStatus.FAILED ||
+                current.status == InstagramLoginStatus.CANCELLED
+            ) {
                 return@execute
             }
+            publish(current.copy(status = InstagramLoginStatus.LOADING, instructions = "Continuing sign-in…"))
             val input = JSONObject().put(fieldId, value).toString().toByteArray(Charsets.UTF_8)
             runUpstream(lc) { lc.submitInput(input) }
         }
@@ -230,10 +234,6 @@ class InstagramLoginSession(
                     ),
                 )
         }
-    }
-
-    private fun isCurrentSelection(fieldId: String, value: String): Boolean {
-        return isValidInstagramSelection(latest.get(), fieldId, value)
     }
 
     private fun parseChoices(snapshot: JSONObject?): List<InstagramSelectionOption> {
@@ -336,6 +336,6 @@ internal fun isValidInstagramSelection(
     if (fieldId == "action" && state.fieldIds.contains("action") &&
         value in setOf("Enter code", "Resend code", "Try another method")
     ) return true
-    if (fieldId == "method" && state.fieldIds.contains("method") && value.isNotBlank()) return true
-    return state.state == "select" && state.choices.any { it.fieldId == fieldId && it.value == value }
+    if (fieldId == "account" && state.fieldIds.contains("account") && value.isNotBlank()) return true
+    return false
 }
