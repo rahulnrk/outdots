@@ -28,7 +28,6 @@ class InstagramReadIngestor(
 ) {
     private val appContext = context.applicationContext
     private val store: ObservationStore = store
-    private val syncLock = Any()
 
     sealed interface Result {
         data class Success(
@@ -40,15 +39,34 @@ class InstagramReadIngestor(
     }
 
     fun sync(accountId: AccountId, maxThreads: Int = 20, maxMessages: Int = 20): Result {
-        return synchronized(syncLock) {
-            if (accountId.provider != Provider.INSTAGRAM) return@synchronized Result.Failed("account_provider_mismatch")
-            when (val read = InstagramSessionRestore(appContext).readRecent(accountId, maxThreads, maxMessages)) {
+        return synchronized(GLOBAL_LOCK) {
+            if (accountId.provider != Provider.INSTAGRAM) {
+                return@synchronized Result.Failed("account_provider_mismatch").also { logResult(it) }
+            }
+            val result = when (val read = InstagramSessionRestore(appContext).readRecent(accountId, maxThreads, maxMessages)) {
                 is InstagramSessionRestore.Result.ReadJson -> ingest(accountId, read.json)
                 is InstagramSessionRestore.Result.NoSession -> Result.Failed("session_expired")
                 is InstagramSessionRestore.Result.Failed -> Result.Failed(read.reason)
                 is InstagramSessionRestore.Result.Verified -> Result.Failed("read_unavailable")
             }
+            logResult(result)
+            result
         }
+    }
+
+    private fun logResult(result: Result) {
+        when (result) {
+            is Result.Success -> android.util.Log.i(
+                LOG_TAG,
+                "result=success persisted=${result.persistedCount} conversations=${result.view.conversations.size} partial=${result.partial}",
+            )
+            is Result.Failed -> android.util.Log.i(LOG_TAG, "result=failed code=${result.code}")
+        }
+    }
+
+    companion object {
+        private const val LOG_TAG = "MiniInstagramIngest"
+        private val GLOBAL_LOCK = Any()
     }
 
     fun loadPersisted(accountId: AccountId): InstagramReadView {

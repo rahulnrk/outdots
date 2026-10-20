@@ -24,15 +24,8 @@ class SqlCipherInstagramSessionStore(context: Context) {
     private val databaseFile = appContext.getDatabasePath(DB_NAME)
     private val keyEnvelope = InstagramKeystoreSqlCipherKey(appContext)
 
-    private val database: SQLiteDatabase by lazy {
-        databaseFile.parentFile?.mkdirs()
-        System.loadLibrary("sqlcipher")
-        SQLiteDatabase.openOrCreateDatabase(databaseFile, keyEnvelope.databaseKey(), null, null, null).also { db ->
-            db.execSQL(
-                "CREATE TABLE IF NOT EXISTS ig_session (account_key TEXT PRIMARY KEY NOT NULL, snapshot BLOB NOT NULL, updated_at INTEGER NOT NULL)",
-            )
-        }
-    }
+    private val database: SQLiteDatabase
+        get() = sharedDatabase(databaseFile, keyEnvelope)
 
     fun save(accountId: AccountId, envelope: InstagramSessionEnvelope) {
         require(accountId.provider == Provider.INSTAGRAM) { "Instagram store received a non-Instagram account" }
@@ -62,6 +55,26 @@ class SqlCipherInstagramSessionStore(context: Context) {
 
     companion object {
         private const val DB_NAME = "mini-instagram-session.db"
+        private val DB_LOCK = Any()
+        @Volatile private var shared: SQLiteDatabase? = null
+
+        private fun sharedDatabase(
+            databaseFile: java.io.File,
+            keyEnvelope: InstagramKeystoreSqlCipherKey,
+        ): SQLiteDatabase {
+            shared?.let { return it }
+            return synchronized(DB_LOCK) {
+                shared?.let { return it }
+                databaseFile.parentFile?.mkdirs()
+                System.loadLibrary("sqlcipher")
+                SQLiteDatabase.openOrCreateDatabase(databaseFile, keyEnvelope.databaseKey(), null, null, null).also { db ->
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS ig_session (account_key TEXT PRIMARY KEY NOT NULL, snapshot BLOB NOT NULL, updated_at INTEGER NOT NULL)",
+                    )
+                    shared = db
+                }
+            }
+        }
     }
 }
 
