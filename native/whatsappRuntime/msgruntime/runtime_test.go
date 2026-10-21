@@ -2,6 +2,7 @@ package msgruntime
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 )
 
@@ -72,12 +73,17 @@ func TestOwnerSessionRoundTripAndEncryptedDeviceStore(t *testing.T) {
 		t.Fatalf("platform=%v", snap["platform"])
 	}
 
-	devicePath := "file:msgruntime-e2ee?mode=memory&cache=shared&_pragma=foreign_keys(1)"
-	if code := r.OpenEncryptedDeviceStore(devicePath); code != "" {
+	deviceDir := t.TempDir()
+	devicePath := filepath.Join(deviceDir, "e2ee.sealed")
+	keyHex := testKeyHex(t)
+	if code := r.OpenEncryptedDeviceStore(devicePath, "facebook|12345", keyHex); code != "" {
 		t.Fatalf("OpenEncryptedDeviceStore=%q", code)
 	}
 	if !r.HasEncryptedDevice() || r.EncryptedDevicePath() == "" {
 		t.Fatal("expected encrypted device after open")
+	}
+	if !r.SealedDevicePresent() {
+		t.Fatal("expected sealed file after open")
 	}
 	if code := r.PrepareEncryptedClient(); code != "" {
 		t.Fatalf("PrepareEncryptedClient=%q", code)
@@ -87,6 +93,9 @@ func TestOwnerSessionRoundTripAndEncryptedDeviceStore(t *testing.T) {
 	}
 	if code := r.RegisterEncryptedDevice(); code != "not_authenticated" {
 		t.Fatalf("Register without verify code=%q", code)
+	}
+	if artifacts := r.PlaintextDeviceArtifacts(); artifacts != "" {
+		t.Fatalf("plaintext artifacts: %s", artifacts)
 	}
 
 	r2 := NewRuntime()

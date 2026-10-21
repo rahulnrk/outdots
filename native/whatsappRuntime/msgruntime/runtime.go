@@ -1,7 +1,7 @@
 // Package msgruntime is the phone-local Facebook Messenger protocol facade inside
 // the shared gomobile runtime. It wraps go.mau.fi/mautrix-meta/pkg/messagix.
 //
-// Probe scope: owner-operated cookie login + encrypted E2EE device-store handling.
+// Probe scope: owner-operated cookie login + sealed in-memory E2EE device state.
 // No Accounts UI, no send, no remote bridge, no qualification-gate changes.
 //
 // Content-free logging: global zerolog is silenced. Methods never log cookies,
@@ -14,7 +14,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,8 +30,6 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
-	"go.mau.fi/whatsmeow/types/events"
-	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
 const (
@@ -62,21 +59,30 @@ const (
 
 // Runtime holds one Messenger client. One Runtime per account attempt.
 type Runtime struct {
-	mu             sync.Mutex
-	client         *messagix.Client
-	jar            *cookies.Cookies
-	verifiedUserID string
-	deviceStore    *sql.DB
+	mu              sync.Mutex
+	client          *messagix.Client
+	jar             *cookies.Cookies
+	verifiedUserID  string
+	deviceStore     *sql.DB
 	deviceContainer *sqlstore.Container
-	devicePath     string
-	device         *store.Device
-	e2ee           *whatsmeow.Client
-	threadCount    int
-	readDone       bool
-	e2eeConnected  bool
-	e2eeEvents     int
-	e2eeFBMessages int
-	e2eeLoggedOut  bool
+	devicePath      string
+	deviceKey       []byte
+	accountKey      string
+	memoryURI       string
+	generation      uint64
+	restoreDump     []byte
+	device          *store.Device
+	e2ee            *whatsmeow.Client
+	e2eeHandlerID   uint32
+	e2eeConnectedCh chan struct{}
+	threadCount     int
+	readDone        bool
+	e2eeConnected   bool
+	e2eeEvents      int
+	e2eeFBMessages  int
+	e2eeUnique      int
+	e2eeDuplicates  int
+	e2eeLoggedOut   bool
 }
 
 type sessionSnapshot struct {
@@ -278,25 +284,28 @@ func (r *Runtime) EncryptedDeviceRegistered() bool {
 
 // ListenEncrypted connects the prepared E2EE client and listens for up to
 // seconds. Receive-only: no sends, no read receipts are issued by MINI.
-// Returns content-free JSON with connection state and event counts.
+// Unique inbound IDs are persisted in the sealed device state so a later
+// listen after force-stop can report duplicates without re-counting.
 func (r *Runtime) ListenEncrypted(seconds int) string {
 	r.mu.Lock()
 	e2ee := r.e2ee
 	registered := r.device != nil && r.device.ID != nil
-	r.e2eeConnected, r.e2eeEvents, r.e2eeFBMessages, r.e2eeLoggedOut = false, 0, 0, false
+	r.e2eeConnected, r.e2eeEvents, r.e2eeFBMessages = false, 0, 0
+	r.e2eeUnique, r.e2eeDuplicates, r.e2eeLoggedOut = 0, 0, false
+	r.e2eeConnectedCh = make(chan struct{}, 1)
+	connectedCh := r.e2eeConnectedCh
+	if e2ee != nil {
+		if r.e2eeHandlerID != 0 {
+			e2ee.RemoveEventHandler(r.e2eeHandlerID)
+		}
+		r.e2eeHandlerID = e2ee.AddEventHandlerWithSuccessStatus(r.handleEncryptedEvent)
+	}
 	r.mu.Unlock()
 	out := func(code string) string {
 		r.mu.Lock()
 		defer r.mu.Unlock()
-		raw, _ := json.Marshal(map[string]any{
-			"registered":  registered,
-			"connected":   r.e2eeConnected,
-			"events":      r.e2eeEvents,
-			"fb_messages": r.e2eeFBMessages,
-			"logged_out":  r.e2eeLoggedOut,
-			"code":        code,
-		})
-		return string(raw)
+		_ = r.persistLocked()
+		return encodeListenResult(r, registered, code)
 	}
 	if e2ee == nil {
 		return out("encrypted_client_missing")
@@ -304,24 +313,6 @@ func (r *Runtime) ListenEncrypted(seconds int) string {
 	if !registered {
 		return out("encrypted_device_unregistered")
 	}
-	connected := make(chan struct{}, 1)
-	e2ee.AddEventHandler(func(evt any) {
-		r.mu.Lock()
-		r.e2eeEvents++
-		switch evt.(type) {
-		case *events.Connected:
-			r.e2eeConnected = true
-			select {
-			case connected <- struct{}{}:
-			default:
-			}
-		case *events.FBMessage:
-			r.e2eeFBMessages++
-		case *events.LoggedOut:
-			r.e2eeLoggedOut = true
-		}
-		r.mu.Unlock()
-	})
 	if err := e2ee.Connect(); err != nil {
 		return out("connect_failed")
 	}
@@ -330,7 +321,7 @@ func (r *Runtime) ListenEncrypted(seconds int) string {
 	}
 	deadline := time.After(time.Duration(seconds) * time.Second)
 	select {
-	case <-connected:
+	case <-connectedCh:
 		<-deadline
 	case <-deadline:
 	}
@@ -451,139 +442,4 @@ func (r *Runtime) ClearSession() {
 	if r.device != nil {
 		r.client.SetDevice(r.device)
 	}
-}
-
-// OpenEncryptedDeviceStore opens or creates a whatsmeow SQL device DB for Messenger
-// Armadillo E2EE. dbPath must be an app-private file path. No network I/O.
-func (r *Runtime) OpenEncryptedDeviceStore(dbPath string) string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	path := strings.TrimSpace(dbPath)
-	if path == "" {
-		return "missing_device_path"
-	}
-	r.closeDeviceLocked()
-	var dsn string
-	var abs string
-	if strings.HasPrefix(path, "file:") {
-		dsn = path
-		abs = path
-	} else {
-		abs = filepath.Clean(path)
-		dsn = "file:" + filepath.ToSlash(abs) + "?_pragma=foreign_keys(1)"
-	}
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return "device_store_open_failed"
-	}
-	db.SetMaxOpenConns(1)
-	container := sqlstore.NewWithDB(db, "sqlite3", waLog.Noop)
-	if err := container.Upgrade(context.Background()); err != nil {
-		_ = db.Close()
-		return "device_store_upgrade_failed"
-	}
-	device, err := container.GetFirstDevice(context.Background())
-	if err != nil {
-		_ = container.Close()
-		return "device_store_device_failed"
-	}
-	r.deviceStore = db
-	r.deviceContainer = container
-	r.devicePath = abs
-	r.device = device
-	if r.client != nil {
-		r.client.SetDevice(device)
-	}
-	return ""
-}
-
-// PrepareEncryptedClient wires messagix PrepareE2EEClient against the open device.
-// Requires OpenEncryptedDeviceStore first. No network I/O.
-func (r *Runtime) PrepareEncryptedClient() string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.client == nil || r.device == nil {
-		return "encrypted_device_missing"
-	}
-	r.client.SetDevice(r.device)
-	e2ee, err := r.client.PrepareE2EEClient()
-	if err != nil {
-		return "prepare_e2ee_failed"
-	}
-	r.e2ee = e2ee
-	return ""
-}
-
-// RegisterEncryptedDevice registers the local device for Messenger E2EE after a
-// verified cookie session. Performs network I/O. No message send.
-func (r *Runtime) RegisterEncryptedDevice() string {
-	if code := r.PrepareEncryptedClient(); code != "" {
-		return code
-	}
-	r.mu.Lock()
-	client := r.client
-	userID := r.verifiedUserID
-	device := r.device
-	r.mu.Unlock()
-	if client == nil || device == nil {
-		return "encrypted_device_missing"
-	}
-	if userID == "" {
-		return "not_authenticated"
-	}
-	fbid, err := strconv.ParseInt(userID, 10, 64)
-	if err != nil || fbid == 0 {
-		return "invalid_verified_identity"
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	if err := client.RegisterE2EE(ctx, fbid); err != nil {
-		return classifyVerifyError(err)
-	}
-	if device.ID != nil {
-		if err := device.Save(ctx); err != nil {
-			return "device_save_failed"
-		}
-	}
-	return ""
-}
-
-func (r *Runtime) HasEncryptedDevice() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.device != nil
-}
-
-func (r *Runtime) EncryptedDevicePath() string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.devicePath
-}
-
-func (r *Runtime) HasPreparedEncryptedClient() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.e2ee != nil
-}
-
-// Close releases E2EE client and device-store handles. Safe to call repeatedly.
-func (r *Runtime) Close() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.closeDeviceLocked()
-}
-
-func (r *Runtime) closeDeviceLocked() {
-	if r.e2ee != nil {
-		r.e2ee.Disconnect()
-		r.e2ee = nil
-	}
-	if r.deviceContainer != nil {
-		_ = r.deviceContainer.Close()
-		r.deviceContainer = nil
-	}
-	// container.Close already closes the underlying *sql.DB.
-	r.deviceStore = nil
-	r.device = nil
-	r.devicePath = ""
 }

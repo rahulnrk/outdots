@@ -79,6 +79,12 @@ class MessengerLoginSession(private val appContext: Context) {
             if (accountId.provider != Provider.FACEBOOK) return@execute
             val envelope = SqlCipherMessengerSessionStore(appContext).load(accountId) ?: return@execute
             val sessionJson = envelope.sessionJsonOrNull() ?: return@execute
+            val store = SqlCipherMessengerSessionStore(appContext)
+            val deviceKey = store.loadDeviceKey(accountId)
+            if (deviceKey == null) {
+                publish(MessengerLoginUiState.Failed("device_key_missing"))
+                return@execute
+            }
             publish(MessengerLoginUiState.Verifying("restoring"))
             val rt = MessengerRuntimeFacade.newRuntime()
             val importCode = MessengerRuntimeFacade.importSessionJson(rt, sessionJson)
@@ -86,7 +92,12 @@ class MessengerLoginSession(private val appContext: Context) {
                 publish(MessengerLoginUiState.Failed(importCode))
                 return@execute
             }
-            val deviceCode = MessengerRuntimeFacade.openEncryptedDeviceStore(rt, deviceDbPath(accountId).absolutePath)
+            val deviceCode = MessengerRuntimeFacade.openEncryptedDeviceStore(
+                rt,
+                deviceSealedPath(accountId).absolutePath,
+                accountId.key,
+                deviceKey.toHex(),
+            )
             if (deviceCode.isNotEmpty()) {
                 publish(MessengerLoginUiState.Failed(deviceCode))
                 return@execute
@@ -106,13 +117,17 @@ class MessengerLoginSession(private val appContext: Context) {
                 publish(MessengerLoginUiState.Failed(prepareCode))
                 return@execute
             }
+            val persistCode = MessengerRuntimeFacade.persistEncryptedDevice(rt)
+            recordPersistence(rt, "restore_persist", persistCode)
             val read = JSONObject(MessengerRuntimeFacade.conversationReadJson(rt))
             val registered = MessengerRuntimeFacade.encryptedDeviceRegistered(rt)
             evidence("restore", "identity_match=true device_registered=$registered")
             evidence("restore_read", "read=${read.optBoolean("read")} threads=${read.optInt("threads")}")
+            evidence("restore_identity", MessengerRuntimeFacade.deviceIdentityJson(rt))
             if (registered) {
                 publish(MessengerLoginUiState.Verifying("e2ee_receive"))
                 evidence("restore_e2ee_listen", listenSummary(rt))
+                recordPersistence(rt, "restore_listen_persist", MessengerRuntimeFacade.persistEncryptedDevice(rt))
             }
             runtime = rt
             publish(MessengerLoginUiState.Verified(accountId.key, restored = true))
@@ -156,7 +171,14 @@ class MessengerLoginSession(private val appContext: Context) {
         val read = JSONObject(MessengerRuntimeFacade.conversationReadJson(rt))
         evidence("read", "read=${read.optBoolean("read")} threads=${read.optInt("threads")}")
         publish(MessengerLoginUiState.Verifying("encrypted_device"))
-        val deviceCode = MessengerRuntimeFacade.openEncryptedDeviceStore(rt, deviceDbPath(accountId).absolutePath)
+        val store = SqlCipherMessengerSessionStore(appContext)
+        val deviceKey = store.getOrCreateDeviceKey(accountId)
+        val deviceCode = MessengerRuntimeFacade.openEncryptedDeviceStore(
+            rt,
+            deviceSealedPath(accountId).absolutePath,
+            accountId.key,
+            deviceKey.toHex(),
+        )
         if (deviceCode.isNotEmpty()) {
             publish(MessengerLoginUiState.Failed(deviceCode))
             return
@@ -181,16 +203,27 @@ class MessengerLoginSession(private val appContext: Context) {
         ) { "could not persist Messenger probe account key" }
         val stored = SqlCipherMessengerSessionStore(appContext).load(accountId) != null
         evidence("session_bind", "sqlcipher_saved=$stored bound_to_verified_identity=true")
-        // E2EE is checked separately: login/inbox success is not E2EE proof.
-        publish(MessengerLoginUiState.Verifying("e2ee_register"))
-        val registerCode = MessengerRuntimeFacade.registerEncryptedDevice(rt)
-        val registered = MessengerRuntimeFacade.encryptedDeviceRegistered(rt)
-        evidence("e2ee_register", "registered=$registered code=${registerCode.ifBlank { "ok" }}")
-        if (registered) {
+        recordPersistence(rt, "login_device", MessengerRuntimeFacade.persistEncryptedDevice(rt))
+        evidence("identity_fp", MessengerRuntimeFacade.deviceIdentityJson(rt))
+        val alreadyRegistered = MessengerRuntimeFacade.encryptedDeviceRegistered(rt)
+        if (!alreadyRegistered) {
+            publish(MessengerLoginUiState.Verifying("e2ee_register"))
+            val registerCode = MessengerRuntimeFacade.registerEncryptedDevice(rt)
+            val registered = MessengerRuntimeFacade.encryptedDeviceRegistered(rt)
+            evidence("e2ee_register", "registered=$registered code=${registerCode.ifBlank { "ok" }}")
+            recordPersistence(rt, "register_persist", MessengerRuntimeFacade.persistEncryptedDevice(rt))
+            if (registered) {
+                publish(MessengerLoginUiState.Verifying("e2ee_receive"))
+                evidence("e2ee_listen", listenSummary(rt))
+                recordPersistence(rt, "listen_persist", MessengerRuntimeFacade.persistEncryptedDevice(rt))
+            } else {
+                evidence("e2ee_listen", "skipped=device_unregistered")
+            }
+        } else {
+            evidence("e2ee_register", "registered=true code=already_registered")
             publish(MessengerLoginUiState.Verifying("e2ee_receive"))
             evidence("e2ee_listen", listenSummary(rt))
-        } else {
-            evidence("e2ee_listen", "skipped=device_unregistered")
+            recordPersistence(rt, "listen_persist", MessengerRuntimeFacade.persistEncryptedDevice(rt))
         }
         runtime = rt
         publish(MessengerLoginUiState.Verified(accountId.key, restored = false))
@@ -218,10 +251,22 @@ class MessengerLoginSession(private val appContext: Context) {
         executor.shutdownNow()
     }
 
-    private fun deviceDbPath(accountId: AccountId): File {
+    private fun deviceSealedPath(accountId: AccountId): File {
         val dir = File(appContext.filesDir, "messenger-e2ee").apply { mkdirs() }
-        return File(dir, "${accountId.localId}.db")
+        return File(dir, "${accountId.localId}.sealed")
     }
+
+    private fun recordPersistence(rt: Any, key: String, persistCode: String) {
+        val artifacts = MessengerRuntimeFacade.plaintextDeviceArtifacts(rt).ifBlank { "none" }
+        val sealed = MessengerRuntimeFacade.sealedDevicePresent(rt)
+        val generation = MessengerRuntimeFacade.lastPersistGeneration(rt)
+        evidence(
+            key,
+            "persist=${persistCode.ifBlank { "ok" }} sealed=$sealed generation=$generation plaintext=$artifacts",
+        )
+    }
+
+    private fun ByteArray.toHex(): String = joinToString("") { byte -> "%02x".format(byte) }
 
     private fun publish(state: MessengerLoginUiState) {
         if (Looper.myLooper() == Looper.getMainLooper()) {

@@ -38,8 +38,28 @@ internal object MessengerRuntimeFacade {
         runtimeClass.getMethod("clearSession").invoke(runtime)
     }
 
-    fun openEncryptedDeviceStore(runtime: Any, dbPath: String): String =
-        call(runtime, "openEncryptedDeviceStore", dbPath) ?: "device_store_open_failed"
+    fun openEncryptedDeviceStore(runtime: Any, dbPath: String, accountKey: String, keyHex: String): String =
+        runtimeClass.getMethod("openEncryptedDeviceStore", String::class.java, String::class.java, String::class.java)
+            .invoke(runtime, dbPath, accountKey, keyHex) as? String ?: "device_store_open_failed"
+
+    fun persistEncryptedDevice(runtime: Any): String =
+        call(runtime, "persistEncryptedDevice") ?: "device_state_write_failed"
+
+    fun deviceIdentityJson(runtime: Any): String =
+        call(runtime, "deviceIdentityJSON") ?: "{}"
+
+    fun plaintextDeviceArtifacts(runtime: Any): String =
+        call(runtime, "plaintextDeviceArtifacts") ?: ""
+
+    fun sealedDevicePresent(runtime: Any): Boolean =
+        runtimeClass.getMethod("sealedDevicePresent").invoke(runtime) as? Boolean ?: false
+
+    fun lastPersistGeneration(runtime: Any): Long =
+        when (val value = runtimeClass.getMethod("lastPersistGeneration").invoke(runtime)) {
+            is Long -> value
+            is Int -> value.toLong()
+            else -> 0L
+        }
 
     fun prepareEncryptedClient(runtime: Any): String =
         call(runtime, "prepareEncryptedClient") ?: "prepare_e2ee_failed"

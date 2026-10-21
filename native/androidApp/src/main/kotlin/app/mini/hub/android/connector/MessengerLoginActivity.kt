@@ -30,7 +30,7 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Owner-operated Messenger cookie login for the isolated rtprobe package.
  * Runs in `:mslogin` so its WebView profile cannot collide with other WebViews.
- * Stores an encrypted cookie session and local E2EE device DB after a harmless
+ * Stores an encrypted cookie session and sealed E2EE device state after a harmless
  * authenticated identity read. Never enables Messenger in Manage Accounts and never sends.
  */
 class MessengerLoginActivity : ComponentActivity() {
@@ -42,6 +42,7 @@ class MessengerLoginActivity : ComponentActivity() {
         }
         super.onCreate(savedInstanceState)
         val loginSession = MessengerLoginSession(applicationContext).also { session = it }
+        loginSession.restoreIfPresent()
         setContent {
             var startRequested by remember { mutableStateOf(false) }
             MaterialTheme {

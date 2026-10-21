@@ -50,7 +50,37 @@ class SqlCipherMessengerSessionStore(context: Context) {
 
     fun clear(accountId: AccountId): Boolean {
         require(accountId.provider == Provider.FACEBOOK) { "Messenger store received a non-Facebook account" }
+        database.delete("fb_device_key", "account_key = ?", arrayOf(accountId.key))
         return database.delete("fb_session", "account_key = ?", arrayOf(accountId.key)) > 0
+    }
+
+    fun loadDeviceKey(accountId: AccountId): ByteArray? {
+        require(accountId.provider == Provider.FACEBOOK) { "Messenger store received a non-Facebook account" }
+        database.rawQuery("SELECT device_key FROM fb_device_key WHERE account_key = ?", arrayOf(accountId.key)).use { cursor ->
+            if (!cursor.moveToFirst()) return null
+            val bytes = cursor.getBlob(0) ?: return null
+            return if (bytes.size == 32) bytes else null
+        }
+    }
+
+    fun getOrCreateDeviceKey(accountId: AccountId): ByteArray {
+        loadDeviceKey(accountId)?.let { return it }
+        val key = ByteArray(32).also(SecureRandom()::nextBytes)
+        saveDeviceKey(accountId, key)
+        return key
+    }
+
+    fun saveDeviceKey(accountId: AccountId, key: ByteArray) {
+        require(accountId.provider == Provider.FACEBOOK) { "Messenger store received a non-Facebook account" }
+        require(key.size == 32) { "Messenger device key must be 32 bytes" }
+        val values = ContentValues().apply {
+            put("account_key", accountId.key)
+            put("device_key", key)
+            put("updated_at", System.currentTimeMillis())
+        }
+        check(database.insertWithOnConflict("fb_device_key", null, values, SQLiteDatabase.CONFLICT_REPLACE) != -1L) {
+            "could not save Messenger device key"
+        }
     }
 
     companion object {
@@ -70,6 +100,9 @@ class SqlCipherMessengerSessionStore(context: Context) {
                 SQLiteDatabase.openOrCreateDatabase(databaseFile, keyEnvelope.databaseKey(), null, null, null).also { db ->
                     db.execSQL(
                         "CREATE TABLE IF NOT EXISTS fb_session (account_key TEXT PRIMARY KEY NOT NULL, snapshot BLOB NOT NULL, updated_at INTEGER NOT NULL)",
+                    )
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS fb_device_key (account_key TEXT PRIMARY KEY NOT NULL, device_key BLOB NOT NULL, updated_at INTEGER NOT NULL)",
                     )
                     shared = db
                 }

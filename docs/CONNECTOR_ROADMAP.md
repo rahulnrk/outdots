@@ -34,7 +34,7 @@ homeserver and no MINI server in the path. Everything else uses **official APIs*
 | WhatsApp (+ Business app) | whatsmeow | MPL-2.0 | Linked device, pairing code | Packaged; owner-verified on Pixel (debug) |
 | Google Messages SMS/RCS | libgm (mautrix-gmessages) | **AGPL-3.0** | Pair as Messages for Web (QR or Google account) | Not started |
 | Instagram DMs | mautrix-meta (instagram mode) | **AGPL-3.0** | In-app login WebView, cookies kept on device | Not started |
-| Messenger | mautrix-meta (messenger mode) | **AGPL-3.0** | In-app login WebView, cookies kept on device | **In progress** (20 Oct 2026): whatsmeow pin COMPATIBLE at production `c386243`; `msgruntime` + rtprobe owner sign-in/E2EE store prepared; Accounts still unavailable. See [Messenger feasibility](MESSENGER_PHONE_LOCAL_FEASIBILITY_2026-10-20.md) |
+| Messenger | mautrix-meta (messenger mode) | **AGPL-3.0** | In-app login WebView, cookies kept on device | **In progress** (21 Oct 2026): E2EE device state is a sealed in-memory store + AES-GCM snapshot (not plaintext SQLite). Cookie SQLCipher unchanged. Accounts still unavailable. See [Messenger feasibility](MESSENGER_PHONE_LOCAL_FEASIBILITY_2026-10-20.md) |
 | LinkedIn messages | mautrix-linkedin | **AGPL-3.0** | In-app login WebView, cookies kept on device | **BLOCKED** (20 Oct 2026): embedded Android WebView Cloudflare-blocked before session; manager/bot cookie paste needs a bridge host, not phone-local Accounts. See [LinkedIn feasibility](LINKEDIN_PHONE_LOCAL_FEASIBILITY_2026-10-20.md) |
 | iMessage | none viable | - | - | **Not possible** on Android or iOS; see below |
 
@@ -73,7 +73,7 @@ Engineering constraints:
 | 2 | **WhatsApp on-device** | C | Owner-verified on Pixel (debug) | Release gating, 14-day primary-phone warning, coverage label, multi-account | None |
 | 3 | **Google Messages on-device (libgm)** | C | Not started | Pair, sync history, receive, reviewed send, reconnect after process death | AGPL decision for release |
 | 4 | **Instagram on-device** | C | Official Pro adapter exists | mautrix-meta engine, in-app login, checkpoint handling | AGPL decision |
-| 5 | **Messenger on-device** | C | Notification-only; runtime/auth/E2EE scaffolding | Same engine as #4 (messenger mode); owner WebView on rtprobe | Live owner login + read qualification; Accounts still unavailable |
+| 5 | **Messenger on-device** | C | Notification-only; sealed E2EE device store on rtprobe | Same engine as #4 (messenger mode); owner WebView on rtprobe | Live owner login + encrypted inbound qualification; Accounts still unavailable |
 | 6 | **LinkedIn on-device** | C | Notification conversations (`2a51f79`..`25ee51c`); runtime/session scaffolding | mautrix-linkedin engine + verified phone-local login | **BLOCKED:** Cloudflare on embedded WebView; manager/bridge cookie paste not phone-local |
 | 7 | **Gmail** | A | Device-verified sync | Live send qualification, OAuth verification prep | Google verification |
 | 8 | **Outlook / M365** | A | Fixture-tested | Live run on device | Entra registration |
