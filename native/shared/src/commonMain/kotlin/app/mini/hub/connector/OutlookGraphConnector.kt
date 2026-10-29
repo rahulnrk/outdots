@@ -61,7 +61,11 @@ class OutlookGraphConnector(
                     if (folder != INBOX && (e.kind == ProviderErrorKind.NotFound || e.kind == ProviderErrorKind.PermissionMissing)) break
                     throw e
                 }
-                page["value"]?.objects.orEmpty().forEach { item -> parse(item, self)?.let(messages::add) }
+                val values = page["value"] as? JsonValue.Arr
+                    ?: throw ConnectorHttpException(200, "Graph message list missing", kind = ProviderErrorKind.Protocol)
+                if (values.items.any { it !is JsonValue.Obj || it.str("id").isNullOrBlank() })
+                    throw ConnectorHttpException(200, "Graph message list invalid", kind = ProviderErrorKind.Protocol)
+                values.items.forEach { item -> parse(item, self)?.let(messages::add) }
                 val next = page.str("@odata.nextLink")
                 val delta = page.str("@odata.deltaLink")
                 (next ?: delta)?.let { links[folder] = it }

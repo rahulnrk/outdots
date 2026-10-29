@@ -8,7 +8,7 @@ class AccountConnectionManager(
     private val accounts: ConnectedAccountStore,
     private val tokens: AccessTokenStore,
     private val ids: IdGenerator,
-    private val operations: AccountOperationCoordinator = AccountOperationCoordinator(),
+    private val operations: AccountOperationCoordinator = AccountOperationCoordinator.Shared,
 ) {
     fun attach(
         identity: ProviderAccountIdentity,
@@ -72,5 +72,15 @@ class AccountConnectionManager(
 
     companion object {
         const val DISCONNECTED_ACTION = "Disconnected. Local history is kept. Reconnect to resume syncing."
+
+        /** Reconnection publishes metadata and its credential under the same owner as refresh. */
+        fun installCredential(accounts: ConnectedAccountStore, tokens: AccessTokenStore,
+            account: ConnectedAccount, token: StoredAccessToken,
+            operations: AccountOperationCoordinator = AccountOperationCoordinator.Shared,
+        ) = operations.withAccount(account.id) {
+            operations.invalidate(account.id)
+            tokens.put(account.id, token)
+            accounts.upsert(account)
+        }
     }
 }

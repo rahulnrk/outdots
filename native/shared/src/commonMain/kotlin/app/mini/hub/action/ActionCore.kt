@@ -194,11 +194,11 @@ class ActionController(
 ) {
     init { require(approvalLifetimeMillis > 0) }
 
-    fun approve(state: ActionState, payload: ExactActionPayload): Pair<ActionState, OutboxCommand> {
+    fun approve(state: ActionState, payload: ExactActionPayload, approvedAt: UtcInstant = clock.now()): Pair<ActionState, OutboxCommand> {
         if (payload.route == ActionRoute.Api) require(payload.recipients.isNotEmpty()) { "API approval requires a recipient" }
         val value = digest.sha256(payload.canonical())
         require(value.isNotBlank()) { "cryptographic digest unavailable" }
-        val now = clock.now()
+        val now = approvedAt
         val approval = ApprovalRecord(ids.next("approval"), value, now, now + approvalLifetimeMillis)
         val command = OutboxCommand(ids.next("outbox"), approval.id, value, payload.route, OutboxState.Ready, now)
         return state.copy(approvals = state.approvals + approval, outbox = state.outbox + command) to command
@@ -249,11 +249,36 @@ class ActionController(
     }
 
     /** Phase 2: the provider call. No state access, so it can run outside any transaction. */
+    fun executionStillAuthorized(state: ActionState, commandId: String, payload: ExactActionPayload, live: LiveDispatchChecks): Boolean {
+        val command = state.outbox.find { it.id == commandId && it.state == OutboxState.Dispatching } ?: return false
+        val approval = state.approvals.find { it.id == command.approvalId && it.consumed } ?: return false
+        val now = clock.now()
+        return now >= approval.approvedAt && now <= approval.expiresAt &&
+            approval.payloadDigest == command.payloadDigest && digest.sha256(payload.canonical()) == command.payloadDigest &&
+            live.grantVersion == payload.grantVersion && live.policyVersion == payload.policyVersion &&
+            sameSources(live.sourceVersions, payload.sourceVersions)
+    }
+
     fun executeGateway(command: OutboxCommand, payload: ExactActionPayload, gateway: ProviderGateway?): GatewayResult =
         try { gateway?.execute(command, payload) ?: GatewayResult.Rejected("gateway_unconfigured") }
         catch (_: Throwable) { GatewayResult.Unknown("gateway_call_failed") }
 
     /** Phase 3: records the provider result. Applies only to a command still in Dispatching. */
+    fun completeHandoff(state: ActionState, commandId: String, opened: Boolean?): ActionState {
+        val command = state.outbox.find { it.id == commandId } ?: error("command not found")
+        if (command.state != OutboxState.Dispatching) return state
+        val now = clock.now()
+        return when (opened) {
+            true -> update(state, commandId, OutboxState.HandoffOpened, now)
+            false -> fail(state, commandId, OutboxState.Rejected, "handoff_rejected", now)
+            null -> fail(state, commandId, OutboxState.OutcomeUnknown, "handoff_outcome_unknown", now)
+        }
+    }
+
+    fun rejectBeforeExecution(state: ActionState, commandId: String, reason: String): ActionState =
+        if (state.outbox.any { it.id == commandId && it.state == OutboxState.Dispatching })
+            fail(state, commandId, OutboxState.ExpiredOrInvalidated, reason, clock.now()) else state
+
     fun completeDispatch(state: ActionState, commandId: String, result: GatewayResult): ActionState {
         val command = state.outbox.find { it.id == commandId } ?: error("command not found")
         if (command.state != OutboxState.Dispatching) return state

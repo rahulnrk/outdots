@@ -4,6 +4,8 @@ import app.mini.hub.domain.AccountId
 import app.mini.hub.domain.ScopedId
 import app.mini.hub.domain.UtcInstant
 
+class SearchUnavailableException : IllegalStateException("Local search is unavailable")
+
 data class SearchResult(
     val conversationId: ScopedId,
     val accountId: AccountId,

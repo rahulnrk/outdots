@@ -136,7 +136,7 @@ class InstagramApiConnector(private val apiBase: String = "https://graph.instagr
 
         /** True while the person's last inbound message is under 24h old. */
         fun windowOpen(lastInboundMillis: Long?, nowMillis: Long): Boolean =
-            lastInboundMillis != null && nowMillis - lastInboundMillis < WINDOW_MILLIS
+            lastInboundMillis != null && nowMillis >= lastInboundMillis && nowMillis - lastInboundMillis < WINDOW_MILLIS
     }
 }
 

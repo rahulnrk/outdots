@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -373,7 +376,7 @@ func (r *Runtime) PrepareEncryptedClient() string {
 	}
 	e2ee.EnableDecryptedEventBuffer = true
 	e2ee.SynchronousAck = true
-	e2ee.EnableAutoReconnect = false
+	e2ee.EnableAutoReconnect = true
 	r.e2ee = e2ee
 	r.e2eeHandlerID = 0
 	return ""
@@ -531,13 +534,39 @@ func (r *Runtime) closeDeviceLocked() {
 	}
 }
 
+func eventKind(evt any) string {
+	t := fmt.Sprintf("%T", evt)
+	t = strings.TrimPrefix(t, "*")
+	if i := strings.LastIndex(t, "."); i >= 0 {
+		t = t[i+1:]
+	}
+	return t
+}
+
+func kindsString(m map[string]int) string {
+	if len(m) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(m))
+	for k, v := range m {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, v))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
+}
+
 func (r *Runtime) handleEncryptedEvent(evt any) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.e2eeEvents++
+	if r.e2eeEventKinds == nil {
+		r.e2eeEventKinds = map[string]int{}
+	}
+	r.e2eeEventKinds[eventKind(evt)]++
 	switch v := evt.(type) {
 	case *events.Connected:
 		r.e2eeConnected = true
+		log.Printf("msgruntime e2ee_connected=true events=%d fb_messages=%d", r.e2eeEvents, r.e2eeFBMessages)
 		if r.e2eeConnectedCh != nil {
 			select {
 			case r.e2eeConnectedCh <- struct{}{}:
@@ -547,12 +576,13 @@ func (r *Runtime) handleEncryptedEvent(evt any) bool {
 		_ = r.persistLocked()
 	case *events.FBMessage:
 		r.noteInboundLocked(v.Info.ID, v.Info.Timestamp)
+	case *events.UndecryptableMessage:
+		r.e2eeUndecryptable++
 	case *events.LoggedOut:
 		r.e2eeLoggedOut = true
 	}
 	return true
 }
-
 func (r *Runtime) noteInboundLocked(id string, ts time.Time) {
 	r.e2eeFBMessages++
 	if id == "" || r.deviceStore == nil {
@@ -590,16 +620,22 @@ func (r *Runtime) seenTotalLocked() int {
 
 func encodeListenResult(r *Runtime, registered bool, code string) string {
 	raw, _ := json.Marshal(map[string]any{
-		"registered":  registered,
-		"connected":   r.e2eeConnected,
-		"events":      r.e2eeEvents,
-		"fb_messages": r.e2eeFBMessages,
-		"unique":      r.e2eeUnique,
-		"duplicates":  r.e2eeDuplicates,
-		"seen_total":  r.seenTotalLocked(),
-		"logged_out":  r.e2eeLoggedOut,
-		"generation":  r.generation,
-		"code":        code,
+		"registered":    registered,
+		"connected":     r.e2eeConnected,
+		"events":        r.e2eeEvents,
+		"fb_messages":   r.e2eeFBMessages,
+		"unique":        r.e2eeUnique,
+		"duplicates":    r.e2eeDuplicates,
+		"undecryptable": r.e2eeUndecryptable,
+		"event_kinds":   kindsString(r.e2eeEventKinds),
+		"ls_inserts":    r.lsInserts,
+		"mqtt":          r.lsMQTTConnected,
+		"e2ee_threads":  r.e2eeThreads,
+		"inbox_active":  r.inboxActive,
+		"seen_total":    r.seenTotalLocked(),
+		"logged_out":    r.e2eeLoggedOut,
+		"generation":    r.generation,
+		"code":          code,
 	})
 	return string(raw)
 }

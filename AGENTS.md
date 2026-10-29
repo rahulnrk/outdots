@@ -1,5 +1,17 @@
 # AGENTS.md
 
+## Current product direction (29 October 2026)
+
+Outdots now targets one hosted product LLM for response suggestions, summaries,
+deadlines and missing-reply follow-ups. This supersedes the local-generation target
+described below; hosted inference is planned, not yet implemented or qualified.
+Initial connectors are Gmail, WhatsApp, Facebook Messenger, Instagram and LinkedIn.
+Read `docs/OUTDOTS_HOSTED_AI_PLAN_2026-10-29.md` for current scope and Codex/Claude Code
+ownership. Keep encrypted local storage, existing accounts, exact user approval and
+qualification gates. Cross-account intelligence needs explicit scoped authorization;
+never remove existing isolation checks to enable it. Historical local-model setup
+instructions below describe existing code, not the new delivery target.
+
 This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## What this is

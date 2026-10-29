@@ -25,11 +25,13 @@ import (
 
 	"go.mau.fi/mautrix-meta/pkg/messagix"
 	"go.mau.fi/mautrix-meta/pkg/messagix/cookies"
+	"go.mau.fi/mautrix-meta/pkg/messagix/table"
 	"go.mau.fi/mautrix-meta/pkg/messagix/types"
 	"go.mau.fi/mautrix-meta/pkg/messagix/useragent"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	waTypes "go.mau.fi/whatsmeow/types"
 )
 
 const (
@@ -53,36 +55,42 @@ const (
 	// messenger.com has no mobile web login and desktop UA is blocked in WebView,
 	// so owner login runs on m.facebook.com and messagix uses Facebook platform
 	// (same xs/c_user/datr cookies, Messenger inbox via facebook.com endpoints).
-	LoginURL = "https://m.facebook.com/login/"
+	LoginURL           = "https://m.facebook.com/login/"
 	LoginSuccessRegexp = `^https://(?:m|www)\.facebook\.com/(?:home\.php|messages(?:/.*)?)?/?(?:\?.*)?$`
 )
 
 // Runtime holds one Messenger client. One Runtime per account attempt.
 type Runtime struct {
-	mu              sync.Mutex
-	client          *messagix.Client
-	jar             *cookies.Cookies
-	verifiedUserID  string
-	deviceStore     *sql.DB
-	deviceContainer *sqlstore.Container
-	devicePath      string
-	deviceKey       []byte
-	accountKey      string
-	memoryURI       string
-	generation      uint64
-	restoreDump     []byte
-	device          *store.Device
-	e2ee            *whatsmeow.Client
-	e2eeHandlerID   uint32
-	e2eeConnectedCh chan struct{}
-	threadCount     int
-	readDone        bool
-	e2eeConnected   bool
-	e2eeEvents      int
-	e2eeFBMessages  int
-	e2eeUnique      int
-	e2eeDuplicates  int
-	e2eeLoggedOut   bool
+	mu                sync.Mutex
+	client            *messagix.Client
+	jar               *cookies.Cookies
+	verifiedUserID    string
+	deviceStore       *sql.DB
+	deviceContainer   *sqlstore.Container
+	devicePath        string
+	deviceKey         []byte
+	accountKey        string
+	memoryURI         string
+	generation        uint64
+	restoreDump       []byte
+	device            *store.Device
+	e2ee              *whatsmeow.Client
+	e2eeHandlerID     uint32
+	e2eeConnectedCh   chan struct{}
+	threadCount       int
+	readDone          bool
+	e2eeConnected     bool
+	e2eeEvents        int
+	e2eeFBMessages    int
+	e2eeUnique        int
+	e2eeDuplicates    int
+	e2eeLoggedOut     bool
+	e2eeUndecryptable int
+	e2eeEventKinds    map[string]int
+	lsInserts         int
+	lsMQTTConnected   bool
+	e2eeThreads       int
+	inboxActive       int
 }
 
 type sessionSnapshot struct {
@@ -292,8 +300,12 @@ func (r *Runtime) ListenEncrypted(seconds int) string {
 	registered := r.device != nil && r.device.ID != nil
 	r.e2eeConnected, r.e2eeEvents, r.e2eeFBMessages = false, 0, 0
 	r.e2eeUnique, r.e2eeDuplicates, r.e2eeLoggedOut = 0, 0, false
+	r.e2eeUndecryptable, r.lsInserts, r.e2eeThreads, r.inboxActive = 0, 0, 0, 0
+	r.lsMQTTConnected = false
+	r.e2eeEventKinds = map[string]int{}
 	r.e2eeConnectedCh = make(chan struct{}, 1)
 	connectedCh := r.e2eeConnectedCh
+	client := r.client
 	if e2ee != nil {
 		if r.e2eeHandlerID != 0 {
 			e2ee.RemoveEventHandler(r.e2eeHandlerID)
@@ -313,6 +325,13 @@ func (r *Runtime) ListenEncrypted(seconds int) string {
 	if !registered {
 		return out("encrypted_device_unregistered")
 	}
+	listenStart := time.Now().UnixMilli()
+	mqttCtx, mqttCancel := context.WithCancel(context.Background())
+	defer mqttCancel()
+	if client != nil {
+		client.SetEventHandler(r.handleMetaEvent)
+		go func() { _ = client.Connect(mqttCtx) }()
+	}
 	if err := e2ee.Connect(); err != nil {
 		return out("connect_failed")
 	}
@@ -322,13 +341,67 @@ func (r *Runtime) ListenEncrypted(seconds int) string {
 	deadline := time.After(time.Duration(seconds) * time.Second)
 	select {
 	case <-connectedCh:
+		_ = e2ee.SendPresence(context.Background(), waTypes.PresenceAvailable)
 		<-deadline
 	case <-deadline:
 	}
 	e2ee.Disconnect()
+	mqttCancel()
+	if client != nil {
+		client.Disconnect()
+		r.snapshotInbox(listenStart)
+	}
 	return out("")
 }
 
+func (r *Runtime) handleMetaEvent(ctx context.Context, evt any) {
+	switch v := evt.(type) {
+	case *messagix.ConnectedEvent, *messagix.ReconnectedEvent:
+		r.mu.Lock()
+		r.lsMQTTConnected = true
+		r.mu.Unlock()
+	case *table.LSTable:
+		n := len(v.LSInsertMessage) + len(v.LSDeleteThenInsertMessage) + len(v.LSUpsertMessage)
+		if n == 0 {
+			return
+		}
+		r.mu.Lock()
+		r.lsInserts += n
+		r.mu.Unlock()
+	}
+}
+
+func (r *Runtime) snapshotInbox(listenStart int64) {
+	r.mu.Lock()
+	client := r.client
+	r.mu.Unlock()
+	if client == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_, tbl, err := client.LoadMessagesPage(ctx)
+	if err != nil || tbl == nil {
+		return
+	}
+	e2eeThreads, active := 0, 0
+	for _, th := range tbl.LSDeleteThenInsertThread {
+		if th == nil {
+			continue
+		}
+		if th.ThreadType.IsWhatsApp() {
+			e2eeThreads++
+		}
+		if th.LastActivityTimestampMs >= listenStart {
+			active++
+		}
+	}
+	r.mu.Lock()
+	r.e2eeThreads = e2eeThreads
+	r.inboxActive = active
+	r.threadCount = len(tbl.LSDeleteThenInsertThread)
+	r.mu.Unlock()
+}
 func classifyVerifyError(err error) string {
 	msg := strings.ToLower(err.Error())
 	switch {

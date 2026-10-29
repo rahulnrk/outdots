@@ -1,5 +1,7 @@
 # LinkedIn phone-local feasibility (20 Oct 2026)
 
+> **20 October source review correction:** The current probe remains blocked and no LinkedIn authentication is qualified. However, the blanket conclusion below that no phone-local path exists is too broad. Our pinned `v0.2609.0` is cookie-only; newly inspected upstream commit `ad282448fee3472678394f9a5478f2696fa011ca` adds native password/checkpoint login and browser-header handling. Separately, local probe defects exist even if Cloudflare clears. See the follow-up review at the end. Do not infer that fixing these defects will resolve the browser block.
+
 > **LinkedIn probe authentication: BLOCKED (not completed).**
 > Cloudflare blocked the embedded Android WebView before any LinkedIn login,
 > cookie harvest, identity verify, or encrypted session save could succeed.
@@ -85,10 +87,11 @@ Device evidence (`app.mini.hub.rtprobe` only; production `app.mini.hub` untouche
 | Bot `login cookies` + paste cURL | Same cookie submit as manager, via Matrix bot | Same bridge dependency; not phone-local Accounts |
 | Official LinkedIn member inbox API | Not established for broad personal inbox access | Still unavailable for this product route |
 
-No supported Android phone-local login path is currently available without either
-clearing the Cloudflare block on an embedded WebView or accepting a bridge/manager
-architecture that MINI's phone-local decision rejects. Cookie import from the owner's
-ordinary browser is **not** implemented and will not be invented here.
+No working Android phone-local login path has been demonstrated by this probe.
+That is an observed implementation limit, not proof of upstream impossibility.
+The newer upstream password/checkpoint path needs a pinned compatibility experiment.
+Cookie import from the owner's ordinary browser is not implemented; the application
+cannot obtain another browser's HttpOnly session cookies through a normal redirect.
 
 ## Demo requirements note
 
@@ -108,3 +111,66 @@ Avoid repeated embedded-login retries until the blocker changes.
 ## Instagram read milestone
 
 Closed separately in `docs/INSTAGRAM_PHONE_LOCAL_PRODUCTION_2026-10-20.md`.
+
+## Follow-up source review: direction and concrete corrections
+
+Reviewed local `liruntime/runtime.go`, its tests, `LinkedInWebViewLoginController.kt`,
+`LinkedInLoginSession.kt`, the pinned upstream cookie connector/client, and current
+upstream login sources. No live LinkedIn request, cookie extraction, device install
+or dependency change was performed during this review.
+
+### Version distinction
+
+Pinned [v0.2609.0 login.go](https://github.com/mautrix/linkedin/blob/v0.2609.0/pkg/connector/login.go)
+advertises only cookie login. Current inspected commit
+[`ad282448fee3472678394f9a5478f2696fa011ca`](https://github.com/mautrix/linkedin/tree/ad282448fee3472678394f9a5478f2696fa011ca)
+also implements password login through `linkedingo.NewPasswordLoginClient`, with
+email/SMS/TOTP codes, app approval and browser fallback in
+[`login_password.go`](https://github.com/mautrix/linkedin/blob/ad282448fee3472678394f9a5478f2696fa011ca/pkg/connector/login_password.go).
+The cookie flow now collects browser headers instead of requiring one fixed
+desktop identity. These are candidates for an isolated upgrade, not evidence
+that Android compilation or owner authentication succeeds. Never update production
+to moving `main` or promise the new path defeats a provider restriction.
+
+### Confirmed local mismatches
+
+1. `FeedURLPattern` in Go is a raw string with doubled backslashes before dots.
+   Upstream uses a single backslash in its raw string. The local pattern fails
+   to match `https://www.linkedin.com/feed/`; a synthetic regex comparison
+   reproduced false for the local expression and true for the upstream expression.
+   Fix with Go and Kotlin regression coverage through the generated facade.
+2. `harvest()` runs only after matching `onPageFinished`. If required XHR headers
+   arrive later, `captureBrowserIdentity()` updates fields but never reevaluates
+   completion. No further navigation is guaranteed in a single-page application.
+   Reevaluate on relevant state changes with a bounded timeout, thread-safe
+   handoff to the WebView thread and cancellation/attempt checks.
+3. `captureBrowserIdentity()` accepts a URL through string-prefix tests. An unrelated
+   host such as `www.linkedin.com.example.invalid` passes that test. Parse URLs and
+   validate HTTPS, userinfo, port policy and exact approved hosts before capture;
+   validate redirect destinations separately. This is a validation defect, not
+   evidence of an observed credential leak or the cause of Cloudflare.
+4. `completeWithSession()` checks the attempt before network work, but does not
+   recheck it after `VerifyIdentity()` and immediately before storing the session
+   and publishing success. A cancellation/new attempt can race with persistence.
+   Use a cancellation/generation barrier covering the commit, not merely UI delivery.
+
+These defects would matter after a successful browser login. They do not explain
+why the owner also saw a block in the ordinary browser. Keep that observation
+and its unknown cause separate from the application defects.
+
+### Recommended next package for Jcode
+
+Fix and test the local mismatches without requiring another owner sign-in. Compare
+the current pinned module with the inspected newer SHA in a scratch Go module;
+compile/bind the real password-login dependencies for Android arm64, retaining one
+Go runtime and protecting WhatsApp/Instagram/Messenger pins and sessions. Inspect
+new logging, serialization, session format and licensing before integration.
+
+If compatible, expose upstream login/checkpoint states in rtprobe, bind successful
+identity with a harmless authenticated read, persist only session material through
+SQLCipher/Keystore and prove restart recovery. Passwords/codes stay transient.
+Render select choices explicitly, support cancellation and timeouts, and respect
+provider rejection/challenges without retry loops or bypasses. Keep Accounts and
+sending unavailable until live evidence exists. A user-controlled local session
+handoff is a separate product/security design, not an automatic need for a cloud
+message bridge or permission to extract ordinary-browser cookies.

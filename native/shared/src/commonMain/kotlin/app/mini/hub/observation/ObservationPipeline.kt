@@ -126,6 +126,9 @@ class NotificationNormalizer(
             correlationConfidence = if (payload.isGroupSummary) CorrelationConfidence.Medium else CorrelationConfidence.High,
             provenance = ObservationProvenance.AndroidNotificationListener,
             notificationCategory = category,
+            messagingEvidence = !payload.isGroupSummary && !payload.isOngoing &&
+                (payload.hasMessagingStyle || payload.category?.lowercase() in setOf("msg", "message", "email")),
+            sourceMessageTimeMillis = payload.sourceMessageTimeMillis?.takeIf { it > 0 },
         )
     }
 
@@ -308,14 +311,21 @@ class NotificationDeduplicator(
             return DedupeAction.Remove(normalized.notificationKey)
         }
 
-        val existing = recentNotifications[normalized.notificationKey]
-            ?: store?.getObservationByNotificationKeyIncludingRemoved(normalized.notificationKey)
+        val existing = store?.getObservationBySourceKey(normalized.accountId, normalized.packageId, normalized.notificationKey, normalized.sourceMessageTimeMillis)
+            ?: recentNotifications[normalized.notificationKey]?.takeIf { it.accountId == normalized.accountId && it.packageId == normalized.packageId }
 
         if (existing == null) {
             // Do NOT cache here -- wait for confirmPersisted
             return DedupeAction.Insert(normalized)
         }
 
+        if (existing.sourceMessageTimeMillis != null && normalized.sourceMessageTimeMillis != null &&
+            existing.sourceMessageTimeMillis != normalized.sourceMessageTimeMillis) return DedupeAction.Insert(normalized)
+        if (existing.rawTextDigest == normalized.rawTextDigest &&
+            (existing.postTime == normalized.postTime || existing.sourceMessageTimeMillis != null &&
+                existing.sourceMessageTimeMillis == normalized.sourceMessageTimeMillis)) {
+            return DedupeAction.DropDuplicate(normalized.notificationKey)
+        }
         // A removed row is historical evidence. Reusing its OS key is a new occurrence rather than
         // resurrecting the dismissed/provider-deleted row.
         if (existing.isRemoved) {

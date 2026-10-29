@@ -95,9 +95,15 @@ class AccountOperationCoordinator {
     private class Entry {
         val lock = Any()
         var generation: Long = 0L
+        var syncing = false
     }
 
     private val entries = mutableMapOf<String, Entry>()
+
+    companion object {
+        /** Process owner, including independently constructed headless Android hosts. */
+        val Shared = AccountOperationCoordinator()
+    }
 
     private fun entry(accountId: AccountId): Entry = synchronized(entries) {
         entries.getOrPut(accountId.key) { Entry() }
@@ -106,6 +112,17 @@ class AccountOperationCoordinator {
     fun <T> withAccount(accountId: AccountId, block: () -> T): T {
         val owner = entry(accountId)
         return synchronized(owner.lock) { block() }
+    }
+
+    /** Coalesces sync triggers across independently constructed hosts sharing this owner. */
+    fun <T : Any> withSync(accountId: AccountId, block: () -> T): T? {
+        val owner = entry(accountId)
+        synchronized(entries) {
+            if (owner.syncing) return null
+            owner.syncing = true
+        }
+        return try { withAccount(accountId, block) }
+        finally { synchronized(entries) { owner.syncing = false } }
     }
 
     /** Invalidates work that was logically older than a disconnect or account replacement. */
@@ -282,7 +299,7 @@ class ConnectorHttpException(
         /** Parses bounded seconds or RFC 7231 HTTP-date Retry-After values. */
         fun retryAfter(response: ProviderHttpResponse, nowMillis: Long = SystemClock.now().epochMillis): Long? {
             val value = response.header("Retry-After")?.trim() ?: return null
-            value.toLongOrNull()?.takeIf { it in 0L..MAX_RETRY_AFTER_SECONDS }?.let { return it }
+            value.toLongOrNull()?.takeIf { it >= 0 }?.let { return it }
             val match = HTTP_DATE.matchEntire(value) ?: return null
             val g = match.groupValues
             val month = MONTHS.indexOf(g[2]) + 1

@@ -161,6 +161,8 @@ fun isConversationSummary(summary: ConversationObservationSummary): Boolean {
         summary.category == NotificationCategory.SystemStatus
     ) return false
 
+    if (summary.messagingEvidence) return true
+
     if (summary.category == NotificationCategory.SocialUpdate) {
         return when (CommunicationSource.forExactPackage(summary.packageId)) {
             CommunicationSource.Instagram,
@@ -194,12 +196,21 @@ fun isConversationSummary(summary: ConversationObservationSummary): Boolean {
         return true
     }
 
-    // NULL category: re-classify from stored text.
-    if (summary.category == null) {
-        return classifyCommunication(summaryAsPayload(summary)) == CommunicationKind.ConversationMessage
-    }
-
     return false
+}
+
+/** Shared Inbox/search policy. Full stored content and structural evidence precede text fallback. */
+fun isStoredCommunication(packageId: String, title: String?, sender: String, body: String,
+    category: NotificationCategory?, messagingEvidence: Boolean,
+): Boolean {
+    if (category in setOf(NotificationCategory.GeneralNotification, NotificationCategory.SystemStatus,
+            NotificationCategory.OngoingService, NotificationCategory.SocialUpdate)) return false
+    if (messagingEvidence || packageId.startsWith(CommunicationSource.API_PACKAGE_PREFIX)) return true
+    val source = CommunicationSource.forExactPackage(packageId)
+    if (category != null && source !in setOf(CommunicationSource.Instagram,
+            CommunicationSource.FacebookMessenger, CommunicationSource.X)) return true
+    return classifyCommunication(NotificationRawPayload(key = "stored-classification", packageId = packageId,
+        notificationId = 0, postTimeMillis = 0, senderHint = sender, title = title, text = body)) == CommunicationKind.ConversationMessage
 }
 
 fun isLinkedInActivitySummary(summary: ConversationObservationSummary): Boolean =

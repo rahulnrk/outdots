@@ -44,7 +44,7 @@ class ProviderApiClient(
         val body = response.body.trim()
         val json = if (body.isBlank()) null else JsonValue.parseOrNull(body)
         if (successful) {
-            if (json != null) return json
+            if (json is JsonValue.Obj) return json
             if (body.isBlank() && emptyBodyAllowed) return JsonValue.Obj(emptyMap())
             throw ConnectorHttpException(
                 statusCode = response.statusCode,

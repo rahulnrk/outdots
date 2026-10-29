@@ -9,7 +9,17 @@ package app.mini.hub.persistence
  *  - 4: notification_observations.notification_category (null = reconstruct from stored text)
  */
 object ObservationSchema {
-    const val VERSION = 6
+    const val VERSION = 8
+
+    const val CREATE_PENDING_INVALIDATIONS = """
+        CREATE TABLE IF NOT EXISTS pending_invalidation_events (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            observation_id TEXT NOT NULL,
+            account_key TEXT NOT NULL,
+            notification_key TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        )
+    """
 
     const val INDEX_FTS_VERSION = "CREATE INDEX IF NOT EXISTS idx_obs_fts_version ON ingest_cursors (source, last_processed_time_millis)"
     const val CREATE_OBSERVATIONS_V1 = """
@@ -119,6 +129,14 @@ object ObservationSchema {
         if ("retry_attempt" !in existingCursorColumns) {
             add("ALTER TABLE ingest_cursors ADD COLUMN retry_attempt INTEGER NOT NULL DEFAULT 0")
         }
+    }
+
+    /** Source evidence and its derived summary flag; old rows remain explicitly unproven. */
+    fun version7Statements(observations: Set<String>, summaries: Set<String>): List<String> = buildList {
+        if ("messaging_evidence" !in observations) add("ALTER TABLE notification_observations ADD COLUMN messaging_evidence INTEGER NOT NULL DEFAULT 0")
+        if ("source_message_time" !in observations) add("ALTER TABLE notification_observations ADD COLUMN source_message_time INTEGER")
+        if ("messaging_evidence" !in summaries) add("ALTER TABLE conversation_summaries ADD COLUMN messaging_evidence INTEGER NOT NULL DEFAULT 0")
+        add("CREATE INDEX IF NOT EXISTS idx_obs_source_occurrence ON notification_observations (account_key, package_id, notification_key, source_message_time, observed_at DESC)")
     }
 
     private const val SEP = "\u001F"

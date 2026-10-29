@@ -34,6 +34,14 @@ data class RestartRecoveryReport(
     val lastCursor: IngestCursor?,
 )
 
+data class PendingInvalidationEvent(
+    val eventId: Long,
+    val observationId: ScopedId,
+    val accountId: AccountId,
+    val notificationKey: String,
+    val createdAt: UtcInstant,
+)
+
 interface ObservationStore {
     val qualification: StorageQualification
     fun persistObservation(observation: ObservedNotification): PersistResult
@@ -45,6 +53,11 @@ interface ObservationStore {
     fun checkpointCursor(cursor: IngestCursor)
     fun getCursor(source: String): IngestCursor?
     fun recoverFromRestart(): RestartRecoveryReport
+
+    // Durable pending Focus invalidation events (provider deletions)
+    fun listPendingInvalidations(accountId: AccountId? = null, limit: Int = 100): List<PendingInvalidationEvent>
+    fun acknowledgeInvalidations(eventIds: List<Long>)
+    fun persistProviderDeletionWithEvent(observation: ObservedNotification, removedAt: UtcInstant): PersistResult
 
     /**
      * Atomically persist a batch of observations and checkpoint cursors in a single transaction.
@@ -84,6 +97,10 @@ interface ObservationStore {
 
     /** Debug/test readback that includes removed rows, unlike the user-facing lookup above. */
     fun getObservationByNotificationKeyIncludingRemoved(notificationKey: String): ObservedNotification?
+
+    fun getObservationBySourceKey(account: AccountId, packageId: String, key: String, messageTime: Long? = null): ObservedNotification? =
+        getObservationByNotificationKeyIncludingRemoved(key)?.takeIf { it.accountId == account && it.packageId == packageId &&
+            (messageTime == null || it.sourceMessageTimeMillis == messageTime) }
 
     /** Debug/test lookup by synthetic notification ID, including removed rows. */
     fun getObservationByNotificationIdIncludingRemoved(packageId: String, notificationId: Int): ObservedNotification?
@@ -144,6 +161,7 @@ class InMemoryObservationStore : ObservationStore {
             observationCount = totalObs,
             unreadCount = unread,
             isRemoved = observation.isRemoved,
+            messagingEvidence = observation.messagingEvidence,
         )
         conversations[convKey] = summary
 
@@ -329,6 +347,11 @@ class InMemoryObservationStore : ObservationStore {
     }
 
     /** Injected error simulation for testing: set to non-null to force persistObservation failures. */
+    override fun getObservationBySourceKey(account: AccountId, packageId: String, key: String, messageTime: Long?): ObservedNotification? = synchronized(lock) {
+        observations.values.filter { it.accountId == account && it.packageId == packageId && it.notificationKey == key &&
+            (messageTime == null || it.sourceMessageTimeMillis == messageTime) }.lastOrNull()
+    }
+
     var simulatedPersistError: String? = null
 
     /** Fail this many individual persistence attempts, then allow later attempts to succeed. */
@@ -372,6 +395,36 @@ class InMemoryObservationStore : ObservationStore {
         )
     }
 
+    private val pendingInvalidations = mutableListOf<PendingInvalidationEvent>()
+    private var nextEventId = 1L
+
+    override fun listPendingInvalidations(accountId: AccountId?, limit: Int): List<PendingInvalidationEvent> = synchronized(lock) {
+        pendingInvalidations
+            .filter { accountId == null || it.accountId == accountId }
+            .take(limit)
+    }
+
+    override fun acknowledgeInvalidations(eventIds: List<Long>): Unit = synchronized(lock) {
+        pendingInvalidations.removeAll { it.eventId in eventIds }
+    }
+
+    override fun persistProviderDeletionWithEvent(observation: ObservedNotification, removedAt: UtcInstant): PersistResult = synchronized(lock) {
+        val res = persistObservation(observation)
+        if (res.isSuccess) {
+            markRemoved(observation.notificationKey, removedAt)
+            pendingInvalidations.add(
+                PendingInvalidationEvent(
+                    eventId = nextEventId++,
+                    observationId = observation.id,
+                    accountId = observation.accountId,
+                    notificationKey = observation.notificationKey,
+                    createdAt = removedAt,
+                )
+            )
+        }
+        res
+    }
+
     override fun search(query: app.mini.hub.search.SearchQuery): List<app.mini.hub.search.SearchResult> = synchronized(lock) {
         val q = query.queryText.trim().lowercase()
         if (q.isBlank()) return emptyList()
@@ -383,6 +436,8 @@ class InMemoryObservationStore : ObservationStore {
             // OS dismissal preserves permitted history; provider-deleted rows are explicitly
             // identified by their durable provider key and remain hidden.
             .filter { !it.isRemoved || !it.notificationKey.startsWith("provider:") }
+            .filter { app.mini.hub.observation.isStoredCommunication(it.packageId, it.title, it.senderHint,
+                it.textFragments.joinToString(" "), it.notificationCategory ?: categoryForStoredObservation(it), it.messagingEvidence) }
             .filter { query.sourceFilter == null || it.packageId == query.sourceFilter }
             .filter { obs ->
                 val fullText = (listOfNotNull(obs.title, obs.senderHint) + obs.textFragments).joinToString(" ").lowercase()

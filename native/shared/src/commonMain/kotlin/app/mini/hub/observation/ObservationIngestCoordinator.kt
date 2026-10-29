@@ -37,7 +37,10 @@ class ObservationIngestCoordinator(
      */
     val maxWriteRetries: Int = 2,
 ) {
-    private val processingLock = Any()
+    // All coordinators sharing this store serialize lookup/admission/commit together.
+    private data class Occurrence(val account: String, val pkg: String, val key: String, val messageTime: Long?)
+    private fun occurrence(obs: ObservedNotification) = Occurrence(obs.accountId.key, obs.packageId, obs.notificationKey, obs.sourceMessageTimeMillis)
+    private val processingLock: Any = store
 
     fun setUiListener(listener: ObservationUiListener?) {
         uiListener = listener
@@ -179,7 +182,7 @@ class ObservationIngestCoordinator(
      */
     private fun resolveBatchAction(
         normalized: ObservedNotification,
-        pending: Map<String, ObservedNotification>,
+        pending: Map<Occurrence, ObservedNotification>,
         removed: Set<String>,
     ): NotificationDeduplicator.DedupeAction {
         if (normalized.isRemoved) {
@@ -188,8 +191,12 @@ class ObservationIngestCoordinator(
         }
 
         // Check the intra-batch state first.
-        val batchExisting = pending[normalized.notificationKey]
+        val batchExisting = pending[occurrence(normalized)]
         if (batchExisting != null) {
+            if (batchExisting.sourceMessageTimeMillis != null && normalized.sourceMessageTimeMillis != null &&
+                batchExisting.sourceMessageTimeMillis != normalized.sourceMessageTimeMillis) {
+                return NotificationDeduplicator.DedupeAction.Insert(normalized)
+            }
             // Key already processed earlier in this same batch.
             if (batchExisting.postTime == normalized.postTime &&
                 batchExisting.rawTextDigest == normalized.rawTextDigest) {
@@ -245,7 +252,7 @@ class ObservationIngestCoordinator(
         // subsequent payloads targeting the same notificationKey within a single drain call.
         // Keys removed within the batch are explicitly tracked so Remove following an Insert
         // (in the same batch) correctly sees the key as absent on restart.
-        val batchPending = mutableMapOf<String, ObservedNotification>()
+        val batchPending = mutableMapOf<Occurrence, ObservedNotification>()
         val batchRemoved = mutableSetOf<String>()
 
         for (payload in batch) {
@@ -266,7 +273,7 @@ class ObservationIngestCoordinator(
                         affectedAccounts.add(action.observation.accountId)
                         val (_, cnt) = cursorAccum[action.observation.packageId] ?: Pair("", 0L)
                         cursorAccum[action.observation.packageId] = Pair(action.observation.notificationKey, cnt + 1L)
-                        batchPending[action.observation.notificationKey] = action.observation
+                        batchPending[occurrence(action.observation)] = action.observation
                         // A re-post after a removal in this same batch is active again. Remove
                         // the earlier pending removal so the final state follows arrival order.
                         batchRemoved.remove(action.observation.notificationKey)
@@ -278,7 +285,7 @@ class ObservationIngestCoordinator(
                         ledger?.record(lk, PipelineStage.DeduplicatedUpdate, clock.now().epochMillis)
                         // Replace existing slot in observationsToPersist with the updated version
                         // (same notificationKey) so the batch upsert produces the final state.
-                        val existingIdx = observationsToPersist.indexOfLast { it.notificationKey == action.observation.notificationKey }
+                        val existingIdx = observationsToPersist.indexOfLast { it.id == action.observation.id }
                         if (existingIdx >= 0) {
                             observationsToPersist[existingIdx] = action.observation
                             ledgerKeysForBatch[existingIdx] = lk
@@ -289,7 +296,7 @@ class ObservationIngestCoordinator(
                         affectedAccounts.add(action.observation.accountId)
                         val (_, cnt) = cursorAccum[action.observation.packageId] ?: Pair("", 0L)
                         cursorAccum[action.observation.packageId] = Pair(action.observation.notificationKey, cnt + 1L)
-                        batchPending[action.observation.notificationKey] = action.observation
+                        batchPending[occurrence(action.observation)] = action.observation
                         batchRemoved.remove(action.observation.notificationKey)
                         removalsToApply.removeAll { it.first == action.observation.notificationKey }
                         processedCount++
@@ -308,7 +315,7 @@ class ObservationIngestCoordinator(
                         // insert/update followed by removal in one drain call is committed as
                         // removed without exposing an intermediate state.
                         ledger?.record(lk, PipelineStage.DeduplicatedRemove, clock.now().epochMillis)
-                        batchPending.remove(action.notificationKey)
+                        batchPending.entries.removeAll { it.value.notificationKey == action.notificationKey }
                         batchRemoved.add(action.notificationKey)
                         removalsToApply.removeAll { it.first == action.notificationKey }
                         removalsToApply.add(action.notificationKey to clock.now())

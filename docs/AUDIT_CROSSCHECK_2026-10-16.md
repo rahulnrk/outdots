@@ -1,0 +1,83 @@
+# Audit cross-check and stabilization requirements
+
+Reviewed 16 October 2026 (Asia/Kolkata), source **2178872**. This is an engineering review and roadmap update, not an implementation completion report.
+
+Read alongside the [complete product roadmap](OUTDOTS_COMPLETE_ROADMAP_2026-10-16.md) and [Jcode implementation prompt](JCODE_STABILIZATION_PROMPT_2026-10-16.md).
+
+## Product position
+
+MINI/Outdots has reusable native foundations: encrypted persistence, account-scoped records, provider adapters, timelines, draft review, durable outbox and local inference interfaces. It remains a **pre-pilot engineering prototype**. WP01 is still partial at this source revision. Focus matters/sessions, calibrated proactive attention, complete document/attachment workflows and portable backup remain substantial work.
+
+The [first supplied discussion](https://chatgpt.com/s/cx_6ad1ee95e31c8191ae415782edf57a49) and [second supplied discussion](https://chatgpt.com/s/cx_6ad1eeba872081918f14708928ae9509) were readable through the browser. Both display the engineering decisions and repeated WP01 reviews. Their prior completion reports are context, not proof against the current checkout.
+
+Preserve the complete product direction: clean connected-account Inbox; dashboard-first Focus with Ask Focus; shared drafts; commitments, waiting, documents and reminders; progressive connectors/media; optional calendars and encrypted recovery. Local operation needs no mandatory Outdots login. External AI remains separately qualified and consented. English drafting scope does not justify losing native-script names or message search.
+
+## Verdict on the supplied audit
+
+| ID / priority | Finding and corrected verdict | Evidence at 2178872 | Roadmap |
+|---|---|---|---|
+| A1 High | **Confirmed defect.** Opening the observation database repopulates an ordinary FTS5 table without unique observation IDs. Unchanged observations accumulate index copies. This is per database reopen, not necessarily every Activity recreation; updated rows can have their old copies removed. Increasing startup work is a risk, not a newly measured device latency result. | `ObservationSchema.kt:80`; Android store `:152`; JDBC initialization also populates. Synthetic JDBC SQL probe: one source row -> 1, 2, 3 FTS rows after three population passes. | WP01-S1 |
+| A2 High | **Confirmed missing coordination; account-loss scenario is source-supported, not live-reproduced.** Manual, job, connect-time and other callers can overlap. Refresh callers include sends and conversation reads, so a Sync button guard alone is insufficient. A stale refresh failure can remove a newer credential; successful stale results can overwrite state. Provider rotation/grace details need exact-route qualification. The raw manual-sync thread lacks an outer exception boundary, although sync engines already catch many account-level exceptions. | `MainActivity.kt:197`; `AndroidConnectorRegistry.kt:191,286,307,319`; `ConnectorSyncEngine.kt:71,142,157`; separate Gmail path and JobService. | WP04-S2 |
+| A3 High | **Confirmed design gap; end-to-end Android restart reproduction pending.** Notification dedupe consults a bounded in-memory map, not persisted observations, before insert. Normalization generates a new observation ID, and notification-key index is nonunique. Restart or cache eviction can create another row for a replay/update. Do not assume every reused Android notification key represents the same message forever. | `ObservationPipeline.kt:88,291`; `ObservationIngestCoordinator.kt` single/batch resolution; `ObservationSchema.INDEX_NOTIFICATION_KEY`. Provider sync already performs a database lookup, so this finding is specifically about notification ingestion. | WP01-S1 |
+| A4 Medium | **Confirmed.** SQL inequality excludes NULL legacy categories; ASCII-only query splitting loses Hindi/Telugu and breaks accented names. Simply allowing every NULL is unsafe because some legacy rows are noncommunications. Resolve eligibility consistently. | Android search `:655,681`; JDBC search `:289,308`; v4 adds a nullable category without rewriting old rows. Synthetic store probe confirms legitimate NULL history remains in summaries but disappears from search. | WP01-S1 |
+| A5 Medium | **Query mismatch confirmed; claimed visible dismissal result is overstated.** Android's query permits removed non-provider observations; JDBC excludes all removed observations. However, ordinary removal deletes their FTS entries in both stores and startup repopulation excludes removed rows. The SQL difference alone does not demonstrate that normally dismissed notifications appear in phone search. | Android search `:681`, `markRemovedRow:577`; JDBC search `:308`, removal `:384`; shared population SQL. Latest-match selection also differs: Android uses `max(post_time)` and JDBC uses an unaggregated time. | WP01-S1 |
+| A6 Medium | **Confirmed.** Retry-After is captured and sometimes placed in a user-facing status string; no durable next-allowed-at admission rule or increasing backoff was found in either sync path. Gmail's specialized error path does not preserve a structured cooldown. A bounded pass is not a retry storm inside one call, but repeated triggers can ignore the provider's requested delay. | `ProviderApiClient.kt`; `ConnectorSyncEngine.classify`; `AndroidGmailConnector.classifyAndMark`; registry/job/notification triggers. | WP04-S2 |
+| A7 Medium | **Confirmed synchronous paths.** Conversation selection reads the store/retrieval on the calling UI path; approval persistence happens before the background send runner; MainActivity initializes storage synchronously. This establishes blocking risk, not a measured ANR. | `InboxViewModel.kt:632,639,1325`; `MainActivity.onCreate`; runtime/store initialization. | WP03-S3 |
+| A8 Medium for integrity | **Partly right, understates malformed-input handling.** This is a recursive parser, not a regex parser, and normal escaped strings are supported. Deep nesting overflows outside `parseOrNull`'s catch. It also accepts invalid numbers (`01`, `1e`, `--1`) and unescaped newlines in strings. Successful malformed bodies become an empty object; some adapters can mistake that for empty history. Valid empty 202/204 responses must remain supported where the endpoint allows them. | `Json.kt:35`, string/number readers; `ProviderApiClient.kt:39`. Synthetic parser probe reproduced all four invalid inputs and stack overflow. `JsonTest.kt` has three test methods, including roundtrip parsing; the audit's one-test count is inaccurate. | WP04-S4 |
+| A9 High for time-window enforcement; Low for diagnostics | **Partly right.** TS conflates missing/consumed approvals with clock skew; it is not repaired by simply swapping two strings. Kotlin already rechecks approval/digest/expiry, grants, policy, source versions, capabilities and credentials. The narrower missing parity is a current time-sensitive reply-window check (Instagram is checked during draft preparation but not locally rechecked by its sender). TS checks route eligibility at dispatch. Do not describe native sending as entirely unchecked. | TS `approval.ts:117-124`; Kotlin `ActionCore.beginDispatch`; `SendContracts.kt:52-85`; `InboxViewModel.kt:1151,1284`; `InstagramApiSender`. | WP03/WP10-S5 |
+| A10 High, additional | **Confirmed existing WP01 regression.** Both real Android and test JDBC summaries still contain `title.contains("Example Person")`. Genuine fixture-named messages are hidden. A stored recommendation hidden in summaries remains searchable. Latest commit title claiming removal does not match current source. | Android store `:545`; JDBC `:230`. Independent JDBC store probe rerun against current compiled source reproduces hidden genuine conversation, searchable recommendation, and NULL-category omission. | WP01-S1 |
+
+### What was not established
+
+This review did not rescan all Git history for secrets, perform penetration testing, qualify model safety, or reproduce provider refresh rotation live. SQLCipher/Keystore, exact approval and transient-refresh handling are existing foundations to preserve, not grounds to declare every privacy/security concern closed. The parser crash is one reason the audit's broad “a stray character cannot break anything” statement must not be treated as a system-wide guarantee.
+
+## Stabilization packages and acceptance
+
+These are subpackages of the existing roadmap, not replacements for WP00–WP18. Complete S1–S5 before declaring the first controlled pilot ready. Fix S5 before any additional live API-send qualification, even though it is listed last here by ownership. Begin S1 now; take S2 next. Isolated UI work and synthetic model evaluation can continue without accepting defective persistence.
+
+### S1 — WP01: communication, durable identity and search
+
+- Establish one evidence-aware communication eligibility policy across SQLCipher, JDBC, Inbox, search, counts and Focus. Remove fixture-specific names and broad topic-only suppression. Preserve real messages about jobs/posts/offers and promotional emails. Keep ambiguous legacy material recoverable; retain source rows and user decisions.
+- Apply eligibility before final search ranking/limit; an unloaded conversation is not an ineligible conversation. Resolve explicit misclassification and NULL legacy cases without blindly trusting either category or body keywords.
+- Repair existing duplicate FTS entries through an idempotent, transactional, versioned migration/rebuild of the derived index only. Normal opens must not scan/reinsert the entire history. Handle interruption and unavailable FTS explicitly; do not report a search failure as verified zero matches.
+- Make notification dedupe authoritative in durable storage with account/source/occurrence/revision semantics and atomic lookup/upsert. A bounded cache is only an optimization. Preserve distinct same-text messages, key reuse and uncertain API/notification matches. Do not add a blind unique notification-key rule that collapses real history.
+- Specify dismissal separately from provider deletion and explicit privacy deletion: clearing an OS notification does not by itself erase permitted message history. Apply the chosen retention/eligibility policy consistently to index maintenance and queries in both stores.
+- Use safe Unicode-aware query construction and qualified tokenization, including combining marks; test actual Hindi/Telugu words and accented names against stored content. Keep query text out of logs.
+- Acceptance: populated old-schema upgrade; real close/reopen; repeated opens with stable eligible-index cardinality; interrupted rebuild; notification replay/update after restart and cache eviction; genuine key reuse and same-text controls; both stores' removal/search/order semantics; NULL and explicit-category cases; search beyond first Inbox page and under a noise-heavy limit; cross-account isolation; Done/Undo preserved. Then actual MainActivity mixed-batch/search/restart workflows on SQLCipher. A launch-only check is insufficient.
+
+### S2 — WP04: sync, credentials and retry admission
+
+- Coalesce or serialize sync per account at the shared service boundary, including Gmail's specialized path, manual/jobs/connect/notification/companion triggers. Preserve cursor ordering and bound queued work. Do not hold a database transaction during network I/O.
+- Give every refresh caller (sync/read/send) a shared per-account credential refresh owner; reread current tokens under coordination and guard credential writes/removal by generation. Concurrent disconnect/reconnect must not be undone by stale work. One blocked account must not block unrelated accounts indefinitely.
+- Persist next-allowed-at, attempts and bounded backoff with jitter using injected time. Honor supported Retry-After forms and provider rate-limit scope, coalesce triggers, survive restart, reset after recovery, and expose useful status. Defer through scheduling rather than sleeping the UI or occupying a worker for the whole cooldown.
+- Contain unexpected exceptions at worker boundaries and report fixed, content-free states. Preserve tokens on transient failures; revoke only based on applicable current credentials and provider evidence.
+- Acceptance: deterministic barriers force two overlapping refreshes plus concurrent read/send and disconnect/reconnect; only one current refresh succeeds, no stale deletion/overwrite, cursor never regresses. Fake-clock 429/restart/manual/notification tests prove no premature call and unaffected-account progress. This never adds automatic send retries.
+
+### S3 — WP03: responsive durable workflows
+
+- Move storage startup, conversation retrieval and approval/outbox writes off the UI thread into bounded lifecycle-aware work. Keep native activity launch on main, after the necessary durable state transition.
+- Preserve loading/error barriers, fail-closed storage, stale selection/result protection, draft edits, rotation and double-tap prevention. No plaintext or memory-only fallback. Provider I/O remains outside transactions and after durable approval consumption.
+- Acceptance: slow-store tests with rapid conversation changes/rotation and edits; process death before/after approval and provider call; StrictMode/trace evidence on actual startup/open/review. Record cold/warm timings using representative synthetic history and compare repeated launches. Do not invent achieved latency thresholds.
+
+### S4 — WP04: bounded parsing and honest provider results
+
+- Enforce depth and input/resource bounds before stack exhaustion. Validate JSON numbers, strings, escapes, trailing input and expected response shapes. A successful HTTP status with malformed required JSON is a typed sanitized protocol failure, not empty history or a successful checkpoint.
+- Endpoint-specific contracts must allow documented empty successes. After a potentially executed write, malformed/absent proof remains unknown where acceptance cannot be established; never retry automatically.
+- Acceptance: malformed/truncated/oversized/deep JSON; valid surrogate/emoji escapes and large IDs; invalid numbers/control characters; empty allowed 202/204; malformed 200 on reads leaves checkpoint unchanged and health honest; malformed write response cannot create a false receipt or resend.
+
+### S5 — WP03/WP10: dispatch policy parity
+
+- Enforce current provider-specific reply windows at the last safe point before external send, using current time and source/permission state. Unknown required facts fail closed. Revalidate after any long refresh/queue delay before sending.
+- Preserve all existing native approval/capability checks and add equivalent TS/KMP cases. Repair TS diagnostic branches independently for missing, consumed, expired, invalid and rolled-back clocks. Never silently switch account, recipient, text or route under an old approval.
+- Acceptance: fake-clock window closes during review and during refresh; permission/source change, consumed/expired approval and changed payload; no provider write occurs. Legitimate allowed routes still work, and unknown outcomes remain non-retryable.
+
+## Evidence from this review
+
+- `:shared:compileKotlinJvm` succeeded (up-to-date after Gradle source checking). Existing Kotlin/AGP compatibility warning remains; no dependency change was made.
+- `tmp/audit-crosscheck-2026-10-16/AuditProbe.java`: in-memory SQLite using the actual shared FTS constants and current compiled JSON parser. FTS rows grew 1 -> 2 -> 3; NULL predicate admitted zero rows; four malformed JSON examples were accepted; deep input raised uncaught StackOverflowError. This is host evidence, not SQLCipher device evidence.
+- Reran existing synthetic `tmp/wp01-review-8753c5e/StoredRowProbe.kt` compiled harness against current main classes: genuine fixture-named conversation hidden, hidden recommendation searchable, legitimate NULL-category conversation omitted from search after close/reopen.
+- No full unit suite, Android build, phone workflow, live send, production migration, secret-history scan or real-model benchmark was run for this review. No application source or user data was changed. Documentation and synthetic scratch probes only.
+
+## Reporting rule
+
+Each package report must identify the actual diff, observed failing-before/passing-after results, exact commands and fresh outcomes, remaining device/live dependencies and unchanged product requirements. Unit totals and commit titles alone cannot close a finding. Mark source-fixed, fixture-tested, device-qualified and live-qualified separately. Preserve pre-existing uncommitted work and do not fabricate completion to advance the roadmap.

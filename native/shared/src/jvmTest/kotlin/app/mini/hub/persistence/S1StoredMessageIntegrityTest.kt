@@ -34,6 +34,61 @@ class S1StoredMessageIntegrityTest {
     private val fb = AccountId(Provider.FACEBOOK, "local_user")
     private val wa = AccountId(Provider.WHATSAPP, "local_user")
 
+    @Test fun structuralMessageEvidenceSurvivesReopenAndDefeatsActivityLikeBodyWords() {
+        val file = dbFile("s1-structure")
+        val store = JdbcObservationStore(file.path)
+        var ids = 0
+        val normalizer = NotificationNormalizer(IdGenerator { "synthetic-${ids++}" }, DigestProvider { it })
+        val obs = normalizer.normalize(NotificationRawPayload(key = "structured-message", packageId = "com.instagram.android",
+            notificationId = 1, postTimeMillis = 1_700_000_000_000L, senderHint = "Synthetic Contact", title = "Synthetic Contact",
+            text = "You might like this recommendation; can we discuss it tomorrow?", hasMessagingStyle = true,
+            sourceMessageTimeMillis = 1_700_000_000_000L), UtcInstant(1_700_000_000_000L))
+        assertTrue(store.persistObservation(obs).isSuccess)
+        close(store)
+        val reopened = JdbcObservationStore(file.path)
+        assertTrue(reopened.getObservation(obs.id)!!.messagingEvidence)
+        assertTrue(isConversationSummary(reopened.getConversationSummaries().single()))
+        assertEquals(listOf(obs.conversationId), reopened.search(SearchQuery("recommendation")).map { it.conversationId })
+        close(reopened)
+    }
+
+    @Test fun reusedLiveNotificationKeyKeepsMessageOccurrencesAndLateReplaysAreIdempotent() {
+        val file = dbFile("s1-occurrence")
+        val store = JdbcObservationStore(file.path)
+        var ids = 0
+        fun coordinator() = ObservationIngestCoordinator(store = store,
+            normalizer = NotificationNormalizer(IdGenerator { "occurrence-${ids++}" }, DigestProvider { it }),
+            clock = Clock { UtcInstant(1_700_000_000_000L) })
+        fun payload(time: Long, text: String) = NotificationRawPayload(key = "reused-live-key", packageId = "com.whatsapp",
+            notificationId = 1, postTimeMillis = time, sourceMessageTimeMillis = time, senderHint = "Synthetic Contact",
+            title = "Synthetic Contact", text = text, hasMessagingStyle = true)
+        val first = coordinator()
+        first.enqueue(payload(1000, "First message")); assertTrue(first.processNext() is IngestProcessResult.Created)
+        first.enqueue(payload(1000, "First message edited")); assertTrue(first.processNext() is IngestProcessResult.Updated)
+        first.enqueue(payload(2000, "Second message")); assertTrue(first.processNext() is IngestProcessResult.Created)
+        // New coordinator has no cache and replays an older occurrence after a newer one.
+        val restarted = coordinator()
+        restarted.enqueue(payload(1000, "First message edited")); assertTrue(restarted.processNext() is IngestProcessResult.DuplicateIgnored)
+        listOf(payload(3000, "Third message"), payload(4000, "Fourth message"), payload(3000, "Third message")).forEach { restarted.enqueue(it) }
+        restarted.drainAndProcessAll()
+        assertEquals(4, store.recoverFromRestart().totalObservations)
+        close(store)
+    }
+
+    @Test fun openingExistingDatabaseDoesNotRecreateTheSearchIndex() {
+        val file = dbFile("s1-no-rebuild")
+        val first = JdbcObservationStore(file.path)
+        first.connection().createStatement().use { it.execute("CREATE TRIGGER fts_open_guard AFTER INSERT ON obs_fts_data BEGIN SELECT 1; END") }
+        close(first)
+        val reopened = JdbcObservationStore(file.path)
+        reopened.connection().createStatement().use { s ->
+            s.executeQuery("SELECT count(*) FROM sqlite_master WHERE name = 'fts_open_guard'").use {
+                it.next(); assertEquals(1, it.getInt(1), "a normal open must retain the existing FTS table")
+            }
+        }
+        close(reopened)
+    }
+
     private fun dbFile(prefix: String) = File.createTempFile(prefix, ".db").apply { delete(); deleteOnExit() }
 
     private fun close(store: JdbcObservationStore) = store.connection().close()
@@ -283,7 +338,67 @@ class S1StoredMessageIntegrityTest {
         assertTrue(hits.all { it.conversationId.key in conversations }, "search returns only Inbox-eligible conversations")
     }
 
-    // Old installations: v4 file with duplicated index rows is repaired without touching source rows.
+    @Test(timeout = 60_000)
+    fun jdbcVersion7To8MigrationPreservesPopulatedObservationsSummariesAndSearchIndex() {
+        val file = dbFile("jdbc-v6-v7")
+        val obsId = ScopedId(wa, ScopedId.Kind.OBSERVATION, "mig1").key
+        val convId = ScopedId(wa, ScopedId.Kind.CONVERSATION, "Asha").key
+        DriverManager.getConnection("jdbc:sqlite:${file.path}").use { c ->
+            c.createStatement().use { s ->
+                s.execute(ObservationSchema.CREATE_OBSERVATIONS_V1)
+                s.execute(ObservationSchema.CREATE_CONVERSATIONS_V1)
+                s.execute(ObservationSchema.CREATE_CURSORS_V1)
+                s.execute(ObservationSchema.CREATE_PENDING_INVALIDATIONS)
+                ObservationSchema.version3Statements(emptySet()).forEach { s.execute(it) }
+                s.execute("ALTER TABLE notification_observations ADD COLUMN notification_category TEXT")
+                s.execute("ALTER TABLE notification_observations ADD COLUMN messaging_evidence INTEGER NOT NULL DEFAULT 0")
+                s.execute("ALTER TABLE conversation_summaries ADD COLUMN messaging_evidence INTEGER NOT NULL DEFAULT 0")
+                s.execute("ALTER TABLE notification_observations ADD COLUMN source_message_time INTEGER")
+                s.execute("ALTER TABLE notification_observations ADD COLUMN is_dismissed INTEGER NOT NULL DEFAULT 0")
+                s.execute("PRAGMA user_version = 7")
+                s.execute(
+                    "INSERT INTO notification_observations (id, account_key, conversation_key, package_id, notification_key, notification_id, tag, sender_hint, title, text_fragments_json, raw_text_digest, observed_at, post_time, revision, is_removed, is_group_summary, truncation_state, correlation_confidence, provenance, notification_category, messaging_evidence, source_message_time, is_dismissed) " +
+                        "VALUES ('$obsId','${wa.key}','$convId','com.whatsapp','key-mig',1,NULL,'Asha','Asha','Migrated message migrationneedle','dg-mig',1000,1000,1,0,0,'Complete','High','AndroidNotificationListener','DirectMessage',0,NULL,0)"
+                )
+                s.execute(
+                    "INSERT INTO conversation_summaries (conversation_key, account_key, title, app_name, sender_hint, package_id, latest_snippet, category, coverage, coverage_explanation, latest_event_at, observation_count, unread_count, is_removed, messaging_evidence) " +
+                        "VALUES ('$convId','${wa.key}','Asha','WhatsApp','Asha','com.whatsapp','Migrated message migrationneedle','DirectMessage','NotificationOnly','n',1000,1,1,0,0)"
+                )
+            }
+        }
+        val store = JdbcObservationStore(file.path)
+        assertEquals(8, store.schemaVersion())
+        val obs = store.getObservation(ScopedId.parse(obsId))
+        kotlin.test.assertNotNull(obs)
+        kotlin.test.assertFalse(obs.messagingEvidence, "legacy v6 rows default to unproven evidence rather than fabricated metadata")
+        assertEquals("Migrated message migrationneedle", obs.textFragments.single())
+
+        val summaries = store.getConversationSummaries(wa)
+        assertEquals(1, summaries.size)
+        kotlin.test.assertFalse(summaries.single().messagingEvidence)
+
+        val hits = store.search(SearchQuery("migrationneedle"))
+        assertEquals(1, hits.size)
+        assertEquals(convId, hits.single().conversationId.key)
+
+        // Verify pending invalidations table is active and functional
+        store.persistProviderDeletionWithEvent(obs, UtcInstant(2000L))
+        val pending = store.listPendingInvalidations(wa)
+        assertEquals(1, pending.size)
+        val eventId = pending.single().eventId
+        store.acknowledgeInvalidations(listOf(eventId))
+        assertTrue(store.listPendingInvalidations(wa).isEmpty())
+
+        close(store)
+
+        // Second close/reopen verification
+        val reopened = JdbcObservationStore(file.path)
+        assertEquals(8, reopened.schemaVersion())
+        assertEquals("Migrated message migrationneedle", reopened.getObservation(ScopedId.parse(obsId))!!.textFragments.single())
+        assertEquals(1, reopened.search(SearchQuery("migrationneedle")).size)
+        close(reopened)
+    }
+
     @Test(timeout = 60_000)
     fun populatedVersion4DatabaseWithDuplicateIndexRowsIsRepaired() {
         val file = dbFile("s1-v4")

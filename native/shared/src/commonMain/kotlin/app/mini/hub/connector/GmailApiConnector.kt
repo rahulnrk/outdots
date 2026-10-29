@@ -51,6 +51,10 @@ class GmailApiConnector(
             if (!checkpoint.cursor.isNullOrBlank()) append("&pageToken=").append(urlEncode(checkpoint.cursor))
         }
         val list = api.get(url)
+        list["messages"]?.let { refs ->
+            if (refs !is JsonValue.Arr || refs.items.any { it !is JsonValue.Obj || it.str("id").isNullOrBlank() })
+                throw ConnectorHttpException(200, "Invalid Gmail message list", kind = ProviderErrorKind.Protocol)
+        }
         var listed = 0
         val messages = list["messages"]?.objects.orEmpty().take(maxMessages).mapNotNull { ref ->
             val id = ref.str("id") ?: return@mapNotNull null
@@ -98,6 +102,16 @@ class GmailApiConnector(
                     pageToken?.let { append("&pageToken=").append(urlEncode(it)) }
                 }
                 val page = api.get(url)
+                if (page.str("historyId").isNullOrBlank() || page["history"]?.let { it !is JsonValue.Arr } == true)
+                    throw ConnectorHttpException(200, "Invalid Gmail history response", kind = ProviderErrorKind.Protocol)
+                page["history"]?.array?.forEach { record ->
+                    if (record !is JsonValue.Obj || record.str("id").isNullOrBlank())
+                        throw ConnectorHttpException(200, "Invalid Gmail history record", kind = ProviderErrorKind.Protocol)
+                    for (field in listOf("messagesAdded", "messagesDeleted")) record[field]?.let { changes ->
+                        if (changes !is JsonValue.Arr || changes.items.any { it["message"]?.str("id").isNullOrBlank() })
+                            throw ConnectorHttpException(200, "Invalid Gmail history changes", kind = ProviderErrorKind.Protocol)
+                    }
+                }
                 page.str("historyId")?.let { latest = it }
                 for (record in page["history"]?.objects.orEmpty()) {
                     if (added.size >= maxMessages) { stoppedMidPage = true; break }
@@ -150,7 +164,8 @@ class GmailApiConnector(
         gap: Boolean,
     ): GmailIncrementalResult {
         // Read historyId BEFORE listing so nothing that arrives during the snapshot is skipped.
-        val historyId = api.get("$apiBase/profile").str("historyId")
+        val historyId = api.get("$apiBase/profile").str("historyId")?.takeIf { it.isNotBlank() }
+            ?: throw ConnectorHttpException(200, "Gmail history checkpoint missing", kind = ProviderErrorKind.Protocol)
         val page = sync(account, token, SyncCheckpoint(), transport, maxMessages, isKnown)
         return GmailIncrementalResult(page.messages, emptyList(), historyId, gap, moreAvailable = false, listedCount = page.listedCount)
     }
@@ -179,6 +194,8 @@ class GmailApiConnector(
             "$apiBase/messages/${urlEncode(id)}?format=metadata" +
                 "&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Message-ID",
         )
+        if (detail.str("id") != id)
+            throw ConnectorHttpException(200, "Invalid Gmail message identity", kind = ProviderErrorKind.Protocol)
         val headers = headers(detail)
         return ProviderMessage(
             providerMessageId = id,
@@ -216,7 +233,7 @@ class GmailApiConnector(
             direction = dir,
             replyAnchor = headers["message-id"],
             recipients = (headers["to"]?.let(::splitAddresses).orEmpty() + headers["cc"]?.let(::splitAddresses).orEmpty()),
-        ) 
+        )
     }
 
     private fun direction(message: JsonValue): MessageDirection {

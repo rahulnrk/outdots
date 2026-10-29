@@ -142,7 +142,11 @@ class MessengerLoginSession(private val appContext: Context) {
     private fun listenSummary(rt: Any): String {
         val r = JSONObject(MessengerRuntimeFacade.listenEncrypted(rt, LISTEN_SECONDS))
         return "connected=${r.optBoolean("connected")} events=${r.optInt("events")} " +
-            "fb_messages=${r.optInt("fb_messages")} logged_out=${r.optBoolean("logged_out")} " +
+            "fb_messages=${r.optInt("fb_messages")} unique=${r.optInt("unique")} " +
+            "duplicates=${r.optInt("duplicates")} undecryptable=${r.optInt("undecryptable")} " +
+            "ls_inserts=${r.optInt("ls_inserts")} mqtt=${r.optBoolean("mqtt")} " +
+            "e2ee_threads=${r.optInt("e2ee_threads")} inbox_active=${r.optInt("inbox_active")} " +
+            "kinds=${r.optString("event_kinds")} logged_out=${r.optBoolean("logged_out")} " +
             "code=${r.optString("code").ifBlank { "ok" }}"
     }
 
@@ -290,7 +294,7 @@ class MessengerLoginSession(private val appContext: Context) {
     companion object {
         private const val PREFS = "mini_messenger_probe"
         private const val EVIDENCE_PREFS = "mini_messenger_probe_evidence"
-        private const val LISTEN_SECONDS = 30L
+        private const val LISTEN_SECONDS = 600L
         private const val PREF_LAST_ACCOUNT = "last_account_key"
     }
 }

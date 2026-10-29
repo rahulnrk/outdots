@@ -39,13 +39,11 @@ class JdbcObservationStore(path: String) : ObservationStore {
             s.execute(ObservationSchema.CREATE_OBSERVATIONS_V1)
             s.execute(ObservationSchema.CREATE_CONVERSATIONS_V1)
             s.execute(ObservationSchema.CREATE_CURSORS_V1)
+            s.execute(ObservationSchema.CREATE_PENDING_INVALIDATIONS)
             s.execute(ObservationSchema.INDEX_NOTIFICATION_KEY)
-            runCatching {
-                s.execute(ObservationSchema.CREATE_FTS_OBSERVATIONS)
-                s.execute(ObservationSchema.POPULATE_FTS_FROM_EXISTING)
-            }
         }
         migrate()
+        ensureSearchIndexExists()
     }
 
     fun schemaVersion(): Int = connection.createStatement().use { s ->
@@ -58,8 +56,9 @@ class JdbcObservationStore(path: String) : ObservationStore {
             // Fresh databases still need FTS population if missing.
             ensureVersion3Columns()
             ensureVersion4Columns()
-            ensureVersion5Columns()
             ensureVersion6Columns()
+            ensureVersion7Columns()
+            ensureVersion8Table()
             return
         }
         transaction {
@@ -67,7 +66,28 @@ class JdbcObservationStore(path: String) : ObservationStore {
             if (current < 4) ensureVersion4Columns()
             if (current < 5) ensureVersion5Columns()
             if (current < 6) ensureVersion6Columns()
+            if (current < 7) ensureVersion7Columns()
+            if (current < 8) ensureVersion8Table()
             connection.createStatement().use { it.execute("PRAGMA user_version = ${ObservationSchema.VERSION}") }
+        }
+    }
+
+    private fun ensureVersion8Table() {
+        connection.createStatement().use { s ->
+            s.execute(ObservationSchema.CREATE_PENDING_INVALIDATIONS)
+        }
+    }
+
+    private fun ensureSearchIndexExists() {
+        val exists = count("SELECT count(*) FROM sqlite_master WHERE name = 'obs_fts'") != 0
+        if (!exists) transaction { ensureVersion5Columns() }
+    }
+
+    private fun ensureVersion7Columns() {
+        val summaries = mutableSetOf<String>()
+        connection.createStatement().use { s ->
+            s.executeQuery("PRAGMA table_info(conversation_summaries)").use { while (it.next()) summaries += it.getString("name") }
+            ObservationSchema.version7Statements(observationColumns(), summaries).forEach { s.execute(it) }
         }
     }
 
@@ -145,14 +165,14 @@ class JdbcObservationStore(path: String) : ObservationStore {
         prepare(
             """INSERT OR REPLACE INTO notification_observations (id, account_key, conversation_key, package_id, notification_key,
                 notification_id, tag, sender_hint, title, text_fragments_json, raw_text_digest, observed_at, post_time, revision,
-                is_removed, is_group_summary, truncation_state, correlation_confidence, provenance, direction, recipients_json, reply_anchor, notification_category)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                is_removed, is_group_summary, truncation_state, correlation_confidence, provenance, direction, recipients_json, reply_anchor, notification_category, messaging_evidence, source_message_time)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             obs.id.key, obs.accountId.key, obs.conversationId.key, obs.packageId, obs.notificationKey,
             obs.notificationId, obs.tag, obs.senderHint, obs.title, obs.textFragments.joinToString("\u001F"), obs.rawTextDigest,
             obs.observedAt.epochMillis, obs.postTime.epochMillis, obs.revision, if (obs.isRemoved) 1 else 0,
             if (obs.isGroupSummary) 1 else 0, obs.truncationState.name, obs.correlationConfidence.name, obs.provenance.name,
             ObservationSchema.encodeDirection(obs.direction), ObservationSchema.encodeRecipients(obs.recipients), obs.replyAnchor,
-            ObservationSchema.encodeCategory(obs.notificationCategory ?: categoryForStoredObservation(obs)),
+            ObservationSchema.encodeCategory(obs.notificationCategory ?: categoryForStoredObservation(obs)), if (obs.messagingEvidence) 1 else 0, obs.sourceMessageTimeMillis,
         ).use { it.executeUpdate() }
 
         runCatching {
@@ -167,18 +187,19 @@ class JdbcObservationStore(path: String) : ObservationStore {
         }
     }
 
-    private fun updateConversationSummary(obs: ObservedNotification) {
+    private fun updateConversationSummary(input: ObservedNotification) {
+        val obs = queryOne("SELECT * FROM notification_observations WHERE conversation_key = ? ORDER BY ${ObservationSchema.TIMELINE_ORDER} LIMIT 1", input.conversationId.key) ?: input
         val conv = obs.conversationId.key
         prepare(
             """INSERT OR REPLACE INTO conversation_summaries (conversation_key, account_key, title, app_name, sender_hint, package_id,
-                latest_snippet, category, coverage, coverage_explanation, latest_event_at, observation_count, unread_count, is_removed)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                latest_snippet, category, coverage, coverage_explanation, latest_event_at, observation_count, unread_count, is_removed, messaging_evidence)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             conv, obs.accountId.key, obs.title ?: obs.senderHint, SourceAppNames.forPackage(obs.packageId), obs.senderHint, obs.packageId,
             obs.textFragments.lastOrNull() ?: obs.title ?: "", categoryOf(obs).name, coverageFor(obs.provenance).name,
-            coverageExplanationFor(obs.provenance, getCursor(obs.packageId)?.gapCount ?: 0L), obs.observedAt.epochMillis,
+            coverageExplanationFor(obs.provenance, getCursor(obs.packageId)?.gapCount ?: 0L), obs.postTime.epochMillis,
             count("SELECT COUNT(*) FROM notification_observations WHERE conversation_key = ?", conv),
             count("SELECT COUNT(*) FROM notification_observations WHERE conversation_key = ? AND is_removed = 0", conv),
-            if (obs.isRemoved) 1 else 0,
+            if (obs.isRemoved) 1 else 0, if (obs.messagingEvidence) 1 else 0,
         ).use { it.executeUpdate() }
     }
 
@@ -201,7 +222,19 @@ class JdbcObservationStore(path: String) : ObservationStore {
     ): BatchPersistResult = try {
         transaction {
             observations.forEach { writeRow(it) }
-            removals.forEach { (key, _) -> removeRows(key) }
+            removals.forEach { (key, at) ->
+                removeRows(key)
+                // If this is a provider deletion (key starts with 'provider:'), log a pending invalidation event atomically
+                if (key.startsWith("provider:")) {
+                    val obs = getObservationByNotificationKeyIncludingRemoved(key)
+                    if (obs != null) {
+                        prepare(
+                            "INSERT INTO pending_invalidation_events (observation_id, account_key, notification_key, created_at) VALUES (?, ?, ?, ?)",
+                            obs.id.key, obs.accountId.key, key, at.epochMillis,
+                        ).use { it.executeUpdate() }
+                    }
+                }
+            }
             cursors.forEach { writeCursor(it) }
         }
         BatchPersistResult(removals.size + observations.size, 0, emptyList())
@@ -234,7 +267,13 @@ class JdbcObservationStore(path: String) : ObservationStore {
 
     @Synchronized
     override fun getObservationByNotificationKeyIncludingRemoved(notificationKey: String): ObservedNotification? =
-        queryOne("SELECT * FROM notification_observations WHERE notification_key = ? ORDER BY observed_at DESC LIMIT 1", notificationKey)
+        queryOne("SELECT * FROM notification_observations WHERE notification_key = ? ORDER BY observed_at DESC, rowid DESC LIMIT 1", notificationKey)
+
+    @Synchronized
+    override fun getObservationBySourceKey(account: AccountId, packageId: String, key: String, messageTime: Long?): ObservedNotification? =
+        queryOne("SELECT * FROM notification_observations WHERE account_key = ? AND package_id = ? AND notification_key = ?" +
+            (if (messageTime != null) " AND source_message_time = ?" else "") + " ORDER BY observed_at DESC, rowid DESC LIMIT 1",
+            *listOfNotNull(account.key, packageId, key, messageTime).toTypedArray())
 
     @Synchronized
     override fun getObservationByNotificationIdIncludingRemoved(packageId: String, notificationId: Int): ObservedNotification? =
@@ -266,7 +305,7 @@ class JdbcObservationStore(path: String) : ObservationStore {
                                 latestEventAt = UtcInstant(rs.getLong("latest_event_at")),
                                 observationCount = rs.getInt("observation_count"),
                                 unreadCount = rs.getInt("unread_count"),
-                                isRemoved = rs.getInt("is_removed") != 0,
+                                isRemoved = rs.getInt("is_removed") != 0, messagingEvidence = rs.getInt("messaging_evidence") != 0,
                             ),
                         )
                     }
@@ -319,6 +358,59 @@ class JdbcObservationStore(path: String) : ObservationStore {
         )
     }
 
+    // The reconciliation worker and UI polling share this connection, like the other store APIs.
+    @Synchronized
+    override fun listPendingInvalidations(accountId: AccountId?, limit: Int): List<PendingInvalidationEvent> = transaction {
+        val sql = if (accountId != null) {
+            "SELECT event_id, observation_id, account_key, notification_key, created_at FROM pending_invalidation_events WHERE account_key = ? ORDER BY event_id ASC LIMIT ?"
+        } else {
+            "SELECT event_id, observation_id, account_key, notification_key, created_at FROM pending_invalidation_events ORDER BY event_id ASC LIMIT ?"
+        }
+        prepare(sql, *if (accountId != null) arrayOf(accountId.key, limit) else arrayOf(limit)).use { ps ->
+            ps.executeQuery().use { rs ->
+                buildList {
+                    while (rs.next()) {
+                        add(
+                            PendingInvalidationEvent(
+                                eventId = rs.getLong("event_id"),
+                                observationId = ScopedId.parse(rs.getString("observation_id")),
+                                accountId = AccountId.parse(rs.getString("account_key")),
+                                notificationKey = rs.getString("notification_key"),
+                                createdAt = UtcInstant(rs.getLong("created_at")),
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @Synchronized
+    override fun acknowledgeInvalidations(eventIds: List<Long>) {
+        if (eventIds.isEmpty()) return
+        transaction {
+            val placeholders = eventIds.joinToString(",") { "?" }
+            prepare("DELETE FROM pending_invalidation_events WHERE event_id IN ($placeholders)", *eventIds.toTypedArray()).use {
+                it.executeUpdate()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun persistProviderDeletionWithEvent(observation: ObservedNotification, removedAt: UtcInstant): PersistResult {
+        return transaction {
+            val res = persistObservation(observation)
+            if (res.isSuccess) {
+                removeRows(observation.notificationKey)
+                prepare(
+                    "INSERT INTO pending_invalidation_events (observation_id, account_key, notification_key, created_at) VALUES (?, ?, ?, ?)",
+                    observation.id.key, observation.accountId.key, observation.notificationKey, removedAt.epochMillis,
+                ).use { it.executeUpdate() }
+            }
+            res
+        }
+    }
+
     @Synchronized
     override fun search(query: app.mini.hub.search.SearchQuery): List<app.mini.hub.search.SearchResult> {
         val q = query.queryText.trim()
@@ -348,7 +440,7 @@ class JdbcObservationStore(path: String) : ObservationStore {
                    coalesce(s.observation_count, 1) AS msg_count,
                    o.notification_category,
                    o.is_group_summary,
-                   o.id AS obs_id
+                   o.messaging_evidence, o.text_fragments_json, o.id AS obs_id
             FROM obs_fts f
             JOIN notification_observations o ON o.id = f.obs_id
             LEFT JOIN conversation_summaries s ON s.conversation_key = o.conversation_key
@@ -366,53 +458,7 @@ class JdbcObservationStore(path: String) : ObservationStore {
                         val convKey = rs.getString("conversation_key")
                         if (convKey in seenConversations) continue
 
-                        // Apply eligibility: only DirectMessage/GroupMessage are inbox-eligible.
-                        // NULL category means legacy data that needs re-classification.
-                        val cat = ObservationSchema.decodeCategory(rs.getString("notification_category"))
-                        if (cat == NotificationCategory.GeneralNotification ||
-                            cat == NotificationCategory.SystemStatus ||
-                            cat == NotificationCategory.OngoingService ||
-                            cat == NotificationCategory.SocialUpdate
-                        ) {
-                           continue
-                        }
-                        // NULL: must re-classify. If not a conversation message, skip.
-                        if (cat == null) {
-                            val pkg = rs.getString("package_id")
-                            val title = rs.getString("obs_title") ?: rs.getString("conv_title") ?: ""
-                            val snippet = rs.getString("match_snippet") ?: ""
-                            val probe = NotificationRawPayload(
-                                key = "legacy-search-probe",
-                                packageId = pkg,
-                                notificationId = 0,
-                                senderHint = title,
-                                title = title,
-                                text = snippet,
-                                postTimeMillis = 0L,
-                            )
-                            if (classifyCommunication(probe) != CommunicationKind.ConversationMessage) continue
-                        }
-
-                        // Social-platform rows can be stored with a DirectMessage category even
-                        // when the notification is a recommendation or activity update.
-                        if (cat == NotificationCategory.DirectMessage || cat == NotificationCategory.GroupMessage) {
-                            val source = CommunicationSource.forExactPackage(rs.getString("package_id"))
-                            if (source == CommunicationSource.Instagram ||
-                                source == CommunicationSource.FacebookMessenger ||
-                                source == CommunicationSource.X
-                            ) {
-                                val payload = NotificationRawPayload(
-                                    key = "search-probe",
-                                    packageId = rs.getString("package_id"),
-                                    notificationId = 0,
-                                    senderHint = rs.getString("sender_hint") ?: "",
-                                    title = rs.getString("obs_title") ?: rs.getString("conv_title") ?: "",
-                                    text = rs.getString("match_snippet") ?: "",
-                                    postTimeMillis = rs.getLong("post_time"),
-                                )
-                                if (classifyCommunication(payload) != CommunicationKind.ConversationMessage) continue
-                            }
-                        }
+                        if (!app.mini.hub.observation.isStoredCommunication(rs.getString("package_id"), rs.getString("obs_title"), rs.getString("sender_hint"), rs.getString("text_fragments_json").orEmpty(), ObservationSchema.decodeCategory(rs.getString("notification_category")), rs.getInt("messaging_evidence") != 0)) continue
 
                         seenConversations.add(convKey)
                         results.add(
@@ -432,7 +478,7 @@ class JdbcObservationStore(path: String) : ObservationStore {
                 }
             }
         } catch (_: Throwable) {
-            emptyList()
+            throw app.mini.hub.search.SearchUnavailableException()
         }
     }
 
@@ -449,14 +495,14 @@ class JdbcObservationStore(path: String) : ObservationStore {
         prepare(
             """INSERT OR REPLACE INTO notification_observations (id, account_key, conversation_key, package_id, notification_key,
                 notification_id, tag, sender_hint, title, text_fragments_json, raw_text_digest, observed_at, post_time, revision,
-                is_removed, is_group_summary, truncation_state, correlation_confidence, provenance, direction, recipients_json, reply_anchor, notification_category)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                is_removed, is_group_summary, truncation_state, correlation_confidence, provenance, direction, recipients_json, reply_anchor, notification_category, messaging_evidence, source_message_time)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             obs.id.key, obs.accountId.key, obs.conversationId.key, obs.packageId, obs.notificationKey,
             obs.notificationId, obs.tag, obs.senderHint, obs.title, obs.textFragments.joinToString("\u001F"), obs.rawTextDigest,
             obs.observedAt.epochMillis, obs.postTime.epochMillis, obs.revision, if (obs.isRemoved) 1 else 0,
             if (obs.isGroupSummary) 1 else 0, obs.truncationState.name, obs.correlationConfidence.name, obs.provenance.name,
             ObservationSchema.encodeDirection(obs.direction), ObservationSchema.encodeRecipients(obs.recipients), obs.replyAnchor,
-            ObservationSchema.encodeCategory(obs.notificationCategory ?: categoryForStoredObservation(obs)),
+            ObservationSchema.encodeCategory(obs.notificationCategory ?: categoryForStoredObservation(obs)), if (obs.messagingEvidence) 1 else 0, obs.sourceMessageTimeMillis,
         ).use { it.executeUpdate() }
 
         // Keep FTS index in sync.
@@ -474,18 +520,7 @@ class JdbcObservationStore(path: String) : ObservationStore {
             }
         }
 
-        val conv = obs.conversationId.key
-        prepare(
-            """INSERT OR REPLACE INTO conversation_summaries (conversation_key, account_key, title, app_name, sender_hint, package_id,
-                latest_snippet, category, coverage, coverage_explanation, latest_event_at, observation_count, unread_count, is_removed)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            conv, obs.accountId.key, obs.title ?: obs.senderHint, SourceAppNames.forPackage(obs.packageId), obs.senderHint, obs.packageId,
-            obs.textFragments.lastOrNull() ?: obs.title ?: "", categoryOf(obs).name, coverageFor(obs.provenance).name,
-            coverageExplanationFor(obs.provenance, getCursor(obs.packageId)?.gapCount ?: 0L), obs.observedAt.epochMillis,
-            count("SELECT COUNT(*) FROM notification_observations WHERE conversation_key = ?", conv),
-            count("SELECT COUNT(*) FROM notification_observations WHERE conversation_key = ? AND is_removed = 0", conv),
-            if (obs.isRemoved) 1 else 0,
-        ).use { it.executeUpdate() }
+        updateConversationSummary(obs)
     }
 
     private fun removeRows(notificationKey: String): Int {
@@ -550,7 +585,7 @@ class JdbcObservationStore(path: String) : ObservationStore {
             observedAt = UtcInstant(rs.getLong("observed_at")),
             postTime = UtcInstant(rs.getLong("post_time")),
             revision = rs.getLong("revision"),
-            isRemoved = rs.getInt("is_removed") != 0,
+            isRemoved = rs.getInt("is_removed") != 0, messagingEvidence = rs.getInt("messaging_evidence") != 0,
             isGroupSummary = rs.getInt("is_group_summary") != 0,
             truncationState = TruncationState.valueOf(rs.getString("truncation_state")),
             correlationConfidence = CorrelationConfidence.valueOf(rs.getString("correlation_confidence")),
@@ -559,6 +594,7 @@ class JdbcObservationStore(path: String) : ObservationStore {
             recipients = ObservationSchema.decodeRecipients(rs.getString("recipients_json")),
             replyAnchor = rs.getString("reply_anchor"),
             notificationCategory = ObservationSchema.decodeCategory(rs.getString("notification_category")),
+            sourceMessageTimeMillis = rs.getLong("source_message_time").let { if (rs.wasNull()) null else it },
         )
     }
 }

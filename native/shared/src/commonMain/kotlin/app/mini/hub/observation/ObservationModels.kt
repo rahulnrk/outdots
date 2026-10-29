@@ -91,6 +91,8 @@ data class NotificationRawPayload(
      * the OS notification key, enabling end-to-end tracing across the broadcast/listener boundary.
      */
     val correlationId: String? = null,
+    /** Android MessagingStyle message timestamp, distinct from notification repost time. */
+    val sourceMessageTimeMillis: Long? = null,
 ) {
     init {
         require(key.isNotBlank()) { "Notification key must not be blank" }
@@ -127,6 +129,9 @@ data class ObservedNotification(
     val replyAnchor: String? = null,
     /** Category decided at ingest. Null on older rows; summaries then reconstruct it. */
     val notificationCategory: NotificationCategory? = null,
+    /** Structural Android message evidence retained across restart; never inferred from body words. */
+    val messagingEvidence: Boolean = false,
+    val sourceMessageTimeMillis: Long? = null,
 ) {
     init {
         require(id.kind == ScopedId.Kind.OBSERVATION) { "ObservedNotification id must be OBSERVATION kind" }
@@ -149,6 +154,7 @@ data class ConversationObservationSummary(
     val observationCount: Int,
     val unreadCount: Int,
     val isRemoved: Boolean,
+    val messagingEvidence: Boolean = false,
 )
 
 data class IngestCursor(

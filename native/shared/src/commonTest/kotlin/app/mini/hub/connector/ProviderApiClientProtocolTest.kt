@@ -6,6 +6,14 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class ProviderApiClientProtocolTest {
+    @Test
+    fun validJsonWithTheWrongRootShapeIsNotAnEmptyProviderPage() {
+        listOf("null", "[]", "1", "true", "\"text\"").forEach { body ->
+            val error = assertFailsWith<ConnectorHttpException> { client(ProviderHttpResponse(200, body)).get("https://example.test/read") }
+            assertEquals(ProviderErrorKind.Protocol, error.kind)
+        }
+    }
+
     private fun client(response: ProviderHttpResponse) = ProviderApiClient(
         providerName = "Fixture",
         transport = ProviderHttpTransport.of { response },
