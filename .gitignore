@@ -17,3 +17,7 @@ tmp/go.zip
 # Local, unpublished corresponding-source preparation output
 tmp/corresponding-source/
 native/whatsappRuntime/build/
+
+# Third-party review captures (kept local, not published)
+tmp/pdfs/
+docs/research/beeper-pocketpal-page-transcript.txt
